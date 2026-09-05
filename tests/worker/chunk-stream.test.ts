@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { CHUNK_BLOCK_COUNT } from '../../src/core/chunk';
 import { plainsSurfaceHeight, plainsTerrain } from '../../src/core/terrain';
-import { createChunkStream, MAX_READY_CHUNKS } from '../../src/worker/chunk-stream';
+import { chunksAround, ORIGIN_CHUNK } from '../../src/core/world';
+import {
+  createChunkStream,
+  MAX_READY_CHUNKS,
+  SPAWN_READY_RADIUS,
+  type ChunkStream,
+} from '../../src/worker/chunk-stream';
 import type { ChunkRequest, ChunkWorkerPort } from '../../src/worker/protocol';
 
 /**
@@ -137,6 +143,20 @@ describe('等一片区块就位', () => {
     expect(stream.source(1, 0)).toBeDefined();
   });
 
+  it('两拨人等同一个区块，两个 promise 都 resolve', async () => {
+    const port = fakePort();
+    const stream = createChunkStream({ seed: SEED, port });
+    const coords = [{ cx: 0, cz: 0 }];
+
+    const first = stream.awaitChunks(coords);
+    const second = stream.awaitChunks(coords);
+    // 第二拨不必再下单
+    expect(port.requests).toHaveLength(1);
+
+    port.deliverAll();
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+  });
+
   it('已经在手上的区块不必再等', async () => {
     const port = fakePort();
     const stream = createChunkStream({ seed: SEED, port });
@@ -149,18 +169,43 @@ describe('等一片区块就位', () => {
 });
 
 describe('攒着的区块有上限', () => {
-  it('核心一直不来取，最早的那些会被丢掉，之后重新请求', () => {
+  /** 请求并收下 count 个区块，一个都不取走。 */
+  function flood(stream: ChunkStream, port: ReturnType<typeof fakePort>, count: number): void {
+    for (let i = 0; i < count; i++) stream.source(i, 0);
+    port.deliverAll();
+  }
+
+  it('核心一直不来取，最后到的那个不留，之后重新请求', () => {
     const port = fakePort();
     const stream = createChunkStream({ seed: SEED, port });
 
-    // 请求并收下比上限多一个
-    for (let i = 0; i <= MAX_READY_CHUNKS; i++) stream.source(i, 0);
-    port.deliverAll();
+    flood(stream, port, MAX_READY_CHUNKS + 1);
 
-    // 最早那个被挤掉了，于是又发了一次请求
-    expect(stream.source(0, 0)).toBeUndefined();
-    expect(port.requests).toEqual([{ seed: SEED, cx: 0, cz: 0 }]);
-    // 后面的还在
-    expect(stream.source(MAX_READY_CHUNKS, 0)).toBeDefined();
+    // 最后到的那个最远、最不着急，被挤掉了，于是又发了一次请求
+    const last = MAX_READY_CHUNKS;
+    expect(stream.source(last, 0)).toBeUndefined();
+    expect(port.requests).toEqual([{ seed: SEED, cx: last, cz: 0 }]);
+    // 早到的那些还在
+    expect(stream.source(0, 0)).toBeDefined();
+  });
+
+  it('引导阶段在等的区块不会被挤掉：出生点不能算在虚空里', async () => {
+    const port = fakePort();
+    const stream = createChunkStream({ seed: SEED, port });
+    flood(stream, port, MAX_READY_CHUNKS);
+
+    // 再来一个就超上限，但这个是有人在等的
+    const awaited = { cx: MAX_READY_CHUNKS, cz: 0 };
+    const waiting = stream.awaitChunks([awaited]);
+    port.deliverAll();
+    await waiting;
+
+    expect(stream.source(awaited.cx, awaited.cz)).toBeDefined();
+  });
+
+  it('上限远大于引导阶段一次要等的那一片', () => {
+    expect(MAX_READY_CHUNKS).toBeGreaterThan(
+      chunksAround(ORIGIN_CHUNK, SPAWN_READY_RADIUS).length,
+    );
   });
 });

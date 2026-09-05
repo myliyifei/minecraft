@@ -5,7 +5,13 @@ import { IDLE_INTENT, Player, type MoveIntent, type PlayerView } from './player'
 import { streamChunks } from './streaming';
 import { plainsTerrain } from './terrain';
 import type { Vec3 } from './vec3';
-import { chunkOf, World, type ChunkCoord, type ChunkSourceFactory } from './world';
+import {
+  chunkOf,
+  ORIGIN_CHUNK,
+  World,
+  type ChunkCoord,
+  type ChunkSourceFactory,
+} from './world';
 
 export interface GameCoreOptions {
   /** 世界种子。同一种子每次进入得到同样的地形。 */
@@ -146,6 +152,3 @@ export class GameCore implements BlockView {
     this.playerState.step(this.intent);
   }
 }
-
-/** 世界原点所在的区块。出生点在这一列上。 */
-const ORIGIN_CHUNK: ChunkCoord = { cx: 0, cz: 0 };

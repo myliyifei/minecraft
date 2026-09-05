@@ -1,22 +1,13 @@
 import './ui/style.css';
 import { DEFAULT_SEED } from './core/constants';
 import { GameCore } from './core/game';
-import type { ChunkCoord } from './core/world';
+import { chunksAround, ORIGIN_CHUNK } from './core/world';
 import { installDebugHandle } from './debug';
 import { buildDemoScene } from './demo-scene';
 import { installPlayerControls } from './input/controls';
 import { startGameLoop } from './loop';
 import { loadAtlasTexture, WorldRenderer } from './render/renderer';
-import { createChunkStream } from './worker/chunk-stream';
-
-/**
- * 进世界之前先等好的区块半径（区块数）。
- *
- * 出生点要有地形才算得出来，否则玩家一进世界就掉进「未加载即空气」的虚空。多等一圈是
- * 为了首帧不是一片虚空：网格要四邻齐全才建（见 `planChunkMeshes`），所以等半径 3
- * 才能铺出半径 2 的一片地。视距内其余的区块由 tick 逐步补上，世界从脚下往外长开。
- */
-const INITIAL_LOAD_RADIUS = 3;
+import { createChunkStream, SPAWN_READY_RADIUS } from './worker/chunk-stream';
 
 /**
  * 接线层：造核心、造渲染适配器、起循环。逻辑一律在核心里，这里只负责组装。
@@ -37,9 +28,10 @@ async function main(): Promise<void> {
       type: 'module',
     }),
   });
-  await chunks.awaitChunks(chunksInSquare(INITIAL_LOAD_RADIUS));
+  await chunks.awaitChunks(chunksAround(ORIGIN_CHUNK, SPAWN_READY_RADIUS));
 
-  const core = new GameCore({ seed, chunkSource: () => chunks.source });
+  // 种子只有一个出处：Worker 与核心都用区块来源记着的那个，两边不可能对不上。
+  const core = new GameCore({ seed: chunks.seed, chunkSource: () => chunks.source });
   buildDemoScene(core);
 
   const texture = await loadAtlasTexture();
@@ -56,17 +48,6 @@ async function main(): Promise<void> {
     renderer.syncChunkMeshes();
     renderer.render(alpha);
   });
-}
-
-/** 以原点区块为心、半径 radius 的方形内的全部区块。 */
-function chunksInSquare(radius: number): ChunkCoord[] {
-  const coords: ChunkCoord[] = [];
-  for (let cx = -radius; cx <= radius; cx++) {
-    for (let cz = -radius; cz <= radius; cz++) {
-      coords.push({ cx, cz });
-    }
-  }
-  return coords;
 }
 
 void main();

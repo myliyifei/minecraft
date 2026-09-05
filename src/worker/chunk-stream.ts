@@ -3,14 +3,27 @@ import { chunkKey, type ChunkCoord, type ChunkSource } from '../core/world';
 import type { ChunkWorkerPort } from './protocol';
 
 /**
+ * 进世界之前先等好的区块半径（区块数）。
+ *
+ * 出生点要有地形才算得出来，否则玩家一进世界就掉进「未加载即空气」的虚空。多等一圈是
+ * 为了首帧不是一片虚空：网格要四邻齐全才建（见 `planChunkMeshes`），所以等半径 3
+ * 才能铺出半径 2 的一片地。视距内其余的区块由 tick 逐步补上，世界从脚下往外长开。
+ */
+export const SPAWN_READY_RADIUS = 3;
+
+/**
  * 攒着等核心来取的区块上限。
  *
- * 正常情况下 Worker 送回来的区块会在下一个 tick（50ms 内）被核心取走，攒不了几个。
- * 万一玩家在区块送到之前就走远了，那个区块没人来取，这个上限保证它不会一直占着
- * 96KB 内存。被挤掉的区块下次要用时重新生成一次即可（0.23ms），地形是纯函数，
- * 结果一模一样。上限必须大于引导阶段一次要等的那一片区块数。
+ * 正常情况下 Worker 送回来的区块会在下一个 tick（50ms 内）被核心取走。核心只要视距内
+ * 的区块，所以这里攒的量本来就有界；这个上限防的是另一种情形：区块送到之后玩家恰好
+ * 走出了它的视距，没人再来取它，于是它一直占着 96KB。被挤掉的区块下次要用时重新生成
+ * 一次即可（0.23ms），地形是纯函数，结果一模一样。
+ *
+ * 挤掉最后到的那个：请求是由近到远发的，最后到的就是最远的，最不着急要。
+ * 上限远大于引导阶段一次要等的那一片（`SPAWN_READY_RADIUS`），否则等到的区块会在
+ * `awaitChunks` resolve 之前就被挤掉，出生点算在虚空里；有测试守着这条。
  */
-export const MAX_READY_CHUNKS = 128;
+export const MAX_READY_CHUNKS = 512;
 
 export interface ChunkStreamOptions {
   readonly seed: number;
@@ -25,6 +38,8 @@ export interface ChunkStreamOptions {
  * 生成器并异步回填」——核心那一侧仍然是同步的、可在 Node 里裸跑的。
  */
 export interface ChunkStream {
+  /** 生成这些区块用的种子。核心从这里拿，种子因此只有一个出处。 */
+  readonly seed: number;
   /** 交给 `GameCore` 的区块来源。 */
   readonly source: ChunkSource;
   /** Worker 一共送回来多少个区块。端到端测试用它确认生成真的发生在 Worker 里。 */
@@ -41,28 +56,24 @@ export function createChunkStream({ seed, port }: ChunkStreamOptions): ChunkStre
   const ready = new Map<number, Chunk>();
   /** 已经下单、还没送到的区块。用它去重，同一个区块不会请求两次。 */
   const ordered = new Set<number>();
-  /** 在等某个区块的 `awaitChunks`。 */
-  const waiting = new Map<number, () => void>();
+  /** 在等某个区块的那些 `awaitChunks`。同一个区块可能有好几拨人在等。 */
+  const waiting = new Map<number, Array<() => void>>();
   let delivered = 0;
 
   port.onmessage = ({ data }) => {
     const key = chunkKey(data.cx, data.cz);
     ordered.delete(key);
+    const awaited = waiting.get(key);
     ready.set(key, new Chunk(data.cx, data.cz, data.blocks));
     delivered++;
-    evictOldest();
-    waiting.get(key)?.();
+
+    // 攒到上限说明核心没来取（玩家大概已经走远了），那就不留刚到的这个：请求是由近到远
+    // 发的，最后到的最远、最不着急。引导阶段在等的那些不算——等到它的人马上就要用。
+    if (ready.size > MAX_READY_CHUNKS && !awaited) ready.delete(key);
+
+    for (const resolve of awaited ?? []) resolve();
     waiting.delete(key);
   };
-
-  /** 攒得太多就把最早到的丢掉。Map 按插入顺序遍历，第一个就是最早的。 */
-  function evictOldest(): void {
-    while (ready.size > MAX_READY_CHUNKS) {
-      const oldest = ready.keys().next();
-      if (oldest.done) return;
-      ready.delete(oldest.value);
-    }
-  }
 
   function order(cx: number, cz: number, key: number): void {
     if (ordered.has(key)) return;
@@ -83,6 +94,7 @@ export function createChunkStream({ seed, port }: ChunkStreamOptions): ChunkStre
   };
 
   return {
+    seed,
     source,
     get deliveredCount(): number {
       return delivered;
@@ -93,7 +105,13 @@ export function createChunkStream({ seed, port }: ChunkStreamOptions): ChunkStre
         const key = chunkKey(cx, cz);
         if (ready.has(key)) continue;
         order(cx, cz, key);
-        pending.push(new Promise<void>((resolve) => waiting.set(key, resolve)));
+        pending.push(
+          new Promise<void>((resolve) => {
+            const resolvers = waiting.get(key) ?? [];
+            resolvers.push(resolve);
+            waiting.set(key, resolvers);
+          }),
+        );
       }
       return Promise.all(pending).then(() => undefined);
     },

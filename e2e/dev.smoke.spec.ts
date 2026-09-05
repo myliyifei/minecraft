@@ -27,7 +27,7 @@ const PROFILE_Z_STEP = 8;
 /**
  * 等视距内的区块全部到位。
  *
- * 页面打开时只等好了出生点那一小片（见 src/main.ts 的 INITIAL_LOAD_RADIUS），
+ * 页面打开时只等好了出生点那一小片（见 SPAWN_READY_RADIUS），
  * 其余由 Worker 陆续送来。要对整片地形下断言就得先等它长齐，否则读到的是
  * 「未加载即空气」。
  */
@@ -213,7 +213,8 @@ test('地形生成在 Worker 里进行，视距内的区块陆续送到', async 
     loaded: window.__VOXEL__!.core.loadedChunkCount,
     delivered: window.__VOXEL__!.chunks.deliveredCount,
   }));
-  // 主线程一个区块都没生成：世界里的每一个区块都是 Worker 送来的
+  // 送回来的不少于世界里现有的：视距铺满靠的是 Worker 的产出，不是主线程边跑边生成
+  // （主线程压根没有生成器——核心拿到的来源只有 chunks.source，见 src/main.ts）
   expect(state.delivered).toBeGreaterThanOrEqual(state.loaded);
   expect(errors).toEqual([]);
 });

@@ -44,7 +44,8 @@ export const TICK_MS = 1000 / TICK_RATE;
 
 /**
  * 默认视距（区块数）：以玩家所在区块为心，这个半径内的区块保持加载。
- * 玩家可在设置中调整（`GameCoreOptions.viewRadius`）。
+ * 建核心时可以换个值（`GameCoreOptions.viewRadius`）；让玩家在设置界面里现场调
+ * 是后续切片的事。
  */
 export const DEFAULT_VIEW_RADIUS = 8;
 

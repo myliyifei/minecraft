@@ -2,10 +2,10 @@ import { isSolid, type BlockView } from './block';
 import { TICK_RATE } from './constants';
 import type { Vec3 } from './vec3';
 
-/** 碰撞盒的水平边长（方块）。 */
+/** 碰撞箱的水平边长（方块）。 */
 export const PLAYER_WIDTH = 0.6;
 
-/** 碰撞盒的高度（方块）。 */
+/** 碰撞箱的高度（方块）。 */
 export const PLAYER_HEIGHT = 1.8;
 
 /** 眼睛相对脚底的高度（方块）。第一人称相机放在这里。 */
@@ -108,7 +108,7 @@ export class Player implements PlayerView {
     this.z = this.prevZ = spawn.z;
   }
 
-  /** 碰撞盒底面中心。y 就是脚底所在的高度。 */
+  /** 碰撞箱底面中心。y 就是脚底所在的高度。 */
   get position(): Vec3 {
     return { x: this.x, y: this.y, z: this.z };
   }
@@ -167,7 +167,7 @@ export class Player implements PlayerView {
 
     // 竖直走完再走水平：跳到台阶上时这一 tick 已经抬到了台阶顶面之上，
     // 水平方向因此不再被台阶挡住。
-    this.walk(intent);
+    this.moveHorizontally(intent);
   }
 
   /**
@@ -176,7 +176,7 @@ export class Player implements PlayerView {
    * 俯仰不参与——抬头看天按 W 仍然是平着走。两个轴分开做碰撞，斜着撞墙时
    * 会沿着墙滑过去，而不是整步作废。
    */
-  private walk(intent: MoveIntent): void {
+  private moveHorizontally(intent: MoveIntent): void {
     const forward = Number(intent.forward) - Number(intent.back);
     const strafe = Number(intent.right) - Number(intent.left);
     if (forward === 0 && strafe === 0) return;
@@ -193,7 +193,7 @@ export class Player implements PlayerView {
   /**
    * 沿一个轴移动之后玩家在这个轴上的新坐标，撞上实心方块则停在接触面上。
    *
-   * 扫掠算出来的是碰撞盒 min 端的落点：竖直方向那就是脚底高度，水平方向要把半宽
+   * 扫掠算出来的是碰撞箱 min 端的落点：竖直方向那就是脚底高度，水平方向要把半宽
    * 加回来才是玩家坐标。
    */
   private movedAlong(axis: Axis, delta: number): number {
@@ -201,7 +201,7 @@ export class Player implements PlayerView {
     return axis === 'y' ? stopped : stopped + HALF_WIDTH;
   }
 
-  /** 当前的碰撞盒：0.6 × 1.8 × 0.6，底面中心落在玩家坐标上。 */
+  /** 当前的碰撞箱：0.6 × 1.8 × 0.6，底面中心落在玩家坐标上。 */
   private get hitbox(): Hitbox {
     return {
       min: { x: this.x - HALF_WIDTH, y: this.y, z: this.z - HALF_WIDTH },
@@ -213,7 +213,7 @@ export class Player implements PlayerView {
 /** 轴向。直接用 Vec3 的字段名，扫掠因此能按名字取分量，不必靠下标约定。 */
 type Axis = keyof Vec3;
 
-/** 世界坐标中的一个轴对齐包围盒。 */
+/** 世界坐标中的一个轴对齐碰撞箱。 */
 interface Hitbox {
   readonly min: Vec3;
   readonly max: Vec3;
@@ -227,9 +227,9 @@ const OTHER_AXES: Readonly<Record<Axis, readonly [Axis, Axis]>> = {
 };
 
 /**
- * 单轴扫掠：碰撞盒沿 `axis` 移动 `delta` 之后，这个轴上盒 min 端落在哪里。
+ * 单轴扫掠：碰撞箱沿 `axis` 移动 `delta` 之后，这个轴上箱 min 端落在哪里。
  *
- * 只动一个轴时，扫掠体正好是「起点盒到终点盒」的包围盒，所以沿移动轴逐个方块扫一遍
+ * 只动一个轴时，扫掠体正好是「起点箱到终点箱」的外接箱，所以沿移动轴逐个方块扫一遍
  * 就够，速度再快也不会穿过方块——自由落体的终端速度接近 4 方块/tick。
  *
  * 撞上方块时返回的是方块边界本身而不是累加出来的位移，因此落地高度是精确的整数。
@@ -248,11 +248,11 @@ function sweep(blocks: BlockView, hitbox: Hitbox, axis: Axis, delta: number): nu
     if (!blockedAt(blocks, hitbox, axis, at)) continue;
     limit =
       delta > 0
-        ? Math.min(limit, at - (max - min)) // 盒的 max 端顶在这个方块的下边界上
-        : Math.max(limit, at + 1); //         盒的 min 端落在这个方块的上边界上
+        ? Math.min(limit, at - (max - min)) // 箱的 max 端顶在这个方块的下边界上
+        : Math.max(limit, at + 1); //         箱的 min 端落在这个方块的上边界上
   }
 
-  // 碰撞盒已经卡在方块里时（比如有方块被放进玩家所在的位置），上面的钳位会算出反向
+  // 碰撞箱已经卡在方块里时（比如有方块被放进玩家所在的位置），上面的钳位会算出反向
   // 位移。夹住方向：宁可不动，也不要把玩家往回推。
   return delta > 0 ? Math.max(min, limit) : Math.min(min, limit);
 }
@@ -276,7 +276,7 @@ function blockedAt(blocks: BlockView, hitbox: Hitbox, axis: Axis, at: number): b
 }
 
 /**
- * 碰撞盒某一端覆盖到的第一个 / 最后一个方块坐标。
+ * 碰撞箱某一端覆盖到的第一个 / 最后一个方块坐标。
  * 两个函数都把「边界重合」算作不相交——贴着面站着不算卡在方块里。
  */
 function firstBlock(min: number): number {

@@ -89,7 +89,10 @@ export class GameCore implements BlockView {
 
   /**
    * 某一列最高的非空气方块的 y。整列都是空气（或区块未加载）时返回世界底面之下一格。
-   * 出生点、树木落地、将来的天光都从这里问「地面在哪」。
+   *
+   * 注意它不是「地表高度」：地表高度是地形生成给出的地面，不随挖掘与放置变化，
+   * 由 `plainsSurfaceHeight` 那类函数回答。这里问的是那一列现在实际堆到了多高，
+   * 出生点与将来的天光要的是这个。
    */
   highestBlockY(x: number, z: number): number {
     return this.world.highestBlockY(x, z);

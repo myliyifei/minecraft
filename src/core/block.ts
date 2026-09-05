@@ -43,7 +43,7 @@ export function isOpaque(block: BlockType): boolean {
   return BLOCKS[block].opaque;
 }
 
-/** 阻挡移动的方块参与玩家的 AABB 碰撞。 */
+/** 阻挡移动的方块参与实体的碰撞箱判定。 */
 export function isSolid(block: BlockType): boolean {
   return BLOCKS[block].solid;
 }

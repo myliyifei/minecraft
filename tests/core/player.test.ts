@@ -201,7 +201,7 @@ describe('玩家与墙、台阶的碰撞', () => {
   it('朝墙走会被挡住，不穿过方块', () => {
     const player = walkerFacingStep(worldWithStep(3));
     for (let i = 0; i < 40; i++) player.step(FORWARD_INTENT);
-    // 碰撞盒的 +X 侧面正好贴在 x = 1 的墙面上
+    // 碰撞箱的 +X 侧面正好贴在 x = 1 的墙面上
     expect(player.position.x).toBeCloseTo(1 - PLAYER_WIDTH / 2, 10);
   });
 
@@ -249,7 +249,7 @@ describe('玩家与墙、台阶的碰撞', () => {
     for (let i = 0; i < 40; i++) player.step(FORWARD_INTENT);
 
     expect(player.position.y).toBe(pitFloor + 1);
-    // 碰撞盒还搭在边上时不会掉，整个盒子越过边界之后才掉——和原版一致
+    // 碰撞箱还搭在边上时不会掉，整个箱子越过边界之后才掉——和原版一致
     expect(player.position.x).toBeGreaterThan(1 + PLAYER_WIDTH / 2);
   });
 
@@ -262,7 +262,7 @@ describe('玩家与墙、台阶的碰撞', () => {
 
   it('头顶有方块时跳不起来，也不会顶进去', () => {
     const world = flatTestWorld();
-    // 在脚底 +2 格铺一层顶板：1.8 高的碰撞盒抬到 0.2 格就顶到它
+    // 在脚底 +2 格铺一层顶板：1.8 高的碰撞箱抬到 0.2 格就顶到它
     for (let x = -2; x <= 2; x++) {
       for (let z = -2; z <= 2; z++) world.setBlock(x, FLAT_STAND_Y + 2, z, BlockType.Stone);
     }
@@ -272,7 +272,7 @@ describe('玩家与墙、台阶的碰撞', () => {
       player.step(JUMP_INTENT);
       apex = Math.max(apex, player.position.y);
     }
-    // 头顶顶住了，最高点就是碰撞盒顶面贴着顶板的那个高度，而不是 1.25 格
+    // 头顶顶住了，最高点就是碰撞箱顶面贴着顶板的那个高度，而不是 1.25 格
     expect(apex).toBe(FLAT_STAND_Y + 2 - PLAYER_HEIGHT);
     // 松开空格落回地面，没有卡在顶板下面
     for (let i = 0; i < 10; i++) player.step(IDLE_INTENT);
@@ -313,7 +313,7 @@ describe('玩家的视角', () => {
     expect(player.yaw).toBeCloseTo(Math.PI * 0.5, 10);
   });
 
-  it('俯仰不影响走路方向：抬头按 W 仍然平着走', () => {
+  it('俯仰不影响移动方向：抬头按 W 仍然平着走', () => {
     const player = standingAt();
     player.turn(0, MAX_PITCH);
     for (let i = 0; i < TICK_RATE; i++) player.step(FORWARD_INTENT);

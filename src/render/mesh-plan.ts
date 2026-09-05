@@ -1,4 +1,15 @@
-import { chunkKey, type ChunkCoord } from '../core/world';
+import { byDistanceTo, chunkKey, chunksAround, type ChunkCoord } from '../core/world';
+
+/**
+ * 一帧最多建几个区块的网格。
+ *
+ * 建一个区块的网格实测 1.3–1.6ms（桌面 Chrome，Node 里 4ms），两个加上这一帧本身的
+ * 绘制仍在 60fps 的 16ms 预算里。玩家跨过一条区块边界时要补一整列区块（视距 8 是
+ * 17 个），全挤在一帧里就是一次看得见的卡顿；摊到几十帧里则完全看不出来——走一格
+ * 区块要 3.7 秒，有两百多帧可用。实测这个预算追得上走路：开局铺满视距要几秒，
+ * 之后一路走下去积压恒为 0（tests/render/mesh-plan.test.ts）。
+ */
+export const MESH_BUDGET_PER_FRAME = 2;
 
 /** 这一帧要建哪些区块的网格、要丢哪些。 */
 export interface MeshPlan {
@@ -9,12 +20,12 @@ export interface MeshPlan {
 }
 
 /** 排网格计划只需要知道区块加载了没有。 */
-export interface ChunkLoadView {
+export interface LoadedChunkView {
   isChunkLoaded(cx: number, cz: number): boolean;
 }
 
 export interface MeshPlanOptions {
-  readonly world: ChunkLoadView;
+  readonly world: LoadedChunkView;
   /** 已经有网格的区块。 */
   readonly meshed: Iterable<ChunkCoord>;
   /** 玩家所在的区块。 */
@@ -55,23 +66,15 @@ export function planChunkMeshes({
     if (!world.isChunkLoaded(cx, cz)) drop.push({ cx, cz });
   }
 
-  const buildable: ChunkCoord[] = [];
-  for (let cx = center.cx - radius; cx <= center.cx + radius; cx++) {
-    for (let cz = center.cz - radius; cz <= center.cz + radius; cz++) {
-      if (meshedKeys.has(chunkKey(cx, cz))) continue;
-      if (!isMeshable(world, cx, cz)) continue;
-      buildable.push({ cx, cz });
-    }
-  }
-
-  if (buildable.length > 1) {
-    buildable.sort((a, b) => squaredDistance(a, center) - squaredDistance(b, center));
-  }
+  const buildable = chunksAround(center, radius).filter(
+    ({ cx, cz }) => !meshedKeys.has(chunkKey(cx, cz)) && isMeshable(world, cx, cz),
+  );
+  if (buildable.length > 1) buildable.sort(byDistanceTo(center));
   return { build: buildable.slice(0, Math.max(budget, 0)), drop };
 }
 
 /** 区块自己与四个侧面的邻居都已加载。 */
-function isMeshable(world: ChunkLoadView, cx: number, cz: number): boolean {
+function isMeshable(world: LoadedChunkView, cx: number, cz: number): boolean {
   return (
     world.isChunkLoaded(cx, cz) &&
     world.isChunkLoaded(cx - 1, cz) &&
@@ -79,10 +82,4 @@ function isMeshable(world: ChunkLoadView, cx: number, cz: number): boolean {
     world.isChunkLoaded(cx, cz - 1) &&
     world.isChunkLoaded(cx, cz + 1)
   );
-}
-
-function squaredDistance(a: ChunkCoord, b: ChunkCoord): number {
-  const dx = a.cx - b.cx;
-  const dz = a.cz - b.cz;
-  return dx * dx + dz * dz;
 }

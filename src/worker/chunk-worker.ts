@@ -1,4 +1,4 @@
-import { plainsTerrain, type TerrainGenerator } from '../core/terrain';
+import { plainsTerrain } from '../core/terrain';
 import type { ChunkRequest, ChunkResponse } from './protocol';
 
 /**
@@ -20,21 +20,11 @@ interface WorkerScope {
 
 const scope = globalThis as unknown as WorkerScope;
 
-/** 上一次用的种子与生成器。同一个世界的区块请求源源不断，没必要每次重建生成器。 */
-let cachedSeed: number | undefined;
-let cachedGenerate: TerrainGenerator | undefined;
-
-function generatorFor(seed: number): TerrainGenerator {
-  if (cachedSeed !== seed || !cachedGenerate) {
-    cachedSeed = seed;
-    cachedGenerate = plainsTerrain(seed);
-  }
-  return cachedGenerate;
-}
-
+// 不缓存生成器：`plainsTerrain(seed)` 只是把种子闭包起来，代价可以忽略，而 Worker
+// 因此一点可变状态都没有——同一个请求任何时候处理都得到同样的区块（ADR-0003）。
 scope.onmessage = ({ data }) => {
   const { seed, cx, cz } = data;
-  const chunk = generatorFor(seed)(cx, cz);
+  const chunk = plainsTerrain(seed)(cx, cz);
   // 转移 buffer 而不是复制：这一块内存交给主线程之后，Worker 这边就不再持有它。
   scope.postMessage({ cx, cz, blocks: chunk.blocks }, [chunk.blocks.buffer]);
 };

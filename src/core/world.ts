@@ -47,12 +47,14 @@ export class World implements BlockView {
   }
 
   /**
-   * 遍历已加载的区块。
-   * 流式加载每 tick 都要走一遍全部已加载区块，用它就不必每次建一个中间数组。
-   * 遍历途中卸载区块是安全的。
+   * 卸载所有离中心区块超过 keepRadius 的区块（切比雪夫距离，即方形范围之外）。
+   * 多远算太远是流式加载的政策，见 `streamChunks`；这里只负责走一遍自己那张表。
    */
-  forEachChunk(visit: (chunk: Chunk) => void): void {
-    for (const chunk of this.chunks.values()) visit(chunk);
+  unloadOutside(center: ChunkCoord, keepRadius: number): void {
+    for (const { cx, cz } of this.chunks.values()) {
+      const distance = Math.max(Math.abs(cx - center.cx), Math.abs(cz - center.cz));
+      if (distance > keepRadius) this.unloadChunk(cx, cz);
+    }
   }
 
   isChunkLoaded(cx: number, cz: number): boolean {
@@ -146,4 +148,33 @@ export function chunkOf(worldCoord: number): number {
 /** 世界坐标在区块内的局部坐标，负坐标也落在 [0, 16)。 */
 export function localOf(worldCoord: number): number {
   return worldCoord & (CHUNK_SIZE - 1);
+}
+
+/** 世界原点所在的区块。出生点在这一列上。 */
+export const ORIGIN_CHUNK: ChunkCoord = { cx: 0, cz: 0 };
+
+/**
+ * 以中心区块为心、半径 radius 的方形范围内的全部区块坐标。
+ * 加载范围、网格范围、引导阶段要等的那一片，说的都是这个形状。
+ */
+export function chunksAround(center: ChunkCoord, radius: number): ChunkCoord[] {
+  const coords: ChunkCoord[] = [];
+  for (let cx = center.cx - radius; cx <= center.cx + radius; cx++) {
+    for (let cz = center.cz - radius; cz <= center.cz + radius; cz++) {
+      coords.push({ cx, cz });
+    }
+  }
+  return coords;
+}
+
+/**
+ * 按到中心的距离由近到远排的比较函数。
+ *
+ * 用欧氏距离（而不是决定加载范围的那个切比雪夫距离）：世界因此是从玩家脚下往外一圈圈
+ * 长出来的，看着自然。比平方就够，不必开根号。
+ */
+export function byDistanceTo(center: ChunkCoord): (a: ChunkCoord, b: ChunkCoord) => number {
+  const squared = ({ cx, cz }: ChunkCoord): number =>
+    (cx - center.cx) ** 2 + (cz - center.cz) ** 2;
+  return (a, b) => squared(a) - squared(b);
 }

@@ -6,21 +6,11 @@ import { PLAYER_EYE_HEIGHT } from '../core/player';
 import type { Vec3 } from '../core/vec3';
 import { ATLAS_PATH } from './atlas';
 import { buildChunkMesh, type MeshData } from './mesh';
-import { planChunkMeshes } from './mesh-plan';
+import { MESH_BUDGET_PER_FRAME, planChunkMeshes } from './mesh-plan';
 import { chunkKey, type ChunkCoord } from '../core/world';
 
 /** 竖直视场角（度）。 */
 const FIELD_OF_VIEW = 70;
-
-/**
- * 一帧最多建几个区块的网格。
- *
- * 建一个区块的网格实测 1.3–1.6ms（桌面 Chrome，Node 里 4ms），两个加上这一帧本身的
- * 绘制仍在 60fps 的 16ms 预算里。玩家跨过一条区块边界时要补一整列区块（视距 8 是
- * 17 个），全挤在一帧里就是一次看得见的卡顿；摊到几十帧里则完全看不出来——走一格
- * 区块要 3.7 秒，有两百多帧可用。
- */
-export const MESH_BUDGET_PER_FRAME = 2;
 
 /**
  * 加载方块图集。像素风必须用 Nearest 过滤且不生成 mipmap，否则贴图会被糊掉、
@@ -100,12 +90,12 @@ export class WorldRenderer {
     window.addEventListener('resize', () => this.resize());
   }
 
-  /** 已建成网格的区块数。 */
+  /** 已经建过网格的区块数（含一个面都没有的那些）。 */
   get chunkMeshCount(): number {
     return this.meshes.size;
   }
 
-  /** 这个区块在场景里有没有网格。 */
+  /** 这个区块的网格建过没有。 */
   hasChunkMesh(cx: number, cz: number): boolean {
     return this.meshes.has(chunkKey(cx, cz));
   }
@@ -141,13 +131,21 @@ export class WorldRenderer {
     this.buildChunk(cx, cz);
   }
 
-  /** 建一个区块的网格。空网格（全空气的区块）不进场景。 */
+  /**
+   * 建一个区块的网格。
+   *
+   * 一个面都没有的区块（整块空气）仍然要记进账里，只是不往场景里放东西：不记账的话
+   * `planChunkMeshes` 每帧都会重新提议它，它会一直白占着这一帧的建网格预算。
+   */
   private buildChunk(cx: number, cz: number): void {
     const chunk = this.core.chunkAt(cx, cz);
     if (!chunk) return;
 
     const data = buildChunkMesh(chunk, this.core);
-    if (data.indices.length === 0) return;
+    if (data.indices.length === 0) {
+      this.meshes.set(chunkKey(cx, cz), { cx, cz });
+      return;
+    }
 
     const mesh = new THREE.Mesh(toGeometry(data), this.material);
     mesh.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
@@ -159,8 +157,10 @@ export class WorldRenderer {
     const key = chunkKey(cx, cz);
     const existing = this.meshes.get(key);
     if (!existing) return;
-    this.scene.remove(existing.mesh);
-    existing.mesh.geometry.dispose();
+    if (existing.mesh) {
+      this.scene.remove(existing.mesh);
+      existing.mesh.geometry.dispose();
+    }
     this.meshes.delete(key);
   }
 
@@ -200,9 +200,12 @@ export class WorldRenderer {
   }
 }
 
-/** 场景里一个区块的网格，连同它是哪个区块。 */
+/**
+ * 一个已经建过网格的区块。
+ * `mesh` 缺省表示这个区块一个面都没有（整块空气），场景里没有对应的对象。
+ */
 interface ChunkMesh extends ChunkCoord {
-  readonly mesh: THREE.Mesh;
+  readonly mesh?: THREE.Mesh;
 }
 
 function lerp(from: number, to: number, alpha: number): number {

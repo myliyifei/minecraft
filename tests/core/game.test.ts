@@ -12,7 +12,7 @@ import {
   WORLD_MAX_Y,
   WORLD_MIN_Y,
 } from '../../src/core/constants';
-import { IDLE_INTENT } from '../../src/core/player';
+import { IDLE_INTENT, WALK_SPEED } from '../../src/core/player';
 import {
   DIRT_DEPTH_MAX,
   DIRT_DEPTH_MIN,
@@ -381,13 +381,16 @@ describe('GameCore 的区块随玩家流式加载', () => {
     expect(core.player.onGround).toBe(true);
   });
 
-  it('走远之后加载范围跟着玩家挪，身后的区块被卸载', () => {
+  it('玩家自己走过 20 个区块之后，原点附近已卸载、新位置周围已加载', () => {
     const core = sampleCore({ chunkSource: () => flatTestTerrain });
     expect(core.isChunkLoaded(0, 0)).toBe(true);
 
-    walkForward(core, 40 * TICK_RATE);
+    // 20 个区块 = 320 格，按步行速度要走 74 秒
+    const chunksToCross = 20;
+    walkForward(core, Math.ceil((chunksToCross * CHUNK_SIZE) / WALK_SPEED) * TICK_RATE);
 
     const { cx, cz } = core.playerChunk;
+    expect(cz).toBeLessThanOrEqual(-chunksToCross);
     expect(core.isChunkLoaded(cx, cz)).toBe(true);
     expect(core.isChunkLoaded(cx, cz - SAMPLE_RADIUS)).toBe(true);
     expect(core.isChunkLoaded(0, 0)).toBe(false);

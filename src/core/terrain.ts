@@ -11,13 +11,6 @@ import { fbm2, hashCoords } from './noise';
 export type TerrainGenerator = (cx: number, cz: number) => Chunk;
 
 /**
- * 由种子造出生成器。
- * 核心只认这个类型，因此换地形算法（测试用的假地形、将来的多群系地形）
- * 不必改动核心的接线。
- */
-export type TerrainFactory = (seed: number) => TerrainGenerator;
-
-/**
  * 平原地表的基准高度。
  * 与起伏幅度的关系是一条硬约束：`PLAINS_BASE_Y − PLAINS_RELIEF ≥ MIN_SURFACE_Y`，
  * 否则地形会跌到海平面以下。

@@ -15,7 +15,7 @@ export const PLAYER_EYE_HEIGHT = 1.62;
 export const WALK_SPEED = 4.317;
 
 /**
- * 俯仰角的上下限（弧度）。
+ * 俯仰的上下限（弧度）。
  * 留一点余量而不是取满 90°，视线方向因此不会退化成纯竖直——将来的方块拾取
  * 要拿它当射线方向。
  */
@@ -118,7 +118,7 @@ export class Player implements PlayerView {
     return { x: this.prevX, y: this.prevY, z: this.prevZ };
   }
 
-  /** 水平朝向（弧度）。0 表示看向 −Z，与 Three.js 相机的默认朝向一致。 */
+  /** 偏航（弧度）。0 表示看向 −Z，与 Three.js 相机的默认朝向一致。 */
   get yaw(): number {
     return this.yawAngle;
   }
@@ -297,7 +297,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-/** 把角度折回 (−π, π]。转多少圈偏航角都不会无界增长，精度因此不随时间变差。 */
+/** 把角度折回 (−π, π]。转多少圈偏航都不会无界增长，精度因此不随时间变差。 */
 function wrapAngle(angle: number): number {
   const wrapped = angle % TAU;
   if (wrapped > Math.PI) return wrapped - TAU;

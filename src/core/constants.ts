@@ -1,6 +1,9 @@
 /** 区块的水平边长（方块数）。区块在竖直方向是完整世界高度的柱体。 */
 export const CHUNK_SIZE = 16;
 
+/** 区块一层的方块数。区块数据按层排布，这也是相邻两层的下标间距。 */
+export const CHUNK_AREA = CHUNK_SIZE * CHUNK_SIZE;
+
 /**
  * CHUNK_SIZE 的位移量，满足 `1 << CHUNK_SHIFT === CHUNK_SIZE`。
  * 世界坐标到区块坐标的换算走位运算而不是除法——这是最热的一条路径。
@@ -40,8 +43,13 @@ export const TICK_RATE = 20;
 export const TICK_MS = 1000 / TICK_RATE;
 
 /**
- * 默认加载半径（区块数）。
- * 本切片相机固定、不做流式加载，取一个够看的小半径即可；
- * 视距 8 与随玩家加载/卸载见 issue #5。
+ * 默认视距（区块数）：以玩家所在区块为心，这个半径内的区块保持加载。
+ * 玩家可在设置中调整（`GameCoreOptions.viewRadius`）。
  */
-export const DEFAULT_VIEW_RADIUS = 2;
+export const DEFAULT_VIEW_RADIUS = 8;
+
+/**
+ * 视距之外再多留几环才卸载（区块数）。
+ * 玩家在区块边界上来回走时，没有这点滞后会让边界那一圈区块反复卸载又重新生成。
+ */
+export const UNLOAD_MARGIN = 1;

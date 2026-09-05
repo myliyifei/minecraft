@@ -1,6 +1,7 @@
 import { DEBUG_BUILD } from './build-flags';
 import type { GameCore } from './core/game';
 import type { WorldRenderer } from './render/renderer';
+import type { ChunkStream } from './worker/chunk-stream';
 
 /**
  * 浏览器端到端测试用的调试句柄。
@@ -9,6 +10,8 @@ import type { WorldRenderer } from './render/renderer';
 export interface DebugHandle {
   readonly core: GameCore;
   readonly renderer: WorldRenderer;
+  /** Worker 供货的区块来源。端到端测试用它确认地形生成真的发生在 Worker 里。 */
+  readonly chunks: ChunkStream;
 }
 
 declare global {

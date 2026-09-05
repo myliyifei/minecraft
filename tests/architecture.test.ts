@@ -18,6 +18,14 @@ function tsFilesIn(dir: string): string[] {
   return out;
 }
 
+/**
+ * 去掉注释的源码。
+ * 按名字禁用某个 API 时必须只看真代码——注释里写「不用 Math.random」不该算违规。
+ */
+function codeOf(file: string): string {
+  return readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+}
+
 /** import 与 export ... from 的模块说明符。 */
 function importedModules(source: string): string[] {
   const out: string[] = [];
@@ -53,7 +61,28 @@ describe('无头游戏核心的隔离（ADR-0001：世界状态与渲染层分�
   it('核心不触碰 DOM 与浏览器全局', () => {
     const forbidden = /\b(window|document|navigator|requestAnimationFrame|HTMLElement|localStorage)\b/;
     for (const file of coreFiles) {
-      expect(readFileSync(file, 'utf8')).not.toMatch(forbidden);
+      expect(codeOf(file)).not.toMatch(forbidden);
+    }
+  });
+});
+
+describe('地形生成的纯性（ADR-0003：地形生成是纯函数）', () => {
+  const coreFiles = tsFilesIn(join(SRC, 'core'));
+
+  it('核心不用非确定性的来源', () => {
+    // 同一个种子必须每次长出同一个世界。真随机与真实时钟一旦进入核心，
+    // 「先加载 A 再 B 与反过来一致」这类断言就守不住了。
+    const forbidden = /\b(Math\.random|Date\.now|performance\.now)\b/;
+    for (const file of coreFiles) {
+      expect(codeOf(file)).not.toMatch(forbidden);
+    }
+  });
+
+  it('核心没有模块级的可变状态', () => {
+    // 顶层 let / var 会让生成结果依赖调用顺序。常量用 const，逐区块的状态留在函数里。
+    const forbidden = /^(?:export\s+)?(?:let|var)\s/m;
+    for (const file of coreFiles) {
+      expect(codeOf(file)).not.toMatch(forbidden);
     }
   });
 });

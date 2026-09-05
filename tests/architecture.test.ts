@@ -87,6 +87,26 @@ describe('地形生成的纯性（ADR-0003：地形生成是纯函数）', () =>
   });
 });
 
+describe('键位表是单一数据源', () => {
+  const table = join(SRC, 'input/keybindings.ts');
+
+  it('按键名只写在键位表里', () => {
+    // 键位要能在设置界面里改，前提是别处没有第二份硬编码的按键名。
+    const keyNames = /'(?:Key[A-Z]|Digit\d|Space|Escape|Arrow[A-Z]\w+|(?:Shift|Alt|Control)(?:Left|Right))'/;
+    for (const file of tsFilesIn(SRC)) {
+      if (file === table) continue;
+      expect(codeOf(file)).not.toMatch(keyNames);
+    }
+  });
+
+  it('核心不知道任何按键', () => {
+    // 移动意图是核心与输入之间的边界：核心收到的是「向前」，不是「W 被按下」。
+    for (const file of tsFilesIn(join(SRC, 'core'))) {
+      expect(codeOf(file)).not.toMatch(/\b(?:KeyboardEvent|MouseEvent)\b/);
+    }
+  });
+});
+
 describe('网格生成的可测性', () => {
   // buildChunkMesh 与图集映射必须是纯数据变换，否则核心层测试无法覆盖面剔除。
   const pureRenderFiles = ['render/mesh.ts', 'render/atlas.ts'].map((f) => join(SRC, f));

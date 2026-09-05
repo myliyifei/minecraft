@@ -6,9 +6,11 @@ const MAX_CATCHUP_TICKS = 5;
 
 /**
  * 固定步长的游戏循环：核心按 20 tick/s 推进，渲染每帧一次。
- * 返回停止循环的函数。
+ *
+ * `render` 收到的 alpha 是这一帧落在两个 tick 之间的比例（0..1），渲染层用它插值
+ * 连续量（ADR-0002）。返回停止循环的函数。
  */
-export function startGameLoop(core: GameCore, render: () => void): () => void {
+export function startGameLoop(core: GameCore, render: (alpha: number) => void): () => void {
   let last = performance.now();
   let accumulator = 0;
   let handle = 0;
@@ -28,7 +30,9 @@ export function startGameLoop(core: GameCore, render: () => void): () => void {
     // 落后太多就直接丢弃欠账，宁可跳过时间也不要卡住渲染。
     if (accumulator > TICK_MS * MAX_CATCHUP_TICKS) accumulator = 0;
 
-    render();
+    // 一帧补不完 MAX_CATCHUP_TICKS 时欠账还剩不止一个 tick，alpha 会超过 1。
+    // 夹到 1：宁可画在当前 tick 的位置上，也不要外推到玩家还没走到的地方。
+    render(Math.min(accumulator / TICK_MS, 1));
     handle = requestAnimationFrame(frame);
   };
 

@@ -2,9 +2,14 @@ import * as THREE from 'three';
 import { DEBUG_BUILD } from '../build-flags';
 import type { GameCore } from '../core/game';
 import { CHUNK_SIZE } from '../core/constants';
+import { PLAYER_EYE_HEIGHT } from '../core/player';
+import type { Vec3 } from '../core/vec3';
 import { ATLAS_PATH } from './atlas';
 import { buildChunkMesh, type MeshData } from './mesh';
 import { chunkKey } from '../core/world';
+
+/** 竖直视场角（度）。 */
+const FIELD_OF_VIEW = 70;
 
 /**
  * 加载方块图集。像素风必须用 Nearest 过滤且不生成 mipmap，否则贴图会被糊掉、
@@ -39,7 +44,7 @@ export interface WorldRendererOptions {
 /**
  * 渲染适配器：把核心的方块数据画成 Three.js 场景。只读核心状态，不改核心状态。
  *
- * 相机在本切片是固定的——第一人称移动见 issue #4。
+ * 相机是第一人称的：跟着核心里的玩家走，位置在两次 tick 之间插值（ADR-0002）。
  */
 export class WorldRenderer {
   private readonly renderer: THREE.WebGLRenderer;
@@ -67,10 +72,10 @@ export class WorldRenderer {
       alphaTest: 0.5,
     });
 
-    this.camera = new THREE.PerspectiveCamera(70, 1, 0.1, 1000);
-    const spawn = core.spawnPoint;
-    this.camera.position.set(spawn.x + 9, spawn.y + 6, spawn.z + 15);
-    this.camera.lookAt(spawn.x, spawn.y, spawn.z);
+    this.camera = new THREE.PerspectiveCamera(FIELD_OF_VIEW, 1, 0.1, 1000);
+    // YXZ：先偏航再俯仰，第一人称相机因此永远不会侧倾。
+    this.camera.rotation.order = 'YXZ';
+    this.updateCamera(1);
 
     // 固定光照：环境光打底，方向光让方块的六个面有明暗区分（本切片不做天光）。
     // 两者的比例决定体积感——环境光太强，方块就摊平成一张色卡。
@@ -86,6 +91,12 @@ export class WorldRenderer {
   /** 已建成网格的区块数。 */
   get chunkMeshCount(): number {
     return this.meshes.size;
+  }
+
+  /** 相机当前的位置。端到端测试用它确认相机真的跟在玩家眼睛上。 */
+  get cameraPosition(): Vec3 {
+    const { x, y, z } = this.camera.position;
+    return { x, y, z };
   }
 
   /** 为所有已加载区块建网格。空网格（全空气的区块）不进场景。 */
@@ -113,8 +124,30 @@ export class WorldRenderer {
     this.meshes.set(key, mesh);
   }
 
-  render(): void {
+  /**
+   * 画一帧。
+   * `alpha` 是当前帧落在上一个 tick 与下一个 tick 之间的比例（0..1），相机位置按它插值。
+   */
+  render(alpha = 1): void {
+    this.updateCamera(alpha);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * 把相机摆到玩家眼睛的位置。
+   *
+   * 核心按 20 tick/s 走，直接读当前位置画面就会以 20Hz 一格格地抖，所以位置在上一个
+   * tick 与当前 tick 之间插值（ADR-0002）。视角不插值——鼠标事件一到就已经改了，
+   * 再插值只会让转头发糊。
+   */
+  private updateCamera(alpha: number): void {
+    const { position, previousPosition, yaw, pitch } = this.core.player;
+    this.camera.position.set(
+      lerp(previousPosition.x, position.x, alpha),
+      lerp(previousPosition.y, position.y, alpha) + PLAYER_EYE_HEIGHT,
+      lerp(previousPosition.z, position.z, alpha),
+    );
+    this.camera.rotation.set(pitch, yaw, 0);
   }
 
   private resize(): void {
@@ -125,6 +158,10 @@ export class WorldRenderer {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
   }
+}
+
+function lerp(from: number, to: number, alpha: number): number {
+  return from + (to - from) * alpha;
 }
 
 function toGeometry(data: MeshData): THREE.BufferGeometry {

@@ -1,6 +1,8 @@
 import { BlockType, type BlockView } from './block';
 import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS } from './constants';
+import { IDLE_INTENT, Player, type MoveIntent, type PlayerView } from './player';
 import { plainsTerrain, type TerrainFactory } from './terrain';
+import type { Vec3 } from './vec3';
 import { World, type ChunkCoord } from './world';
 
 export interface GameCoreOptions {
@@ -15,23 +17,19 @@ export interface GameCoreOptions {
   readonly terrain?: TerrainFactory;
 }
 
-export interface Vec3 {
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-}
-
 /**
  * 无头游戏核心：纯 TypeScript，不依赖 Three.js 与 DOM，可在 Node 中直接实例化。
  * 这是主测试接缝——渲染与输入适配器只通过这里的指令和查询与游戏交互。
  *
- * 本切片只有「推进时间」和「查询/写入方块」两件事。玩家、挖掘、掉落物等系统
+ * 本切片有「推进时间」「查询/写入方块」「玩家移动」三件事。挖掘、掉落物等系统
  * 由后续切片挂进 step()。
  */
 export class GameCore implements BlockView {
   private readonly world: World;
   private readonly worldSeed: number;
+  private readonly playerState: Player;
   private ticks = 0;
+  private intent: MoveIntent = IDLE_INTENT;
 
   constructor(options: GameCoreOptions = {}) {
     this.worldSeed = options.seed ?? DEFAULT_SEED;
@@ -42,6 +40,26 @@ export class GameCore implements BlockView {
         this.world.loadChunk(cx, cz);
       }
     }
+    // 出生点要先有地形才算得出来，所以玩家在区块加载之后才造。
+    this.playerState = new Player(this.world, this.spawnPoint);
+  }
+
+  /** 玩家状态的只读视图。渲染层读它摆相机，改状态只能通过下面两个指令。 */
+  get player(): PlayerView {
+    return this.playerState;
+  }
+
+  /**
+   * 设定当前的移动意图，下一个 tick 生效。
+   * 输入适配器每次按键状态变化时调一次，核心因此不知道任何键位。
+   */
+  setMoveIntent(intent: MoveIntent): void {
+    this.intent = intent;
+  }
+
+  /** 转动视角（弧度增量）。鼠标一动就生效，不等 tick，否则转头会以 20Hz 一格格跳。 */
+  turn(yawDelta: number, pitchDelta: number): void {
+    this.playerState.turn(yawDelta, pitchDelta);
   }
 
   /** 本世界的种子。地形完全由它决定，端到端测试用它断言「同一种子同一个世界」。 */
@@ -85,7 +103,12 @@ export class GameCore implements BlockView {
     return this.world.loadedChunks();
   }
 
-  /** 出生点：世界原点那一列最高实心方块的顶面，落在方块中心。 */
+  /**
+   * 出生点：世界原点那一列最高实心方块的顶面，落在方块中心。
+   *
+   * `highestBlockY` 找的是最高的非空气方块。当前除空气之外的方块都是实心的，
+   * 两者等价；issue #6 放树时要让树避开出生点这一列，免得玩家生在树冠上。
+   */
   get spawnPoint(): Vec3 {
     return { x: 0.5, y: this.highestBlockY(0, 0) + 1, z: 0.5 };
   }
@@ -93,5 +116,6 @@ export class GameCore implements BlockView {
   /** 一个 tick 的全部逻辑。 */
   private step(): void {
     this.ticks++;
+    this.playerState.step(this.intent);
   }
 }

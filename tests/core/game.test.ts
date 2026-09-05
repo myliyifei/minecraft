@@ -7,14 +7,17 @@ import {
   DEFAULT_SEED,
   DEFAULT_VIEW_RADIUS,
   SEA_LEVEL,
+  TICK_RATE,
   WORLD_MAX_Y,
   WORLD_MIN_Y,
 } from '../../src/core/constants';
+import { IDLE_INTENT } from '../../src/core/player';
 import {
   DIRT_DEPTH_MAX,
   DIRT_DEPTH_MIN,
   plainsSurfaceHeight,
 } from '../../src/core/terrain';
+import { flatTestTerrain } from '../helpers/flat-terrain';
 
 /** 默认视距下已加载区块覆盖的世界坐标区间。 */
 const LOADED_MIN = -DEFAULT_VIEW_RADIUS * CHUNK_SIZE;
@@ -242,6 +245,61 @@ describe('GameCore 的出生点', () => {
   it('换种子后出生点跟着地形走', () => {
     const core = new GameCore({ seed: 555 });
     expect(core.spawnPoint.y).toBe(plainsSurfaceHeight(555, 0, 0) + 1);
+  });
+});
+
+describe('GameCore 的玩家', () => {
+  /** 固定平地上的核心：移动断言要的是可预测的地面，不是真实地形的起伏。 */
+  function coreOnFlatGround(): GameCore {
+    return new GameCore({ terrain: () => flatTestTerrain });
+  }
+
+  it('新建世界后玩家位于出生点', () => {
+    const core = new GameCore();
+    expect(core.player.position).toEqual(core.spawnPoint);
+    expect(core.player.onGround).toBe(true);
+  });
+
+  it('没有输入时 tick 多少次玩家都站着不动', () => {
+    const core = new GameCore();
+    core.tick(100);
+    expect(core.player.position).toEqual(core.spawnPoint);
+  });
+
+  it('设定移动意图后，tick 让玩家走起来', () => {
+    const core = coreOnFlatGround();
+    const before = core.player.position;
+    core.setMoveIntent({ ...IDLE_INTENT, forward: true });
+    core.tick(TICK_RATE);
+    expect(core.player.position.z).toBeLessThan(before.z);
+    expect(core.player.position.x).toBeCloseTo(before.x, 10);
+  });
+
+  it('意图收回后玩家立刻停下，没有惯性', () => {
+    const core = coreOnFlatGround();
+    core.setMoveIntent({ ...IDLE_INTENT, forward: true });
+    core.tick(TICK_RATE);
+    const stopped = core.player.position;
+    core.setMoveIntent(IDLE_INTENT);
+    core.tick(TICK_RATE);
+    expect(core.player.position).toEqual(stopped);
+  });
+
+  it('转动视角不等 tick，鼠标一动就生效', () => {
+    const core = new GameCore();
+    core.turn(0.5, -0.2);
+    expect(core.player.yaw).toBeCloseTo(0.5, 10);
+    expect(core.player.pitch).toBeCloseTo(-0.2, 10);
+    expect(core.tickCount).toBe(0);
+  });
+
+  it('上一个 tick 的位置留给渲染层插值', () => {
+    const core = coreOnFlatGround();
+    core.setMoveIntent({ ...IDLE_INTENT, forward: true });
+    const spawn = core.player.position;
+    core.tick();
+    expect(core.player.previousPosition).toEqual(spawn);
+    expect(core.player.position).not.toEqual(spawn);
   });
 });
 

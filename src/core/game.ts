@@ -57,7 +57,7 @@ export class GameCore implements BlockView {
     this.intent = intent;
   }
 
-  /** 转动视角（弧度增量）。鼠标一动就生效，不等 tick，否则转头会以 20Hz 一格格跳。 */
+  /** 转动视角（弧度增量）。不等 tick，鼠标一动就生效——见 ADR-0004。 */
   turn(yawDelta: number, pitchDelta: number): void {
     this.playerState.turn(yawDelta, pitchDelta);
   }

@@ -1,6 +1,12 @@
 /** 区块的水平边长（方块数）。区块在竖直方向是完整世界高度的柱体。 */
 export const CHUNK_SIZE = 16;
 
+/**
+ * CHUNK_SIZE 的位移量，满足 `1 << CHUNK_SHIFT === CHUNK_SIZE`。
+ * 世界坐标到区块坐标的换算走位运算而不是除法——这是最热的一条路径。
+ */
+export const CHUNK_SHIFT = 4;
+
 /** 世界最低一层的 y（基岩层）。 */
 export const WORLD_MIN_Y = -64;
 

@@ -2,21 +2,27 @@ import { expect, test } from '@playwright/test';
 import { BlockType } from '../src/core/block';
 import { FLAT_SURFACE_Y } from '../src/core/constants';
 import { DEMO_TREE_COLUMN } from '../src/demo-scene';
+import { STRINGS } from '../src/ui/strings';
 import { countCanvasColors, waitForFirstFrame } from './canvas';
 
+const errors: string[] = [];
+
 test.beforeEach(async ({ page }) => {
-  const errors: string[] = [];
+  errors.length = 0;
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
   });
   await page.goto('/');
   await waitForFirstFrame(page);
+});
+
+test('页面加载过程中没有 JS 错误', () => {
   expect(errors).toEqual([]);
 });
 
 test('页面标题来自简体中文字符串表', async ({ page }) => {
-  await expect(page).toHaveTitle('体素世界');
+  await expect(page).toHaveTitle(STRINGS.gameTitle);
 });
 
 test('画布画出了内容，不是单色', async ({ page }) => {

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DEBUG_BUILD } from '../build-flags';
 import type { GameCore } from '../core/game';
 import { CHUNK_SIZE } from '../core/constants';
 import { ATLAS_PATH } from './atlas';
@@ -35,15 +36,16 @@ export class WorldRenderer {
   private readonly camera: THREE.PerspectiveCamera;
   private readonly material: THREE.Material;
   private readonly core: GameCore;
-  private readonly meshes = new Map<string, THREE.Mesh>();
+  private readonly meshes = new Map<number, THREE.Mesh>();
 
   constructor({ canvas, core, texture }: WorldRendererOptions) {
     this.core = core;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: false,
-      // 让端到端测试能把画布内容读回来判断是否画出了东西。
-      preserveDrawingBuffer: true,
+      // 只在开发与测试构建里保留绘制缓冲，好让端到端测试把画布内容读回来判断
+      // 是否真画出了东西。生产构建不带这个负担。
+      preserveDrawingBuffer: DEBUG_BUILD,
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
@@ -90,7 +92,7 @@ export class WorldRenderer {
       this.meshes.delete(key);
     }
 
-    const data = buildChunkMesh(this.core.world, cx, cz);
+    const data = buildChunkMesh(this.core, cx, cz);
     if (data.indices.length === 0) return;
 
     const mesh = new THREE.Mesh(toGeometry(data), this.material);

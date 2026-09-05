@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
-import { FLAT_SURFACE_Y } from '../../src/core/constants';
+import { FLAT_SURFACE_Y, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { flatTerrain } from '../../src/core/terrain';
 import { World } from '../../src/core/world';
 
@@ -45,6 +45,58 @@ describe('World 的区块加载', () => {
     expect(world.getBlock(-1, FLAT_SURFACE_Y, -1)).toBe(BlockType.Grass);
     expect(world.getBlock(-16, FLAT_SURFACE_Y, -16)).toBe(BlockType.Grass);
     expect(world.getBlock(0, FLAT_SURFACE_Y, 0)).toBe(BlockType.Air);
+  });
+});
+
+describe('World 的写入结果', () => {
+  it('写入已加载区块返回 true', () => {
+    const world = new World(flatTerrain);
+    world.loadChunk(0, 0);
+    expect(world.setBlock(0, FLAT_SURFACE_Y, 0, BlockType.Air)).toBe(true);
+  });
+
+  it('写入未加载区块返回 false', () => {
+    const world = new World(flatTerrain);
+    expect(world.setBlock(0, FLAT_SURFACE_Y, 0, BlockType.Air)).toBe(false);
+  });
+
+  it('世界高度之外的写入返回 false 且不改变世界', () => {
+    const world = new World(flatTerrain);
+    world.loadChunk(0, 0);
+    expect(world.setBlock(0, WORLD_MAX_Y + 1, 0, BlockType.Stone)).toBe(false);
+    expect(world.setBlock(0, WORLD_MIN_Y - 1, 0, BlockType.Stone)).toBe(false);
+    expect(world.getBlock(0, WORLD_MAX_Y + 1, 0)).toBe(BlockType.Air);
+    expect(world.getBlock(0, WORLD_MIN_Y - 1, 0)).toBe(BlockType.Air);
+    // 边界上仍然可写
+    expect(world.setBlock(0, WORLD_MAX_Y, 0, BlockType.Stone)).toBe(true);
+    expect(world.getBlock(0, WORLD_MAX_Y, 0)).toBe(BlockType.Stone);
+  });
+});
+
+describe('区块索引', () => {
+  it('相邻与远处的区块互不串台', () => {
+    const world = new World(flatTerrain);
+    const spots: Array<[number, number]> = [
+      [0, 0],
+      [-1, 0],
+      [0, -1],
+      [1, 1],
+      [1000, -1000],
+      [-33_000, 33_000],
+    ];
+    for (const [cx, cz] of spots) world.loadChunk(cx, cz);
+    expect(world.loadedChunkCount).toBe(spots.length);
+
+    // 每个区块挖掉自己的一格，不应影响别的区块
+    for (const [cx, cz] of spots) {
+      world.setBlock(cx * 16, FLAT_SURFACE_Y, cz * 16, BlockType.Air);
+    }
+    for (const [cx, cz] of spots) {
+      expect(world.getBlock(cx * 16, FLAT_SURFACE_Y, cz * 16)).toBe(BlockType.Air);
+      expect(world.getBlock(cx * 16 + 1, FLAT_SURFACE_Y, cz * 16 + 1)).toBe(
+        BlockType.Grass,
+      );
+    }
   });
 });
 

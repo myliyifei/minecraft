@@ -1,0 +1,37 @@
+{
+  "name": "minecraft",
+  "version": "0.1.0",
+  "description": "浏览器体素生存沙盒游戏",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "gen:atlas": "node tools/gen-atlas.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/myliyifei/minecraft.git"
+  },
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/myliyifei/minecraft/issues"
+  },
+  "homepage": "https://github.com/myliyifei/minecraft#readme",
+  "dependencies": {
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.4.1",
+    "@types/three": "^0.185.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
+  }
+}

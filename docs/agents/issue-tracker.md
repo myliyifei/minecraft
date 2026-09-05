@@ -1,10 +1,7 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
-
-> **Prerequisite (as of setup):** this directory is not yet a git repo and has no remote.
-> Run `git init` and create/attach a GitHub remote (e.g. `gh repo create`) before any `gh issue`
-> command will resolve. Until then, `gh` cannot infer the repo.
+Issues and specs for this repo live as GitHub issues at
+[myliyifei/minecraft](https://github.com/myliyifei/minecraft). Use the `gh` CLI for all operations.
 
 ## Conventions
 

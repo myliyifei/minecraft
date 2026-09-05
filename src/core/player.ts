@@ -276,13 +276,21 @@ function blockedAt(blocks: BlockView, hitbox: Hitbox, axis: Axis, at: number): b
 /**
  * 碰撞箱某一端覆盖到的第一个 / 最后一个方块坐标。
  * 两个函数都把「边界重合」算作不相交——贴着面站着不算卡在方块里。
+ *
+ * 容差是必须的，不是保险：钳位落点是算出来的，`(x + 0.3) − (x − 0.3)` 并不总等于
+ * 0.6，于是贴住墙面的碰撞箱可能算出比墙面多 1e-16 的坐标（实测约 3% 的位置会这样）。
+ * 少了这点容差，那一格就被判成嵌进了墙里，而嵌进方块之后各个方向的扫掠都返回零位移
+ * ——玩家永久卡死，走不动也跳不起来。容差远大于那点舍入误差，又远小于一 tick 的位移
+ * 与贴地探测深度，所以只吃掉误差，不改变任何看得见的行为。
  */
+const TOUCH_EPSILON = 1e-9;
+
 function firstBlock(min: number): number {
-  return Math.floor(min);
+  return Math.floor(min + TOUCH_EPSILON);
 }
 
 function lastBlock(max: number): number {
-  return Math.ceil(max) - 1;
+  return Math.ceil(max - TOUCH_EPSILON) - 1;
 }
 
 function clamp(value: number, min: number, max: number): number {

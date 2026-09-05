@@ -321,3 +321,85 @@ describe('玩家的视角', () => {
     expect(0.5 - player.position.z).toBeCloseTo(WALK_SPEED, 6);
   });
 });
+
+describe('玩家不会被卡死', () => {
+  /** 固定的伪随机序列，跑多少次结果都一样。 */
+  function makeRandom(seed: number): () => number {
+    let state = seed | 0;
+    return () => {
+      state = (Math.imul(state, 1103515245) + 12345) | 0;
+      return ((state >>> 8) & 0xff_ffff) / 0x100_0000;
+    };
+  }
+
+  /** 一动不动多少 tick 才算可疑。 */
+  const MOTIONLESS_TICKS = 60;
+
+  /** 走出这么远才算「还能走」。0.6 宽的玩家在一格缝里能晃 0.2 格，那不算。 */
+  const ESCAPE_DISTANCE = 1.5;
+
+  /** 从某处朝某个方向按住 W + 空格若干 tick，返回水平净位移。 */
+  function tryEscape(world: World, from: Player, yaw: number): number {
+    const at = from.position;
+    const probe = new Player(world, at);
+    probe.turn(yaw, 0);
+    for (let i = 0; i < 40; i++) probe.step({ ...FORWARD_INTENT, jump: true });
+    const after = probe.position;
+    return Math.hypot(after.x - at.x, after.z - at.z);
+  }
+
+  /** 用户的原话：任何方向都动不了，空格也跳不起来。 */
+  function isStuck(world: World, player: Player): boolean {
+    for (let i = 0; i < 8; i++) {
+      if (tryEscape(world, player, (i / 8) * Math.PI * 2) > ESCAPE_DISTANCE) return false;
+    }
+    return true;
+  }
+
+  /**
+   * 摆一片一格高的障碍——台阶、单块方块、矮墙。全都跳得过去，所以走这片地形
+   * 永远不该走不动。
+   */
+  function worldWithLowObstacles(): World {
+    const world = flatTestWorld();
+    const random = makeRandom(4321);
+    for (let i = 0; i < 60; i++) {
+      const x = Math.floor(random() * 24) - 12;
+      const z = Math.floor(random() * 24) - 12;
+      world.setBlock(x, FLAT_STAND_Y, z, BlockType.Stone);
+    }
+    return world;
+  }
+
+  it('在一格高的障碍之间乱走，不会走到动不了', () => {
+    // 撞墙或顶到天花板时，钳位算出的落点带着浮点误差，可能落到阻挡面的另一侧。
+    // 一旦碰撞箱被判成嵌进方块，各个方向的扫掠都返回零位移——玩家永久卡死。
+    const world = worldWithLowObstacles();
+    const random = makeRandom(20_260_906);
+    const stuck: string[] = [];
+
+    for (let run = 0; run < 200 && stuck.length === 0; run++) {
+      const player = new Player(world, { x: 0.5, y: FLAT_STAND_Y, z: 0.5 });
+      player.turn(random() * Math.PI * 2, 0);
+      let motionless = 0;
+      let last = player.position;
+
+      for (let t = 0; t < 400; t++) {
+        if (random() < 0.05) player.turn((random() - 0.5) * Math.PI, 0);
+        player.step({ ...FORWARD_INTENT, jump: random() < 0.3 });
+        const now = player.position;
+        const moved =
+          Math.abs(now.x - last.x) + Math.abs(now.y - last.y) + Math.abs(now.z - last.z);
+        motionless = moved < 1e-12 ? motionless + 1 : 0;
+        last = now;
+
+        if (motionless >= MOTIONLESS_TICKS && isStuck(world, player)) {
+          stuck.push(`第 ${run} 次游走的第 ${t} tick：(${now.x}, ${now.y}, ${now.z})`);
+          break;
+        }
+      }
+    }
+    expect(stuck).toEqual([]);
+  });
+
+});

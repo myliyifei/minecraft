@@ -2,6 +2,7 @@ import './ui/style.css';
 import { GameCore } from './core/game';
 import { installDebugHandle } from './debug';
 import { buildDemoScene } from './demo-scene';
+import { installPlayerControls } from './input/controls';
 import { startGameLoop } from './loop';
 import { loadAtlasTexture, WorldRenderer } from './render/renderer';
 
@@ -26,8 +27,9 @@ async function main(): Promise<void> {
 
   // 首帧画完才撤掉加载遮罩，页面不会闪一下空画布。
   loading.remove();
+  installPlayerControls(canvas, core);
   installDebugHandle({ core, renderer });
-  startGameLoop(core, () => renderer.render());
+  startGameLoop(core, (alpha) => renderer.render(alpha));
 }
 
 void main();

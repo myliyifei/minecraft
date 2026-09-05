@@ -16,17 +16,22 @@ export type BlockType = (typeof BlockType)[keyof typeof BlockType];
 export interface BlockDef {
   /** 是否完全遮挡视线。false 的方块（空气、树叶）不会剔除邻居的面。 */
   readonly opaque: boolean;
+  /**
+   * 是否阻挡玩家与生物移动。
+   * 与 `opaque` 是两件事：树叶不遮挡视线，但站在树冠里会被它挡住。
+   */
+  readonly solid: boolean;
 }
 
 /** 方块属性表。硬度、掉落表、经验表是后续切片往这里加的数据列。 */
 export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
-  [BlockType.Air]: { opaque: false },
-  [BlockType.Grass]: { opaque: true },
-  [BlockType.Dirt]: { opaque: true },
-  [BlockType.Stone]: { opaque: true },
-  [BlockType.Bedrock]: { opaque: true },
-  [BlockType.OakLog]: { opaque: true },
-  [BlockType.OakLeaves]: { opaque: false },
+  [BlockType.Air]: { opaque: false, solid: false },
+  [BlockType.Grass]: { opaque: true, solid: true },
+  [BlockType.Dirt]: { opaque: true, solid: true },
+  [BlockType.Stone]: { opaque: true, solid: true },
+  [BlockType.Bedrock]: { opaque: true, solid: true },
+  [BlockType.OakLog]: { opaque: true, solid: true },
+  [BlockType.OakLeaves]: { opaque: false, solid: true },
 };
 
 export function isAir(block: BlockType): boolean {
@@ -36,6 +41,11 @@ export function isAir(block: BlockType): boolean {
 /** 完全遮挡视线的方块会让邻居对应的面被剔除。 */
 export function isOpaque(block: BlockType): boolean {
   return BLOCKS[block].opaque;
+}
+
+/** 阻挡移动的方块参与玩家的 AABB 碰撞。 */
+export function isSolid(block: BlockType): boolean {
+  return BLOCKS[block].solid;
 }
 
 /**

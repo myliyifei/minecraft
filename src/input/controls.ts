@@ -1,6 +1,7 @@
 import type { GameCore } from '../core/game';
 import { IDLE_INTENT, type MoveIntent } from '../core/player';
 import { ACTION_BY_CODE, MOVE_ACTIONS, type MoveAction } from './keybindings';
+import { isPointerSpike } from './pointer-spike';
 
 /**
  * 鼠标灵敏度：鼠标每移动一像素，视角转多少弧度。
@@ -34,6 +35,10 @@ export function installPlayerControls(
   // ——那不是玩家转头。不丢掉它，一进第一人称视角就会被甩向一边。
   let dropWarpMove = false;
 
+  // 上一发 mousemove 的时刻，用来算这一发的隐含指针速度。丢掉的那些也要记，
+  // 否则下一发会拿一个过时的时刻算出偏小的速度。
+  let lastMoveAt = 0;
+
   const onClick = (): void => {
     // 指针锁定只能由用户手势触发，所以挂在 click 上。
     if (locked()) return;
@@ -51,10 +56,14 @@ export function installPlayerControls(
 
   const onMouseMove = (event: MouseEvent): void => {
     if (!locked()) return;
+    const elapsedMs = event.timeStamp - lastMoveAt;
+    lastMoveAt = event.timeStamp;
     if (dropWarpMove) {
       dropWarpMove = false;
       return;
     }
+    // 浏览器偶尔会吐出手做不到的巨型增量，采了视角就会跳到别处——见 pointer-spike.ts。
+    if (isPointerSpike(Math.hypot(event.movementX, event.movementY), elapsedMs)) return;
     // 两个方向都取负：偏航 0 朝 −Z（右手边是 +X，往右转是减），俯仰正为抬头。
     target.turn(-event.movementX * MOUSE_SENSITIVITY, -event.movementY * MOUSE_SENSITIVITY);
   };

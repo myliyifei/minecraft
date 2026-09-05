@@ -254,6 +254,20 @@ test('鼠标移动转动视角', async ({ page }) => {
   expect(look.after.pitch).toBeLessThan(look.before.pitch);
 });
 
+test('手做不到的巨型鼠标增量不转动视角', async ({ page }) => {
+  await grabPointer(page);
+  const look = await page.evaluate(() => {
+    const core = window.__VOXEL__!.core;
+    // 先来一发正常增量，把「上一发的时刻」对到现在，下一发的间隔才是真的很短。
+    document.dispatchEvent(new MouseEvent('mousemove', { movementX: 2 }));
+    const before = core.player.yaw;
+    // 566px 是实测采到的假增量幅度，紧跟着上一发投递，隐含速度远超人手。
+    document.dispatchEvent(new MouseEvent('mousemove', { movementX: 566 }));
+    return { before, after: core.player.yaw };
+  });
+  expect(look.after).toBe(look.before);
+});
+
 test('相机跟在玩家眼睛上，并在两个 tick 之间插值', async ({ page }) => {
   // 这条不用锁鼠标：主角是渲染层，移动意图直接给核心。
   const camera = await page.evaluate((ticks) => {

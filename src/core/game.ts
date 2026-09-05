@@ -1,46 +1,47 @@
 import { BlockType, type BlockView } from './block';
+import type { ChunkView } from './chunk';
 import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS } from './constants';
 import { IDLE_INTENT, Player, type MoveIntent, type PlayerView } from './player';
-import { plainsTerrain, type TerrainFactory } from './terrain';
+import { streamChunks } from './streaming';
+import { plainsTerrain } from './terrain';
 import type { Vec3 } from './vec3';
-import { World, type ChunkCoord } from './world';
+import { chunkOf, World, type ChunkCoord, type ChunkSourceFactory } from './world';
 
 export interface GameCoreOptions {
   /** 世界种子。同一种子每次进入得到同样的地形。 */
   readonly seed?: number;
-  /** 初始加载半径（区块数）。 */
+  /** 视距（区块数）：这个半径内的区块保持加载，见 CONTEXT.md 的「视距」。 */
   readonly viewRadius?: number;
   /**
-   * 换掉地形算法，测试里可以塞一个特定形状的世界。
-   * 拿到的是本世界的种子，因此替换实现同样受种子驱动。
+   * 换掉区块的来源，测试里可以塞一个特定形状的世界，浏览器里塞一个由 Worker 供货的
+   * 来源。拿到的是本世界的种子，因此替换实现同样受种子驱动。
    */
-  readonly terrain?: TerrainFactory;
+  readonly chunkSource?: ChunkSourceFactory;
 }
 
 /**
  * 无头游戏核心：纯 TypeScript，不依赖 Three.js 与 DOM，可在 Node 中直接实例化。
  * 这是主测试接缝——渲染与输入适配器只通过这里的指令和查询与游戏交互。
  *
- * 本切片有「推进时间」「查询/写入方块」「玩家移动」三件事。挖掘、掉落物等系统
- * 由后续切片挂进 step()。
+ * 本切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」四件事。
+ * 挖掘、掉落物等系统由后续切片挂进 step()。
  */
 export class GameCore implements BlockView {
   private readonly world: World;
   private readonly worldSeed: number;
+  private readonly radius: number;
   private readonly playerState: Player;
   private ticks = 0;
   private intent: MoveIntent = IDLE_INTENT;
 
   constructor(options: GameCoreOptions = {}) {
     this.worldSeed = options.seed ?? DEFAULT_SEED;
-    this.world = new World((options.terrain ?? plainsTerrain)(this.worldSeed));
-    const radius = options.viewRadius ?? DEFAULT_VIEW_RADIUS;
-    for (let cx = -radius; cx <= radius; cx++) {
-      for (let cz = -radius; cz <= radius; cz++) {
-        this.world.loadChunk(cx, cz);
-      }
-    }
-    // 出生点要先有地形才算得出来，所以玩家在区块加载之后才造。
+    this.radius = options.viewRadius ?? DEFAULT_VIEW_RADIUS;
+    this.world = new World((options.chunkSource ?? plainsTerrain)(this.worldSeed));
+    // 出生点要先有地形才算得出来，所以先加载原点周围，玩家最后造。
+    // 来源当场给不出区块时（浏览器里 Worker 还在生成）这里只加载得到已经就绪的那些，
+    // 其余由 tick 补上——所以浏览器那一侧要先把出生点那一带备好，见 src/main.ts。
+    streamChunks(this.world, ORIGIN_CHUNK, this.radius);
     this.playerState = new Player(this.world, this.spawnPoint);
   }
 
@@ -106,6 +107,26 @@ export class GameCore implements BlockView {
     return this.world.loadedChunks();
   }
 
+  isChunkLoaded(cx: number, cz: number): boolean {
+    return this.world.isChunkLoaded(cx, cz);
+  }
+
+  /** 已加载的区块，未加载则 undefined。渲染层建网格时直读它的方块数据。 */
+  chunkAt(cx: number, cz: number): ChunkView | undefined {
+    return this.world.chunkAt(cx, cz);
+  }
+
+  /** 视距（区块数）。渲染层按它决定网格的范围。 */
+  get viewRadius(): number {
+    return this.radius;
+  }
+
+  /** 玩家所在的区块。加载与卸载都以它为中心。 */
+  get playerChunk(): ChunkCoord {
+    const { x, z } = this.playerState.position;
+    return { cx: chunkOf(Math.floor(x)), cz: chunkOf(Math.floor(z)) };
+  }
+
   /**
    * 出生点：世界原点那一列最高实心方块的顶面，落在方块中心。
    *
@@ -119,6 +140,12 @@ export class GameCore implements BlockView {
   /** 一个 tick 的全部逻辑。 */
   private step(): void {
     this.ticks++;
+    // 先让区块跟上玩家再算物理：玩家脚下的地形必须已经在世界里，否则他会踩进
+    // 「未加载即空气」的虚空里往下掉。
+    streamChunks(this.world, this.playerChunk, this.radius);
     this.playerState.step(this.intent);
   }
 }
+
+/** 世界原点所在的区块。出生点在这一列上。 */
+const ORIGIN_CHUNK: ChunkCoord = { cx: 0, cz: 0 };

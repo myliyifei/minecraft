@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GameCore } from '../../src/core/game';
+import { GameCore, type GameCoreOptions } from '../../src/core/game';
 import { BlockType } from '../../src/core/block';
 import { Chunk } from '../../src/core/chunk';
 import {
@@ -8,6 +8,7 @@ import {
   DEFAULT_VIEW_RADIUS,
   SEA_LEVEL,
   TICK_RATE,
+  UNLOAD_MARGIN,
   WORLD_MAX_Y,
   WORLD_MIN_Y,
 } from '../../src/core/constants';
@@ -19,9 +20,22 @@ import {
 } from '../../src/core/terrain';
 import { flatTestTerrain } from '../helpers/flat-terrain';
 
-/** 默认视距下已加载区块覆盖的世界坐标区间。 */
-const LOADED_MIN = -DEFAULT_VIEW_RADIUS * CHUNK_SIZE;
-const LOADED_MAX = (DEFAULT_VIEW_RADIUS + 1) * CHUNK_SIZE - 1;
+/**
+ * 采样用的视距（区块数）。
+ * 地形形态与方块查询的断言只需要原点周围一小片；按默认视距 8 建一个核心要生成
+ * 289 个区块（实测 95ms），这一节几十个核心加起来就是好几秒。视距本身的断言在
+ * 「初始区块加载」那一节里，用的是真正的默认值。
+ */
+const SAMPLE_RADIUS = 2;
+
+/** 采样用的核心：视距收小，其余按默认。 */
+function sampleCore(options: GameCoreOptions = {}): GameCore {
+  return new GameCore({ viewRadius: SAMPLE_RADIUS, ...options });
+}
+
+/** 采样核心的已加载区块覆盖的世界坐标区间。 */
+const LOADED_MIN = -SAMPLE_RADIUS * CHUNK_SIZE;
+const LOADED_MAX = (SAMPLE_RADIUS + 1) * CHUNK_SIZE - 1;
 
 /** 默认种子下某一列的地表高度。 */
 function surfaceAt(x: number, z: number): number {
@@ -30,11 +44,11 @@ function surfaceAt(x: number, z: number): number {
 
 describe('GameCore 的 tick 推进', () => {
   it('新建的核心 tick 计数为 0', () => {
-    expect(new GameCore().tickCount).toBe(0);
+    expect(sampleCore().tickCount).toBe(0);
   });
 
   it('tick(n) 推进 n 步', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     core.tick(5);
     expect(core.tickCount).toBe(5);
     core.tick(3);
@@ -42,13 +56,13 @@ describe('GameCore 的 tick 推进', () => {
   });
 
   it('tick() 不带参数推进 1 步', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     core.tick();
     expect(core.tickCount).toBe(1);
   });
 
   it('tick(0) 与 tick(负数) 不推进', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     core.tick(0);
     core.tick(-3);
     expect(core.tickCount).toBe(0);
@@ -57,16 +71,16 @@ describe('GameCore 的 tick 推进', () => {
 
 describe('GameCore 的种子', () => {
   it('不指定种子时用默认种子', () => {
-    expect(new GameCore().seed).toBe(DEFAULT_SEED);
+    expect(sampleCore().seed).toBe(DEFAULT_SEED);
   });
 
   it('记住构造时传入的种子', () => {
-    expect(new GameCore({ seed: 123 }).seed).toBe(123);
+    expect(sampleCore({ seed: 123 }).seed).toBe(123);
   });
 
   it('同一种子两次进入世界，同一坐标得到相同方块', () => {
-    const a = new GameCore({ seed: 4321 });
-    const b = new GameCore({ seed: 4321 });
+    const a = sampleCore({ seed: 4321 });
+    const b = sampleCore({ seed: 4321 });
     const differing: string[] = [];
     for (let x = LOADED_MIN; x <= LOADED_MAX; x += 5) {
       for (let z = LOADED_MIN; z <= LOADED_MAX; z += 5) {
@@ -79,8 +93,8 @@ describe('GameCore 的种子', () => {
   });
 
   it('不同种子得到不同的地形', () => {
-    const a = new GameCore({ seed: 1 });
-    const b = new GameCore({ seed: 2 });
+    const a = sampleCore({ seed: 1 });
+    const b = sampleCore({ seed: 2 });
     let differing = 0;
     for (let x = LOADED_MIN; x <= LOADED_MAX; x++) {
       if (a.highestBlockY(x, 0) !== b.highestBlockY(x, 0)) differing++;
@@ -93,9 +107,9 @@ describe('GameCore 的种子', () => {
     const core = new GameCore({
       seed: 99,
       viewRadius: 0,
-      terrain: (seed) => {
+      chunkSource: (seed: number) => {
         seeds.push(seed);
-        return (cx, cz) => new Chunk(cx, cz);
+        return (cx: number, cz: number) => new Chunk(cx, cz);
       },
     });
     expect(seeds).toEqual([99]);
@@ -114,7 +128,7 @@ describe('GameCore 在 Node 中的方块查询', () => {
   ];
 
   it('地表以上是空气', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     for (const [x, z] of columns) {
       const surface = surfaceAt(x, z);
       expect(core.getBlock(x, surface + 1, z)).toBe(BlockType.Air);
@@ -124,14 +138,14 @@ describe('GameCore 在 Node 中的方块查询', () => {
   });
 
   it('地表那一层是草方块', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     for (const [x, z] of columns) {
       expect(core.getBlock(x, surfaceAt(x, z), z)).toBe(BlockType.Grass);
     }
   });
 
   it('草方块下方是 3–4 层泥土，再下方是石头', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     for (const [x, z] of columns) {
       const surface = surfaceAt(x, z);
       let dirt = 0;
@@ -145,7 +159,7 @@ describe('GameCore 在 Node 中的方块查询', () => {
   });
 
   it('世界底层 y = −64 是基岩', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     for (let x = 0; x < 16; x++) {
       for (let z = 0; z < 16; z++) {
         expect(core.getBlock(x, WORLD_MIN_Y, z)).toBe(BlockType.Bedrock);
@@ -154,14 +168,14 @@ describe('GameCore 在 Node 中的方块查询', () => {
   });
 
   it('世界高度范围之外一律是空气', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     expect(core.getBlock(0, WORLD_MIN_Y - 1, 0)).toBe(BlockType.Air);
     expect(core.getBlock(0, WORLD_MAX_Y + 1, 0)).toBe(BlockType.Air);
     expect(core.getBlock(0, 10_000, 0)).toBe(BlockType.Air);
   });
 
   it('坐标按 floor 取整，小数落在同一格', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     const surface = surfaceAt(0, 0);
     expect(core.getBlock(0.9, surface + 0.5, -0.1)).toBe(BlockType.Grass);
     expect(core.getBlock(0.9, surface, 0.9)).toBe(BlockType.Grass);
@@ -170,7 +184,7 @@ describe('GameCore 在 Node 中的方块查询', () => {
 
 describe('GameCore 的地形形态', () => {
   it('已加载范围内每一列的地表都高于海平面', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     const tooLow: string[] = [];
     for (let x = LOADED_MIN; x <= LOADED_MAX; x++) {
       for (let z = LOADED_MIN; z <= LOADED_MAX; z++) {
@@ -181,14 +195,14 @@ describe('GameCore 的地形形态', () => {
   });
 
   it('地形有起伏，不是一片同高的平地', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     const heights = new Set<number>();
     for (let x = LOADED_MIN; x <= LOADED_MAX; x++) heights.add(core.highestBlockY(x, 0));
     expect(heights.size).toBeGreaterThan(1);
   });
 
   it('highestBlockY 就是那一列草方块的高度', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     for (const [x, z] of [
       [0, 0],
       [-9, 21],
@@ -206,13 +220,13 @@ describe('GameCore 的地形形态', () => {
 
 describe('GameCore 的方块写入', () => {
   it('写入后能读回同一种方块', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     core.setBlock(3, surfaceAt(3, 4) + 1, 4, BlockType.OakLog);
     expect(core.getBlock(3, surfaceAt(3, 4) + 1, 4)).toBe(BlockType.OakLog);
   });
 
   it('可以把方块挖成空气', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     const y = surfaceAt(3, 4);
     core.setBlock(3, y, 4, BlockType.Air);
     expect(core.getBlock(3, y, 4)).toBe(BlockType.Air);
@@ -228,7 +242,7 @@ describe('GameCore 的方块写入', () => {
 
 describe('GameCore 的出生点', () => {
   it('出生点在地表之上，脚下是实心方块、脚位与头位是空气', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     const spawn = core.spawnPoint;
     expect(spawn.y).toBe(surfaceAt(0, 0) + 1);
     expect(core.getBlock(spawn.x, spawn.y - 1, spawn.z)).toBe(BlockType.Grass);
@@ -237,13 +251,13 @@ describe('GameCore 的出生点', () => {
   });
 
   it('出生点落在方块中心', () => {
-    const spawn = new GameCore().spawnPoint;
+    const spawn = sampleCore().spawnPoint;
     expect(spawn.x).toBe(0.5);
     expect(spawn.z).toBe(0.5);
   });
 
   it('换种子后出生点跟着地形走', () => {
-    const core = new GameCore({ seed: 555 });
+    const core = sampleCore({ seed: 555 });
     expect(core.spawnPoint.y).toBe(plainsSurfaceHeight(555, 0, 0) + 1);
   });
 });
@@ -251,17 +265,17 @@ describe('GameCore 的出生点', () => {
 describe('GameCore 的玩家', () => {
   /** 固定平地上的核心：移动断言要的是可预测的地面，不是真实地形的起伏。 */
   function coreOnFlatGround(): GameCore {
-    return new GameCore({ terrain: () => flatTestTerrain });
+    return sampleCore({ chunkSource: () => flatTestTerrain });
   }
 
   it('新建世界后玩家位于出生点', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     expect(core.player.position).toEqual(core.spawnPoint);
     expect(core.player.onGround).toBe(true);
   });
 
   it('没有输入时 tick 多少次玩家都站着不动', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     core.tick(100);
     expect(core.player.position).toEqual(core.spawnPoint);
   });
@@ -286,7 +300,7 @@ describe('GameCore 的玩家', () => {
   });
 
   it('转动视角不等 tick，鼠标一动就生效', () => {
-    const core = new GameCore();
+    const core = sampleCore();
     core.turn(0.5, -0.2);
     expect(core.player.yaw).toBeCloseTo(0.5, 10);
     expect(core.player.pitch).toBeCloseTo(-0.2, 10);
@@ -314,6 +328,12 @@ describe('GameCore 的初始区块加载', () => {
     expect(new GameCore({ viewRadius: 2 }).loadedChunkCount).toBe(25);
   });
 
+  it('不指定视距时用默认视距', () => {
+    const core = new GameCore();
+    expect(core.viewRadius).toBe(DEFAULT_VIEW_RADIUS);
+    expect(core.loadedChunkCount).toBe((2 * DEFAULT_VIEW_RADIUS + 1) ** 2);
+  });
+
   it('已加载区块坐标可枚举，且围绕原点区块', () => {
     const core = new GameCore({ viewRadius: 1 });
     const keys = core.loadedChunks().map(({ cx, cz }) => `${cx},${cz}`);
@@ -321,5 +341,79 @@ describe('GameCore 的初始区块加载', () => {
     expect(keys).toContain('-1,-1');
     expect(keys).toContain('1,1');
     expect(keys).toHaveLength(9);
+  });
+
+  it('来源还没准备好区块时，构造不报错，tick 之后补上', () => {
+    let ready = false;
+    const core = new GameCore({
+      viewRadius: 1,
+      chunkSource: () => (cx, cz) => (ready ? flatTestTerrain(cx, cz) : undefined),
+    });
+    expect(core.loadedChunkCount).toBe(0);
+
+    ready = true;
+    core.tick();
+    expect(core.loadedChunkCount).toBe(9);
+  });
+});
+
+describe('GameCore 的区块随玩家流式加载', () => {
+  /** 一直往前走：返回走到哪儿了。 */
+  function walkForward(core: GameCore, ticks: number): void {
+    core.setMoveIntent({ ...IDLE_INTENT, forward: true });
+    core.tick(ticks);
+  }
+
+  it('玩家所在区块由脚下的位置决定，负坐标也算对', () => {
+    const core = sampleCore({ chunkSource: () => flatTestTerrain });
+    expect(core.playerChunk).toEqual({ cx: 0, cz: 0 });
+  });
+
+  it('走出初始范围时前方的区块跟着生成，玩家不会掉进虚空', () => {
+    const core = sampleCore({ chunkSource: () => flatTestTerrain });
+    const standing = core.player.position.y;
+
+    // 视距 2 时初始加载范围只到 z = −32；朝 −Z 走 40 秒足以走出去好几个区块
+    walkForward(core, 40 * TICK_RATE);
+
+    expect(core.player.position.z).toBeLessThan(-CHUNK_SIZE * (SAMPLE_RADIUS + 1));
+    expect(core.player.position.y).toBe(standing);
+    expect(core.player.onGround).toBe(true);
+  });
+
+  it('走远之后加载范围跟着玩家挪，身后的区块被卸载', () => {
+    const core = sampleCore({ chunkSource: () => flatTestTerrain });
+    expect(core.isChunkLoaded(0, 0)).toBe(true);
+
+    walkForward(core, 40 * TICK_RATE);
+
+    const { cx, cz } = core.playerChunk;
+    expect(core.isChunkLoaded(cx, cz)).toBe(true);
+    expect(core.isChunkLoaded(cx, cz - SAMPLE_RADIUS)).toBe(true);
+    expect(core.isChunkLoaded(0, 0)).toBe(false);
+    // 视距内的一定在，卸载线之外的一定不在，之间那一圈滞后的可能还在
+    expect(core.loadedChunkCount).toBeGreaterThanOrEqual((2 * SAMPLE_RADIUS + 1) ** 2);
+    expect(core.loadedChunkCount).toBeLessThanOrEqual(
+      (2 * (SAMPLE_RADIUS + UNLOAD_MARGIN) + 1) ** 2,
+    );
+  });
+
+  it('真实地形上一路走过去都踩在地表上，不会走进未加载的空气里', () => {
+    const core = sampleCore();
+    const falls: string[] = [];
+
+    // 边走边跳：真实地形上相邻两列可能差一格，光走会被这一格挡住（没有自动上台阶）。
+    core.setMoveIntent({ ...IDLE_INTENT, forward: true, jump: true });
+    for (let i = 0; i < 60 * TICK_RATE; i++) {
+      core.tick();
+      const { x, y, z } = core.player.position;
+      // 脚底始终在自己这一列的地表之上——低于它就说明踩进了没加载的区块
+      const surface = plainsSurfaceHeight(DEFAULT_SEED, Math.floor(x), Math.floor(z));
+      if (y < surface + 1) falls.push(`第 ${i} tick：y=${y}，地表=${surface}`);
+    }
+
+    expect(falls).toEqual([]);
+    // 一分钟走出去二百多格，跨过十几个区块边界
+    expect(core.player.position.z).toBeLessThan(-200);
   });
 });

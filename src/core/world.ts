@@ -1,7 +1,6 @@
 import { BlockType, type BlockView } from './block';
 import { Chunk } from './chunk';
 import { CHUNK_SHIFT, CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from './constants';
-import type { TerrainGenerator } from './terrain';
 
 export interface ChunkCoord {
   readonly cx: number;
@@ -9,17 +8,34 @@ export interface ChunkCoord {
 }
 
 /**
+ * 区块的来源。
+ *
+ * 返回 `undefined` 表示「这个区块还没准备好」，核心不当作错误，下一个 tick 再问一次。
+ * 浏览器里区块由 Web Worker 生成，主线程问的时候往往还没生成好；测试与 Node 里
+ * 同一个地形函数当场就能给出区块（`TerrainGenerator` 因此天然是一种区块来源）。
+ * 无论哪一种，同一个种子与区块坐标给出的内容都必须一样——见 ADR-0003。
+ */
+export type ChunkSource = (cx: number, cz: number) => Chunk | undefined;
+
+/**
+ * 由种子造出区块来源。
+ * 核心只认这个类型，因此换地形算法（测试用的假地形、将来的多群系地形）或者换生成的
+ * 去处（Worker）都不必改动核心的接线。
+ */
+export type ChunkSourceFactory = (seed: number) => ChunkSource;
+
+/**
  * 已加载区块的集合，按世界坐标读写方块。
  *
  * 未加载的区块视为边界：读到空气，写入被丢弃。这与连锁挖掘「未加载区块视为边界」
- * 的规则一致，也让区块流式加载（issue #5）不必给读写路径加特例。
+ * 的规则一致，也让区块流式加载不必给读写路径加特例。
  */
 export class World implements BlockView {
   private readonly chunks = new Map<number, Chunk>();
-  private readonly generate: TerrainGenerator;
+  private readonly source: ChunkSource;
 
-  constructor(generate: TerrainGenerator) {
-    this.generate = generate;
+  constructor(source: ChunkSource) {
+    this.source = source;
   }
 
   get loadedChunkCount(): number {
@@ -30,16 +46,36 @@ export class World implements BlockView {
     return [...this.chunks.values()].map(({ cx, cz }) => ({ cx, cz }));
   }
 
+  /**
+   * 遍历已加载的区块。
+   * 流式加载每 tick 都要走一遍全部已加载区块，用它就不必每次建一个中间数组。
+   * 遍历途中卸载区块是安全的。
+   */
+  forEachChunk(visit: (chunk: Chunk) => void): void {
+    for (const chunk of this.chunks.values()) visit(chunk);
+  }
+
   isChunkLoaded(cx: number, cz: number): boolean {
     return this.chunks.has(chunkKey(cx, cz));
   }
 
-  /** 加载区块；已加载则原样返回，不重新生成，玩家的修改因此不会被覆盖。 */
-  loadChunk(cx: number, cz: number): Chunk {
+  /** 已加载的区块，未加载则 undefined。网格生成要直读区块数据。 */
+  chunkAt(cx: number, cz: number): Chunk | undefined {
+    return this.chunks.get(chunkKey(cx, cz));
+  }
+
+  /**
+   * 加载区块。
+   *
+   * 已加载则原样返回，不向来源重新要一份，玩家的修改因此不会被覆盖。
+   * 来源说「还没准备好」时返回 undefined，世界保持不变。
+   */
+  loadChunk(cx: number, cz: number): Chunk | undefined {
     const key = chunkKey(cx, cz);
     const loaded = this.chunks.get(key);
     if (loaded) return loaded;
-    const chunk = this.generate(cx, cz);
+    const chunk = this.source(cx, cz);
+    if (!chunk) return undefined;
     this.chunks.set(key, chunk);
     return chunk;
   }

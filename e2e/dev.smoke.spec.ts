@@ -18,8 +18,46 @@ import { countCanvasColors, waitForFirstFrame } from './canvas';
 const LOADED_MIN = -DEFAULT_VIEW_RADIUS * CHUNK_SIZE;
 const LOADED_MAX = (DEFAULT_VIEW_RADIUS + 1) * CHUNK_SIZE - 1;
 
+/** 视距铺满时的区块数。 */
+const CHUNKS_IN_VIEW = (2 * DEFAULT_VIEW_RADIUS + 1) ** 2;
+
 /** 采样时 z 的步长：抽十来行就够判断起伏与确定性，不必读满六千多列。 */
 const PROFILE_Z_STEP = 8;
+
+/**
+ * 等视距内的区块全部到位。
+ *
+ * 页面打开时只等好了出生点那一小片（见 src/main.ts 的 INITIAL_LOAD_RADIUS），
+ * 其余由 Worker 陆续送来。要对整片地形下断言就得先等它长齐，否则读到的是
+ * 「未加载即空气」。
+ */
+async function waitForFullViewDistance(page: Page): Promise<void> {
+  await expect
+    .poll(() => page.evaluate(() => window.__VOXEL__!.core.loadedChunkCount), {
+      timeout: 20_000,
+    })
+    .toBeGreaterThanOrEqual(CHUNKS_IN_VIEW);
+}
+
+/**
+ * 一直往前走 n 个 tick，中途把主线程让出去，好让 Worker 送回来的区块能被收下。
+ *
+ * 分批 tick 而不是一次 `core.tick(n)`：区块是异步回填的，一整段跑在同一个任务里
+ * 就一个区块也等不到，玩家会走进还没生成的地方。边走边跳是因为真实地形上相邻两列
+ * 可能差一格，光走会被那一格挡住。
+ */
+async function walkForwardTicks(page: Page, ticks: number): Promise<void> {
+  await page.evaluate(async (total) => {
+    const core = window.__VOXEL__!.core;
+    const batch = 10;
+    core.setMoveIntent({ forward: true, back: false, left: false, right: false, jump: true });
+    for (let done = 0; done < total; done += batch) {
+      core.tick(batch);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    core.setMoveIntent({ forward: false, back: false, left: false, right: false, jump: false });
+  }, ticks);
+}
 
 /** 读一片地表高度。地形起伏与确定性都靠它断言。 */
 async function readSurfaceProfile(page: Page): Promise<number[]> {
@@ -147,6 +185,7 @@ test('页面打开后是由默认种子生成的起伏平原', async ({ page }) 
   const seed = await page.evaluate(() => window.__VOXEL__!.core.seed);
   expect(seed).toBe(DEFAULT_SEED);
 
+  await waitForFullViewDistance(page);
   const heights = await readSurfaceProfile(page);
   // 出现多种高度才算「起伏」，而不是一片硬编码平地
   expect(new Set(heights).size).toBeGreaterThan(1);
@@ -155,10 +194,75 @@ test('页面打开后是由默认种子生成的起伏平原', async ({ page }) 
 });
 
 test('同一种子每次进入地形相同', async ({ page }) => {
+  await waitForFullViewDistance(page);
   const before = await readSurfaceProfile(page);
   await page.reload();
   await waitForFirstFrame(page);
+  await waitForFullViewDistance(page);
   expect(await readSurfaceProfile(page)).toEqual(before);
+});
+
+test('地形生成在 Worker 里进行，视距内的区块陆续送到', async ({ page }) => {
+  // 首帧只等了出生点那一小片，此时视距还没铺满
+  const atFirstFrame = await page.evaluate(() => window.__VOXEL__!.core.loadedChunkCount);
+  expect(atFirstFrame).toBeLessThan(CHUNKS_IN_VIEW);
+
+  await waitForFullViewDistance(page);
+
+  const state = await page.evaluate(() => ({
+    loaded: window.__VOXEL__!.core.loadedChunkCount,
+    delivered: window.__VOXEL__!.chunks.deliveredCount,
+  }));
+  // 主线程一个区块都没生成：世界里的每一个区块都是 Worker 送来的
+  expect(state.delivered).toBeGreaterThanOrEqual(state.loaded);
+  expect(errors).toEqual([]);
+});
+
+test('走远之后前方区块生成、身后区块与它的网格一起卸载', async ({ page }) => {
+  await waitForFullViewDistance(page);
+  const before = await page.evaluate(() => ({
+    chunk: window.__VOXEL__!.core.playerChunk,
+    hasOriginMesh: window.__VOXEL__!.renderer.hasChunkMesh(0, 0),
+    z: window.__VOXEL__!.core.player.position.z,
+  }));
+  expect(before.chunk).toEqual({ cx: 0, cz: 0 });
+  expect(before.hasOriginMesh).toBe(true);
+
+  // 朝 −Z 走一分钟：视距 8 的加载范围是 ±128 格，这一趟远远走出去
+  await walkForwardTicks(page, 60 * TICK_RATE);
+
+  const after = await page.evaluate((radius) => {
+    const { core, renderer } = window.__VOXEL__!;
+    const { cx, cz } = core.playerChunk;
+    return {
+      chunk: { cx, cz },
+      z: core.player.position.z,
+      y: core.player.position.y,
+      surface: core.highestBlockY(
+        Math.floor(core.player.position.x),
+        Math.floor(core.player.position.z),
+      ),
+      loaded: core.loadedChunkCount,
+      aheadLoaded: core.isChunkLoaded(cx, cz - radius),
+      originLoaded: core.isChunkLoaded(0, 0),
+      hasOriginMesh: renderer.hasChunkMesh(0, 0),
+      hasHereMesh: renderer.hasChunkMesh(cx, cz),
+    };
+  }, DEFAULT_VIEW_RADIUS);
+
+  // 走出去了好几个区块，脚下始终是地面而不是虚空
+  expect(before.z - after.z).toBeGreaterThan(4 * CHUNK_SIZE);
+  expect(after.y).toBeGreaterThan(SEA_LEVEL);
+  expect(after.y).toBeGreaterThanOrEqual(after.surface);
+  // 前方的区块跟着生成，身后的连网格一起卸载
+  expect(after.aheadLoaded).toBe(true);
+  expect(after.originLoaded).toBe(false);
+  expect(after.hasOriginMesh).toBe(false);
+  expect(after.hasHereMesh).toBe(true);
+  // 已加载区块数稳定在视距那一圈上下，不会一路涨
+  expect(after.loaded).toBeGreaterThanOrEqual(CHUNKS_IN_VIEW);
+  expect(after.loaded).toBeLessThanOrEqual((2 * (DEFAULT_VIEW_RADIUS + 1) + 1) ** 2);
+  expect(errors).toEqual([]);
 });
 
 test('点击画布锁定鼠标，视角不被甩一下', async ({ page }) => {

@@ -140,10 +140,8 @@ export class Player implements PlayerView {
    * 转动视角。
    * 增量由输入适配器按鼠标灵敏度换算成弧度；这里只负责夹住俯仰、折回偏航。
    *
-   * 视角不等 tick：鼠标一动就生效，否则第一人称转头会以 20Hz 一格一格地跳。
-   * 这不违反 ADR-0002——那条决策管的是「游戏规则不许跟着帧率变」，而视角是输入，
-   * 和按键一样本来就异步到达。核心的确定性仍然成立：同一串 tick 加同一串输入，
-   * 结果一样，测试里 `tick(n)` 因此还是完全可复现的。
+   * 不等 tick，鼠标一动就生效——与 `setMoveIntent` 那条路不同。为什么这样分见
+   * ADR-0004（输入的时间性）。
    */
   turn(yawDelta: number, pitchDelta: number): void {
     this.yawAngle = wrapAngle(this.yawAngle + yawDelta);

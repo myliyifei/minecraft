@@ -137,8 +137,8 @@ export class WorldRenderer {
    * 把相机摆到玩家眼睛的位置。
    *
    * 核心按 20 tick/s 走，直接读当前位置画面就会以 20Hz 一格格地抖，所以位置在上一个
-   * tick 与当前 tick 之间插值（ADR-0002）。视角不插值——鼠标事件一到就已经改了，
-   * 再插值只会让转头发糊。
+   * tick 与当前 tick 之间插值（ADR-0002）。视角不插值：它已经是即时值，再平滑一次
+   * 反而给瞄准加延迟（ADR-0004）。
    */
   private updateCamera(alpha: number): void {
     const { position, previousPosition, yaw, pitch } = this.core.player;

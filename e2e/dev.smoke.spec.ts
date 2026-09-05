@@ -1,9 +1,36 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { BlockType } from '../src/core/block';
-import { FLAT_SURFACE_Y } from '../src/core/constants';
+import {
+  CHUNK_SIZE,
+  DEFAULT_SEED,
+  DEFAULT_VIEW_RADIUS,
+  SEA_LEVEL,
+} from '../src/core/constants';
 import { DEMO_TREE_COLUMN } from '../src/demo-scene';
 import { STRINGS } from '../src/ui/strings';
 import { countCanvasColors, waitForFirstFrame } from './canvas';
+
+/** 默认视距下已加载区块覆盖的世界坐标区间。 */
+const LOADED_MIN = -DEFAULT_VIEW_RADIUS * CHUNK_SIZE;
+const LOADED_MAX = (DEFAULT_VIEW_RADIUS + 1) * CHUNK_SIZE - 1;
+
+/** 采样时 z 的步长：抽十来行就够判断起伏与确定性，不必读满六千多列。 */
+const PROFILE_Z_STEP = 8;
+
+/** 读一片地表高度。地形起伏与确定性都靠它断言。 */
+async function readSurfaceProfile(page: Page): Promise<number[]> {
+  return page.evaluate(
+    ({ from, to, zStep }) => {
+      const core = window.__VOXEL__!.core;
+      const heights: number[] = [];
+      for (let z = from; z <= to; z += zStep) {
+        for (let x = from; x <= to; x++) heights.push(core.highestBlockY(x, z));
+      }
+      return heights;
+    },
+    { from: LOADED_MIN, to: LOADED_MAX, zStep: PROFILE_Z_STEP },
+  );
+}
 
 const errors: string[] = [];
 
@@ -44,19 +71,49 @@ test('调试句柄报告已加载区块与已建网格', async ({ page }) => {
 });
 
 test('调试句柄能读到核心的方块状态', async ({ page }) => {
-  const trunk = { ...DEMO_TREE_COLUMN, y: FLAT_SURFACE_Y + 1 };
-  const blocks = await page.evaluate((trunkAt) => {
-    const core = window.__VOXEL__!.core;
-    const spawn = core.spawnPoint;
-    return {
-      underSpawn: core.getBlock(spawn.x, spawn.y - 1, spawn.z),
-      atSpawn: core.getBlock(spawn.x, spawn.y, spawn.z),
-      demoTrunk: core.getBlock(trunkAt.x, trunkAt.y, trunkAt.z),
-    };
-  }, trunk);
-  expect(blocks.underSpawn).toBe(BlockType.Grass);
-  expect(blocks.atSpawn).toBe(BlockType.Air);
-  expect(blocks.demoTrunk).toBe(BlockType.OakLog);
+  const state = await page.evaluate(
+    ({ column, oakLog }) => {
+      const core = window.__VOXEL__!.core;
+      const spawn = core.spawnPoint;
+      // 演示橡树的树干在这一列上。地表高度随地形起伏，所以自上而下扫，不写死 y。
+      let trunkFound = false;
+      for (let y = core.highestBlockY(column.x, column.z); y > 0; y--) {
+        if (core.getBlock(column.x, y, column.z) === oakLog) {
+          trunkFound = true;
+          break;
+        }
+      }
+      return {
+        underSpawn: core.getBlock(spawn.x, spawn.y - 1, spawn.z),
+        atSpawn: core.getBlock(spawn.x, spawn.y, spawn.z),
+        aboveSpawn: core.getBlock(spawn.x, spawn.y + 1, spawn.z),
+        trunkFound,
+      };
+    },
+    { column: DEMO_TREE_COLUMN, oakLog: BlockType.OakLog },
+  );
+  expect(state.underSpawn).toBe(BlockType.Grass);
+  expect(state.atSpawn).toBe(BlockType.Air);
+  expect(state.aboveSpawn).toBe(BlockType.Air);
+  expect(state.trunkFound).toBe(true);
+});
+
+test('页面打开后是由默认种子生成的起伏平原', async ({ page }) => {
+  const seed = await page.evaluate(() => window.__VOXEL__!.core.seed);
+  expect(seed).toBe(DEFAULT_SEED);
+
+  const heights = await readSurfaceProfile(page);
+  // 出现多种高度才算「起伏」，而不是一片硬编码平地
+  expect(new Set(heights).size).toBeGreaterThan(1);
+  expect(Math.min(...heights)).toBeGreaterThan(SEA_LEVEL);
+  expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(20);
+});
+
+test('同一种子每次进入地形相同', async ({ page }) => {
+  const before = await readSurfaceProfile(page);
+  await page.reload();
+  await waitForFirstFrame(page);
+  expect(await readSurfaceProfile(page)).toEqual(before);
 });
 
 test('核心以固定步长推进', async ({ page }) => {

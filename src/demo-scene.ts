@@ -1,11 +1,12 @@
 import { BlockType } from './core/block';
-import { FLAT_SURFACE_Y } from './core/constants';
 import type { GameCore } from './core/game';
 
 /**
- * 本切片的临时演示内容：在硬编码平地上摆一棵橡树、挖一个露出泥土的坑，
+ * 本切片的临时演示内容：在生成的平原上摆一棵橡树、挖一个露出泥土的坑，
  * 再把石头与基岩各摆一块在地面上——地下的方块看不见，但贴图得能验证。
  * 这样 6 种方块的贴图在页面上一眼可见。
+ *
+ * 所有位置都按各自那一列的地表高度算，地形起伏后不会悬空也不会埋进土里。
  *
  * issue #6（橡树生成）与 issue #7（挖掘）落地后，这个文件应当删掉。
  */
@@ -15,13 +16,13 @@ export const DEMO_TREE_COLUMN = { x: -5, z: -4 } as const;
 export function buildDemoScene(core: GameCore): void {
   placeOakTree(core, DEMO_TREE_COLUMN.x, DEMO_TREE_COLUMN.z);
   digPit(core, 4, 3);
-  core.setBlock(-2, FLAT_SURFACE_Y + 1, 5, BlockType.Bedrock);
-  core.setBlock(1, FLAT_SURFACE_Y + 1, 6, BlockType.Stone);
+  placeOnGround(core, -2, 5, BlockType.Bedrock);
+  placeOnGround(core, 1, 6, BlockType.Stone);
 }
 
 /** 5 格树干 + 原版式橡树冠。 */
 function placeOakTree(core: GameCore, ox: number, oz: number): void {
-  const base = FLAT_SURFACE_Y + 1;
+  const base = core.highestBlockY(ox, oz) + 1;
   const trunkHeight = 5;
   for (let i = 0; i < trunkHeight; i++) {
     core.setBlock(ox, base + i, oz, BlockType.OakLog);
@@ -50,7 +51,14 @@ function placeOakTree(core: GameCore, ox: number, oz: number): void {
 function digPit(core: GameCore, ox: number, oz: number): void {
   for (let dx = -2; dx <= 2; dx++) {
     for (let dz = -1; dz <= 1; dz++) {
-      core.setBlock(ox + dx, FLAT_SURFACE_Y, oz + dz, BlockType.Air);
+      const x = ox + dx;
+      const z = oz + dz;
+      core.setBlock(x, core.highestBlockY(x, z), z, BlockType.Air);
     }
   }
+}
+
+/** 把一块方块摆在某一列的地面上。 */
+function placeOnGround(core: GameCore, x: number, z: number, block: BlockType): void {
+  core.setBlock(x, core.highestBlockY(x, z) + 1, z, block);
 }

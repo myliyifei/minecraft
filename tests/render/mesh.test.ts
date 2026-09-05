@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType, type BlockView } from '../../src/core/block';
-import { CHUNK_SIZE, FLAT_SURFACE_Y, WORLD_MIN_Y } from '../../src/core/constants';
-import { flatTerrain } from '../../src/core/terrain';
+import { CHUNK_SIZE, WORLD_MIN_Y } from '../../src/core/constants';
 import { World } from '../../src/core/world';
+import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 import { tileUvRect, TILE } from '../../src/render/atlas';
 import { buildChunkMesh, type MeshData } from '../../src/render/mesh';
 
@@ -69,7 +69,7 @@ describe('区块网格只生成暴露面', () => {
   });
 
   it('周围区块都已加载的平地区块只产生 256 个朝上的顶面', () => {
-    const world = new World(flatTerrain);
+    const world = new World(flatTestTerrain);
     for (let dx = -1; dx <= 1; dx++) {
       for (let dz = -1; dz <= 1; dz++) {
         world.loadChunk(dx, dz);
@@ -83,7 +83,7 @@ describe('区块网格只生成暴露面', () => {
   });
 
   it('世界底面之下不生成面', () => {
-    const world = new World(flatTerrain);
+    const world = new World(flatTestTerrain);
     for (let dx = -1; dx <= 1; dx++) {
       for (let dz = -1; dz <= 1; dz++) {
         world.loadChunk(dx, dz);
@@ -96,18 +96,18 @@ describe('区块网格只生成暴露面', () => {
   });
 
   it('未加载的相邻区块视为边界，区块侧面暴露', () => {
-    const world = new World(flatTerrain);
+    const world = new World(flatTestTerrain);
     world.loadChunk(0, 0);
     const mesh = buildChunkMesh(world, 0, 0);
-    // 256 个顶面 + 四条边界上每层 16 个侧面，实心层为 y ∈ [−64, 63]
-    const solidLayers = FLAT_SURFACE_Y - WORLD_MIN_Y + 1;
+    // 256 个顶面 + 四条边界上每层 16 个侧面，实心层为 y ∈ [−64, FLAT_GROUND_Y]
+    const solidLayers = FLAT_GROUND_Y - WORLD_MIN_Y + 1;
     expect(faceCount(mesh)).toBe(CHUNK_SIZE * CHUNK_SIZE + 4 * CHUNK_SIZE * solidLayers);
   });
 });
 
 describe('单个悬空方块的网格', () => {
   const x = 8;
-  const y = FLAT_SURFACE_Y + 4;
+  const y = FLAT_GROUND_Y + 4;
   const z = 8;
 
   it('六个面全部生成，索引与顶点数量匹配', () => {
@@ -150,7 +150,7 @@ describe('单个悬空方块的网格', () => {
 });
 
 describe('不遮挡视线的方块与邻居', () => {
-  const y = FLAT_SURFACE_Y + 4;
+  const y = FLAT_GROUND_Y + 4;
 
   it('相邻两块树叶之间不生成重合的两个面', () => {
     const mesh = buildChunkMesh(
@@ -181,7 +181,7 @@ describe('不遮挡视线的方块与邻居', () => {
 
 describe('面到图集贴图的映射', () => {
   const x = 8;
-  const y = FLAT_SURFACE_Y + 4;
+  const y = FLAT_GROUND_Y + 4;
   const z = 8;
 
   /** 取指定法线那一面的 uv，并断言它落在某个 tile 的矩形内。 */
@@ -250,7 +250,7 @@ describe('面到图集贴图的映射', () => {
 
 describe('区块网格的坐标系', () => {
   it('顶点使用区块局部的 x/z 与世界 y', () => {
-    const world = new World(flatTerrain);
+    const world = new World(flatTestTerrain);
     world.loadChunk(2, -3);
     const mesh = buildChunkMesh(world, 2, -3);
     for (let i = 0; i < mesh.positions.length; i += 3) {
@@ -263,7 +263,7 @@ describe('区块网格的坐标系', () => {
     const tops = faceCenters(mesh).filter((_, f) => normals[f]![1] === 1);
     expect(tops.length).toBeGreaterThan(0);
     for (const [, cy] of tops) {
-      expect(cy).toBe(FLAT_SURFACE_Y + 1);
+      expect(cy).toBe(FLAT_GROUND_Y + 1);
     }
   });
 });

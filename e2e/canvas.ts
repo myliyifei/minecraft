@@ -5,7 +5,9 @@ import type { Page } from '@playwright/test';
  *
  * 直接把 WebGL 画布 drawImage 到 2D 画布上读像素——比截图再解码 PNG 更直接，
  * 也能顺带发现「画出来了但全是同一个颜色」这种接线错误。
- * 依赖渲染器开启 preserveDrawingBuffer。
+ *
+ * 只在开发与测试构建里可用：读回画布内容要求 preserveDrawingBuffer，
+ * 而那个选项跟着 DEBUG_BUILD 走（见 src/build-flags.ts）。
  */
 export async function countCanvasColors(page: Page): Promise<number> {
   return page.evaluate(() => {

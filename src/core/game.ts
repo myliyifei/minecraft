@@ -24,7 +24,7 @@ export interface Vec3 {
  * 由后续切片挂进 step()。
  */
 export class GameCore implements BlockView {
-  readonly world: World;
+  private readonly world: World;
   private ticks = 0;
 
   constructor(options: GameCoreOptions = {}) {

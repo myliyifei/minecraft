@@ -23,6 +23,13 @@ npm run dev        # http://localhost:5173
 
 首次跑端到端测试前需要 `npx playwright install chromium`。
 
+调试句柄（`window.__VOXEL__`）在开发服务器上默认挂着，生产构建不挂。要得到一个带句柄的
+**测试构建**（生产模式 + 句柄，用于在真实产物上跑端到端测试）：
+
+```bash
+VITE_DEBUG_HANDLE=true npm run build
+```
+
 ## 分层
 
 ```
@@ -32,6 +39,7 @@ src/
 ├── ui/            界面文字与样式
 ├── loop.ts        固定 20 tick/s 的游戏循环
 ├── debug.ts       调试句柄，只在开发与测试构建中挂到 window
+├── demo-scene.ts  临时：摆几块方块把 6 种贴图显示出来，issue #6 / #7 落地后删除
 └── main.ts        接线层
 ```
 

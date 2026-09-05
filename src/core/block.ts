@@ -14,22 +14,19 @@ export const BlockType = {
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
 
 export interface BlockDef {
-  readonly id: BlockType;
-  /** 稳定的英文标识。界面显示名在 ui 层的字符串表里按它查。 */
-  readonly key: string;
   /** 是否完全遮挡视线。false 的方块（空气、树叶）不会剔除邻居的面。 */
   readonly opaque: boolean;
 }
 
-/** 方块属性表。硬度、掉落表、经验表是后续切片往这里加的数据行。 */
+/** 方块属性表。硬度、掉落表、经验表是后续切片往这里加的数据列。 */
 export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
-  [BlockType.Air]: { id: BlockType.Air, key: 'air', opaque: false },
-  [BlockType.Grass]: { id: BlockType.Grass, key: 'grass', opaque: true },
-  [BlockType.Dirt]: { id: BlockType.Dirt, key: 'dirt', opaque: true },
-  [BlockType.Stone]: { id: BlockType.Stone, key: 'stone', opaque: true },
-  [BlockType.Bedrock]: { id: BlockType.Bedrock, key: 'bedrock', opaque: true },
-  [BlockType.OakLog]: { id: BlockType.OakLog, key: 'oak_log', opaque: true },
-  [BlockType.OakLeaves]: { id: BlockType.OakLeaves, key: 'oak_leaves', opaque: false },
+  [BlockType.Air]: { opaque: false },
+  [BlockType.Grass]: { opaque: true },
+  [BlockType.Dirt]: { opaque: true },
+  [BlockType.Stone]: { opaque: true },
+  [BlockType.Bedrock]: { opaque: true },
+  [BlockType.OakLog]: { opaque: true },
+  [BlockType.OakLeaves]: { opaque: false },
 };
 
 export function isAir(block: BlockType): boolean {

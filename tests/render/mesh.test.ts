@@ -63,6 +63,11 @@ describe('区块网格只生成暴露面', () => {
     expect(faceCount(mesh)).toBe(0);
   });
 
+  it('全是树叶时一个面都不生成：同种方块之间的重合面互相剔除', () => {
+    const mesh = buildChunkMesh(uniformView(BlockType.OakLeaves), 0, 0);
+    expect(faceCount(mesh)).toBe(0);
+  });
+
   it('周围区块都已加载的平地区块只产生 256 个朝上的顶面', () => {
     const world = new World(flatTerrain);
     for (let dx = -1; dx <= 1; dx++) {
@@ -141,6 +146,36 @@ describe('单个悬空方块的网格', () => {
       expect(mesh.positions[i + 2]).toBeGreaterThanOrEqual(z);
       expect(mesh.positions[i + 2]).toBeLessThanOrEqual(z + 1);
     }
+  });
+});
+
+describe('不遮挡视线的方块与邻居', () => {
+  const y = FLAT_SURFACE_Y + 4;
+
+  it('相邻两块树叶之间不生成重合的两个面', () => {
+    const mesh = buildChunkMesh(
+      sparseView([
+        [8, y, 8, BlockType.OakLeaves],
+        [9, y, 8, BlockType.OakLeaves],
+      ]),
+      0,
+      0,
+    );
+    // 各 6 面减去贴在一起的那一对
+    expect(faceCount(mesh)).toBe(10);
+  });
+
+  it('树叶挡不住邻居的面，石头挡得住', () => {
+    const mesh = buildChunkMesh(
+      sparseView([
+        [8, y, 8, BlockType.OakLeaves],
+        [9, y, 8, BlockType.Stone],
+      ]),
+      0,
+      0,
+    );
+    // 树叶朝石头那面被剔除（5 面），石头朝树叶那面保留（6 面）
+    expect(faceCount(mesh)).toBe(11);
   });
 });
 

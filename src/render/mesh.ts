@@ -1,4 +1,4 @@
-import { BlockType, isOpaque, type BlockView } from '../core/block';
+import { isAir, isOpaque, type BlockView } from '../core/block';
 import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../core/constants';
 import { BLOCK_TILES, tileUvRect, type FaceTiles } from './atlas';
 
@@ -13,24 +13,26 @@ export interface MeshData {
   readonly indices: Uint32Array;
 }
 
-type Corner = readonly [number, number, number];
+/** 单位立方体内的一个点，或一个轴向方向。 */
+type Point3 = readonly [number, number, number];
+
+/** 一对归一化 uv 坐标。 */
+type Uv = readonly [number, number];
 
 interface FaceSpec {
   /** 邻居方向，同时是这个面的法线。 */
-  readonly dir: Corner;
+  readonly normal: Point3;
   /** 面的四个角（单位立方体内），从外部看是逆时针。 */
-  readonly corners: readonly [Corner, Corner, Corner, Corner];
+  readonly corners: readonly [Point3, Point3, Point3, Point3];
   /** 四个角对应的 uv 归一化坐标，v 向上。 */
-  readonly uv: readonly [Corner2, Corner2, Corner2, Corner2];
+  readonly uv: readonly [Uv, Uv, Uv, Uv];
   /** 取方块的哪一张贴图。 */
   readonly face: keyof FaceTiles;
 }
 
-type Corner2 = readonly [number, number];
-
 const FACES: readonly FaceSpec[] = [
   {
-    dir: [1, 0, 0],
+    normal: [1, 0, 0],
     corners: [
       [1, 0, 0],
       [1, 1, 0],
@@ -46,7 +48,7 @@ const FACES: readonly FaceSpec[] = [
     face: 'side',
   },
   {
-    dir: [-1, 0, 0],
+    normal: [-1, 0, 0],
     corners: [
       [0, 0, 0],
       [0, 0, 1],
@@ -62,7 +64,7 @@ const FACES: readonly FaceSpec[] = [
     face: 'side',
   },
   {
-    dir: [0, 1, 0],
+    normal: [0, 1, 0],
     corners: [
       [0, 1, 0],
       [0, 1, 1],
@@ -78,7 +80,7 @@ const FACES: readonly FaceSpec[] = [
     face: 'top',
   },
   {
-    dir: [0, -1, 0],
+    normal: [0, -1, 0],
     corners: [
       [0, 0, 0],
       [1, 0, 0],
@@ -94,7 +96,7 @@ const FACES: readonly FaceSpec[] = [
     face: 'bottom',
   },
   {
-    dir: [0, 0, 1],
+    normal: [0, 0, 1],
     corners: [
       [0, 0, 1],
       [1, 0, 1],
@@ -110,7 +112,7 @@ const FACES: readonly FaceSpec[] = [
     face: 'side',
   },
   {
-    dir: [0, 0, -1],
+    normal: [0, 0, -1],
     corners: [
       [0, 0, 0],
       [0, 1, 0],
@@ -148,16 +150,20 @@ export function buildChunkMesh(view: BlockView, cx: number, cz: number): MeshDat
         const wx = originX + lx;
         const wz = originZ + lz;
         const block = view.getBlock(wx, y, wz);
-        if (block === BlockType.Air) continue;
+        if (isAir(block)) continue;
         const tiles = BLOCK_TILES[block];
         if (!tiles) continue;
 
         for (const spec of FACES) {
-          const [dx, dy, dz] = spec.dir;
+          const [dx, dy, dz] = spec.normal;
           const ny = y + dy;
           // 世界底面之下永远看不见，省掉每个区块 256 个无用面。
           if (ny < WORLD_MIN_Y) continue;
-          if (isOpaque(view.getBlock(wx + dx, ny, wz + dz))) continue;
+          const neighbor = view.getBlock(wx + dx, ny, wz + dz);
+          if (isOpaque(neighbor)) continue;
+          // 走到这里说明邻居不遮挡视线（空气或树叶）。同种方块相邻时两个面完全重合：
+          // 留着只会 z-fighting、还让树冠内部的几何翻倍。整片树叶因此只保留最外层的面。
+          if (neighbor === block) continue;
 
           const base = positions.length / 3;
           const rect = tileUvRect(tiles[spec.face]);

@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- 标题与加载提示由 src/ui/strings.ts 填充，界面文字只在那里定义。 -->
-    <title></title>
+    <!-- {{...}} 由 vite.config.ts 的 html-strings 插件从 src/ui/strings.ts 填充。 -->
+    <title>{{gameTitle}}</title>
   </head>
   <body>
     <canvas id="game"></canvas>
-    <div id="loading"></div>
+    <div id="loading">{{loadingWorld}}</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

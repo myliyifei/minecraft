@@ -4,17 +4,14 @@ import { installDebugHandle } from './debug';
 import { buildDemoScene } from './demo-scene';
 import { startGameLoop } from './loop';
 import { loadAtlasTexture, WorldRenderer } from './render/renderer';
-import { STRINGS } from './ui/strings';
 
 /**
  * 接线层：造核心、造渲染适配器、起循环。逻辑一律在核心里，这里只负责组装。
+ * 标题与加载提示由构建期从 src/ui/strings.ts 注入 index.html，不在这里设置。
  */
 async function main(): Promise<void> {
-  document.title = STRINGS.gameTitle;
-
   const loading = document.querySelector('#loading');
   if (!(loading instanceof HTMLElement)) throw new Error('页面缺少 #loading 元素');
-  loading.textContent = STRINGS.loadingWorld;
 
   const canvas = document.querySelector('#game');
   if (!(canvas instanceof HTMLCanvasElement)) throw new Error('页面缺少 #game 画布');

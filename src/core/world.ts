@@ -1,6 +1,6 @@
 import { BlockType, type BlockView } from './block';
 import { Chunk } from './chunk';
-import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from './constants';
+import { CHUNK_SHIFT, CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from './constants';
 import type { TerrainGenerator } from './terrain';
 
 export interface ChunkCoord {
@@ -15,7 +15,7 @@ export interface ChunkCoord {
  * 的规则一致，也让区块流式加载（issue #5）不必给读写路径加特例。
  */
 export class World implements BlockView {
-  private readonly chunks = new Map<string, Chunk>();
+  private readonly chunks = new Map<number, Chunk>();
   private readonly generate: TerrainGenerator;
 
   constructor(generate: TerrainGenerator) {
@@ -72,11 +72,15 @@ export class World implements BlockView {
     return WORLD_MIN_Y - 1;
   }
 
-  /** 写入方块；坐标所在区块未加载时不做任何事并返回 false。 */
+  /**
+   * 写入方块。返回值表示这次写入是否落到了世界里：
+   * 坐标所在区块未加载、或 y 超出世界高度时不做任何事并返回 false。
+   */
   setBlock(x: number, y: number, z: number, block: BlockType): boolean {
     const bx = Math.floor(x);
     const by = Math.floor(y);
     const bz = Math.floor(z);
+    if (by < WORLD_MIN_Y || by > WORLD_MAX_Y) return false;
     const chunk = this.chunks.get(chunkKey(chunkOf(bx), chunkOf(bz)));
     if (!chunk) return false;
     chunk.set(localOf(bx), by, localOf(bz), block);
@@ -84,16 +88,26 @@ export class World implements BlockView {
   }
 }
 
-export function chunkKey(cx: number, cz: number): string {
-  return `${cx},${cz}`;
+/** 区块键的一维跨度，决定了世界的区块坐标范围：±2²⁵ 个区块。 */
+const CHUNK_KEY_STRIDE = 1 << 26;
+
+/**
+ * 区块的 Map 键。
+ *
+ * 用数字而不是 `"cx,cz"` 字符串：`getBlock` 是全局最热的调用，网格生成一个区块要走
+ * 近 70 万次，模板字符串会在这条路径上不停分配。cx 乘一个比 cz 取值范围更大的跨度，
+ * 不同 cx 的区间因此不重叠，结果始终在安全整数内。
+ */
+export function chunkKey(cx: number, cz: number): number {
+  return cx * CHUNK_KEY_STRIDE + cz;
 }
 
-/** 世界坐标所属的区块坐标。 */
+/** 世界坐标所属的区块坐标。要求整数输入；右移对负数也是向下取整。 */
 export function chunkOf(worldCoord: number): number {
-  return Math.floor(worldCoord / CHUNK_SIZE);
+  return worldCoord >> CHUNK_SHIFT;
 }
 
 /** 世界坐标在区块内的局部坐标，负坐标也落在 [0, 16)。 */
 export function localOf(worldCoord: number): number {
-  return worldCoord - chunkOf(worldCoord) * CHUNK_SIZE;
+  return worldCoord & (CHUNK_SIZE - 1);
 }

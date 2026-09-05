@@ -8,7 +8,12 @@
   </head>
   <body>
     <canvas id="game"></canvas>
-    <div id="loading">{{loadingWorld}}</div>
+    <div id="loading">
+      <h1 class="loading__title">{{gameTitle}}</h1>
+      <p class="loading__status" role="status">
+        {{loadingWorld}}<span class="loading__cursor" aria-hidden="true"></span>
+      </p>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

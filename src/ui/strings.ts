@@ -3,5 +3,6 @@
  */
 export const STRINGS = {
   gameTitle: '体素世界',
-  loadingWorld: '正在生成世界…',
+  // 省略号交给加载屏上那个闪动的方块光标，文案本身不带标点。
+  loadingWorld: '正在生成世界',
 } as const;

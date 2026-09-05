@@ -19,6 +19,17 @@ export async function loadAtlasTexture(): Promise<THREE.Texture> {
   return texture;
 }
 
+/**
+ * 从世界色板取色。色板定义在 src/ui/style.css 的 `:root` 里，
+ * 界面与 3D 场景因此共用同一份颜色，天空不会和加载屏对不上。
+ */
+function paletteColor(name: string, fallback: string): THREE.Color {
+  const value = getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+  return new THREE.Color(value || fallback);
+}
+
 export interface WorldRendererOptions {
   readonly canvas: HTMLCanvasElement;
   readonly core: GameCore;
@@ -49,7 +60,7 @@ export class WorldRenderer {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    this.scene.background = new THREE.Color(0x8fc7ee);
+    this.scene.background = paletteColor('--sky', '#7fb2e8');
     this.material = new THREE.MeshLambertMaterial({
       map: texture,
       // 树叶贴图有镂空，用 alphaTest 剔掉透明像素，避免半透明排序问题。
@@ -62,9 +73,10 @@ export class WorldRenderer {
     this.camera.lookAt(spawn.x, spawn.y, spawn.z);
 
     // 固定光照：环境光打底，方向光让方块的六个面有明暗区分（本切片不做天光）。
-    this.scene.add(new THREE.AmbientLight(0xffffff, 1.4));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.1);
-    sun.position.set(0.6, 1, 0.35);
+    // 两者的比例决定体积感——环境光太强，方块就摊平成一张色卡。
+    this.scene.add(new THREE.AmbientLight(0xffffff, 1.05));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.45);
+    sun.position.set(0.5, 1, 0.28);
     this.scene.add(sun);
 
     this.resize();

@@ -48,7 +48,7 @@ const GROUND_DRAG = 0.6;
 
 /**
  * 低于这个速度（方块/tick）直接归零。
- * 指数衰减自己到不了零，少了这一刀掉落物会永远以肉眼看不见的速度蠕动，
+ * 指数衰减本身到不了零。不做这一步截断，掉落物会一直以肉眼看不见的速度移动，
  * 「落地后停住」就不是真的停住。
  */
 const MIN_SPEED = 1e-3;
@@ -128,7 +128,8 @@ export class Drops implements DropsView, DropSink {
    * `playerBox` 是玩家的碰撞箱，吸入范围是把它外扩 `PICKUP_MARGIN` 格；`into` 是收物品的
    * 地方。排在玩家移动之后调，吸入判定用的才是这一 tick 走完之后的位置。
    *
-   * 先判拾取再判到期：正好在第 6000 tick 上玩家贴着它时，宁可让他捡到，也不要眼前一空。
+   * 先判拾取再判到期：正好在第 6000 tick 上而玩家就贴着它时，宁可让他捡到，
+   * 而不是在他手边凭空消失。
    */
   step(playerBox: Hitbox, into: ItemSink): void {
     const pickupBox = expand(playerBox, PICKUP_MARGIN);

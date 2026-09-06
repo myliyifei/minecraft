@@ -31,7 +31,7 @@ export interface BlockDef {
   readonly hardness: number;
   /**
    * 挖它要对应的工具（石头要镐）。空手照样挖得动，只是慢得多——耗时从每点硬度
-   * 1.5 秒变成 5 秒，石头因此是 150 tick 而不是 45。工具本身是 #8 之后的事。
+   * 1.5 秒变成 5 秒，石头因此是 150 tick 而不是 45。工具本身是后续切片的事。
    */
   readonly requiresTool: boolean;
   /**
@@ -135,7 +135,7 @@ const SECONDS_PER_HARDNESS_WITHOUT_TOOL = 5;
  *
  * 硬度是 0.2、0.6 这类十进制小数，二进制存不精确：`0.2 × 1.5 × 20` 算出来是
  * 6.000000000000001，直接向上取整树叶就要挖 7 tick 而不是 6。容差比一个 tick 小得多，
- * 只吃掉舍入噪声，不改变任何本该取整的结果。
+ * 只抵消舍入误差，不改变任何本该取整的结果。
  */
 const TICK_EPSILON = 1e-9;
 
@@ -144,7 +144,7 @@ const TICK_EPSILON = 1e-9;
  *
  * 硬度换成耗时的公式在 `SECONDS_PER_HARDNESS` 那两个常量里，以 tick 计时向上取整。
  * 结果：草 18、泥土 15、树叶 6、原木 60、石头 150。
- * 持有工具时的加成要等快捷栏（#8）落地，本切片只有空手。
+ * 持有工具时的加成要等工具落地，目前只有空手。
  */
 export function miningTicks(block: BlockType): number {
   const { hardness, requiresTool } = BLOCKS[block];

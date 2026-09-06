@@ -500,7 +500,7 @@ describe('GameCore 的空手挖掘', () => {
       expect(core.drops.count).toBe(0);
     });
 
-    it('掉落物是实体，不进「变过的方块」那本账', () => {
+    it('掉落物是实体，不进「变过的方块」那份记录', () => {
       const core = lookingDown();
       core.setMining(true);
       core.tick(GRASS_TICKS);

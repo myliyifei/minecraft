@@ -238,7 +238,7 @@ test('页面里长着由种子生成的橡树，树干与树冠都在', async ({
       for (let y = rootY - 1; y <= rootY + trunkHeight; y++) {
         column.push(core.getBlock(x, y, z));
       }
-      // 树冠最宽那一层横着切一刀
+      // 树冠最宽那一层，横向取一整行
       const canopy: number[] = [];
       const top = rootY + trunkHeight - 1;
       for (let dx = -radius; dx <= radius; dx++) canopy.push(core.getBlock(x + dx, top - 1, z));
@@ -609,10 +609,11 @@ test('按住左键一秒把脚下的草挖掉，掉出的泥土进快捷栏', as
 
   // 按下与松开走的是真实的鼠标事件（指针锁定下 mouse.down 投得到 document 上的监听器）。
   // 中间只留两次 evaluate：锁定期间 headless Chromium 把整页任务调度降到约 1/10，
-  // 每来回一次都要好几秒，多一次就顶到测试超时上去了。
+  // 每来回一次都要好几秒，多一次就会超过测试的超时上限。
   await page.mouse.down();
   // **对准要在按下之后**：指针锁定下 Playwright 的 mouse.down 会连带投一发大位移的
-  // mousemove，视角当场被甩到别处去，先对准就白对了——真人按键不会有这发位移。
+  // mousemove，视角当场被甩到别处，按下之前对准的方向会被它抵消——真人按键不会有
+  // 这发位移。
   // 推进时间同样走 evaluate，不等墙上时间：throttle 之下靠时钟数 tick 不可靠。
   const at = await page.evaluate(
     ({ pitch, ticks }) => {
@@ -650,7 +651,7 @@ test('按住左键一秒把脚下的草挖掉，掉出的泥土进快捷栏', as
   await expect(first).toHaveAttribute('title', ITEM_NAMES[ItemType.Dirt]);
   await expect(first.locator('.hotbar__icon')).toBeVisible();
   // 图标贴的是不是泥土那一格，在下面那条不锁鼠标的测试里验：读图集要发一次请求，
-  // 而指针锁定期间页面的任务调度被降到约 1/10，异步的活在这里会被饿死。
+  // 而指针锁定期间页面的任务调度被降到约 1/10，异步请求在这里会迟迟回不来。
   expect(errors).toEqual([]);
 });
 

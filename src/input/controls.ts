@@ -19,7 +19,8 @@ export type PlayerInputTarget = Pick<GameCore, 'setMoveIntent' | 'turn' | 'setMi
  * 未锁定时按键与鼠标按钮都不生效，因此 Esc 之后玩家不会继续走、也不会继续挖。
  *
  * **Esc 不在键位表里**：退出指针锁定是浏览器按规范必须做的事，页面既拦不住也换不掉，
- * 所以把 `Escape` 写进可自定义的键位表反而是撒谎。设置界面（后续切片）改不到它。
+ * 所以把 `Escape` 写进可自定义的键位表只会让人误以为它改得动。设置界面（后续切片）
+ * 改不到它。
  *
  * 返回卸载函数。
  */
@@ -83,7 +84,7 @@ export function installPlayerControls(
   const onKeyDown = (event: KeyboardEvent): void => {
     const action = ACTION_BY_CODE.get(event.code);
     if (action === undefined || !locked()) return;
-    // 空格默认滚动页面，绑过的键一律吃掉。
+    // 空格默认滚动页面，绑过的键一律拦下。
     event.preventDefault();
     // 按住不放会连发 keydown，意图没变就不必再交给核心。
     if (pressed.has(action)) return;

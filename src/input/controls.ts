@@ -62,7 +62,7 @@ export function installPlayerControls(
       dropWarpMove = false;
       return;
     }
-    // 浏览器偶尔会吐出手做不到的巨型增量，采了视角就会跳到别处——见 pointer-spike.ts。
+    // 浏览器偶尔会投来手做不到的巨型增量，采了视角就会跳到别处——见 pointer-spike.ts。
     if (isPointerSpike(Math.hypot(event.movementX, event.movementY), elapsedMs)) return;
     // 两个方向都取负：偏航 0 朝 −Z（右手边是 +X，往右转是减），俯仰正为抬头。
     target.turn(-event.movementX * MOUSE_SENSITIVITY, -event.movementY * MOUSE_SENSITIVITY);

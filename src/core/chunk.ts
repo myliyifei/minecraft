@@ -16,8 +16,8 @@ export type ChunkBlocks = Uint8Array<ArrayBuffer>;
  *
  * 之所以把底层数组摊开而不是只给一个 `get()`：网格生成对每个方块要问 6 个邻居，
  * 一个区块下来二十多万次查询，走 `World.getBlock`（三次取整 + Map 查找）实测 22ms，
- * 在这块内存上直接做下标算术是 4ms。每帧要建好几个区块的网格，这个差距是能不能
- * 维持 60fps 的差距。写这块内存的只有区块自己。
+ * 在这块内存上直接做下标算术是 4ms。一帧要建一两个区块的网格，22ms 一个就超出了
+ * 60fps 的每帧预算。写这块内存的只有区块自己。
  */
 export interface ChunkView {
   readonly cx: number;

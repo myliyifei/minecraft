@@ -19,7 +19,7 @@ export interface GameCoreOptions {
   /** 视距（区块数）：这个半径内的区块保持加载，见 CONTEXT.md 的「视距」。 */
   readonly viewRadius?: number;
   /**
-   * 换掉区块的来源，测试里可以塞一个特定形状的世界，浏览器里塞一个由 Worker 供货的
+   * 换掉区块的来源：测试里塞一个特定形状的世界，浏览器里塞一个由 Worker 生成区块的
    * 来源。拿到的是本世界的种子，因此替换实现同样受种子驱动。
    */
   readonly chunkSource?: ChunkSourceFactory;

@@ -132,8 +132,8 @@ const CHUNK_KEY_STRIDE = 1 << 26;
 /**
  * 区块的 Map 键。
  *
- * 用数字而不是 `"cx,cz"` 字符串：`getBlock` 是全局最热的调用，网格生成一个区块要走
- * 近 70 万次，模板字符串会在这条路径上不停分配。cx 乘一个比 cz 取值范围更大的跨度，
+ * 用数字而不是 `"cx,cz"` 字符串：这个键在每 tick 的碰撞扫掠、每帧的网格计划里都要算
+ * 成千上万次，模板字符串会在这些路径上不停分配。cx 乘一个比 cz 取值范围更大的跨度，
  * 不同 cx 的区间因此不重叠，结果始终在安全整数内。
  */
 export function chunkKey(cx: number, cz: number): number {
@@ -170,8 +170,8 @@ export function chunksAround(center: ChunkCoord, radius: number): ChunkCoord[] {
 /**
  * 按到中心的距离由近到远排的比较函数。
  *
- * 用欧氏距离（而不是决定加载范围的那个切比雪夫距离）：世界因此是从玩家脚下往外一圈圈
- * 长出来的，看着自然。比平方就够，不必开根号。
+ * 用欧氏距离，而不是决定加载范围的那个切比雪夫距离：这样补齐的顺序是以玩家为心由近到
+ * 远，而不是先补满一个方环。比平方就够，不必开根号。
  */
 export function byDistanceTo(center: ChunkCoord): (a: ChunkCoord, b: ChunkCoord) => number {
   const squared = ({ cx, cz }: ChunkCoord): number =>

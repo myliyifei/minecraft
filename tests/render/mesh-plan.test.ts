@@ -101,7 +101,7 @@ describe('每帧的建网格预算', () => {
     expect(plan.build).toHaveLength(2);
   });
 
-  it('先建离玩家近的：世界从脚下往外长', () => {
+  it('先建离玩家近的：近处的地面先补齐', () => {
     const center = { cx: 10, cz: -4 };
     const plan = planChunkMeshes({
       world: worldWith(square(3, center)),
@@ -135,7 +135,7 @@ describe('每帧的预算追不追得上走路', () => {
    * 按 60fps、20tick/s 跑一遍「一直往前走」，返回每帧结束时还欠多少个区块的网格。
    *
    * 网格积压是「走动过程中不出现明显卡顿」这条验收的可测部分：一帧只建两个，只要积压
-   * 不一路增长，玩家眼里的世界边缘就跟得上他的脚步。真正建网格的动作在这里换成
+   * 不一路增长，网格补齐的速度就跟得上玩家走路的速度。真正建网格的动作在这里换成
    * 「记进已建集合」，因此不需要 three.js，也不受机器快慢影响。
    */
   function backlogWhileWalking(seconds: number): number[] {

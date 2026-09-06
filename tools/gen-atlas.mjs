@@ -1,10 +1,10 @@
 /**
- * 生成方块贴图图集 public/textures/atlas.png。
+ * 生成方块贴图：图集 public/textures/atlas.png 与裂纹条 public/textures/crack.png。
  *
  * 贴图是本项目自己画的 16×16 像素风，按 CC0 释出（见 public/textures/LICENSE.md），
  * 不含任何《我的世界》原版资源。随机噪点由固定种子驱动，因此重复运行输出完全一致。
  *
- * 格号与 src/render/atlas.ts 的 TILE 表必须一致。
+ * 格号与 src/render/atlas.ts 的 TILE 表必须一致，裂纹阶数与那里的 CRACK_STAGES 一致。
  *
  * 用法：npm run gen:atlas
  */
@@ -19,7 +19,11 @@ const ROWS = 4;
 const WIDTH = COLS * TILE_PX;
 const HEIGHT = ROWS * TILE_PX;
 
+/** 裂纹分几阶，横排成一条。 */
+const CRACK_STAGES = 10;
+
 const OUT = fileURLToPath(new URL('../public/textures/atlas.png', import.meta.url));
+const CRACK_OUT = fileURLToPath(new URL('../public/textures/crack.png', import.meta.url));
 
 /** 固定种子的伪随机数，保证图集可复现。 */
 function mulberry32(seed) {
@@ -86,6 +90,77 @@ const TILES = {
     return shade(LEAVES, Math.floor(rand() * 46) - 23);
   },
 };
+
+/**
+ * 裂纹的颜色与不透明度。
+ * 暗色半透明：盖在任何贴图上都读作凹进去的缝，而不是刷上去的一块黑漆。
+ */
+const CRACK_RGBA = [0, 0, 0, 150];
+
+/** 裂缝从方块中心长出几条。够铺满整个面，又不至于把面糊住。 */
+const CRACK_BRANCHES = 9;
+
+/**
+ * 裂纹图案：每个像素记它从第几阶起出现（0 到 CRACK_STAGES−1），没有裂纹的记 −1。
+ *
+ * 先从格子中心随机游走出几条裂缝，再按到中心的距离排序、均分到各阶——裂纹因此是从
+ * 中间往四周长开的，而且每一阶都添上差不多多的像素。直接拿距离折算阶数不行：裂缝多半
+ * 在走到角上之前就出了格子，最后几阶会一个新像素都不加，看上去像卡住了。
+ */
+function crackStages() {
+  const cracked = new Map();
+  const rand = mulberry32(0xc7ac4);
+  const center = TILE_PX / 2 - 0.5;
+
+  const mark = (x, y) => {
+    if (x < 0 || x >= TILE_PX || y < 0 || y >= TILE_PX) return;
+    const index = y * TILE_PX + x;
+    if (!cracked.has(index)) cracked.set(index, Math.hypot(x - center, y - center));
+  };
+
+  for (let b = 0; b < CRACK_BRANCHES; b++) {
+    let x = center;
+    let y = center;
+    // 每条裂缝朝一个大致固定的方向长，中途左右抖动
+    let angle = (b / CRACK_BRANCHES) * Math.PI * 2 + rand() * 0.8;
+    for (let step = 0; step < TILE_PX * 2; step++) {
+      angle += (rand() - 0.5) * 0.9;
+      x += Math.cos(angle);
+      y += Math.sin(angle);
+      const px = Math.round(x);
+      const py = Math.round(y);
+      if (px < 0 || px >= TILE_PX || py < 0 || py >= TILE_PX) break;
+      mark(px, py);
+      // 偶尔加个毛刺，裂纹才不是一条干净的细线；概率压得低，免得连成一片黑
+      if (rand() < 0.16) mark(px + (rand() < 0.5 ? 1 : -1), py);
+      if (rand() < 0.12) mark(px, py + (rand() < 0.5 ? 1 : -1));
+    }
+  }
+
+  const stages = new Int8Array(TILE_PX * TILE_PX).fill(-1);
+  const byRadius = [...cracked.entries()].sort(([, a], [, b]) => a - b);
+  byRadius.forEach(([index], rank) => {
+    stages[index] = Math.floor((rank * CRACK_STAGES) / byRadius.length);
+  });
+  return stages;
+}
+
+/** 裂纹条：CRACK_STAGES 张横排，第 n 张画出所有第 n 阶及更早出现的像素。 */
+function crackStrip() {
+  const width = CRACK_STAGES * TILE_PX;
+  const strip = new Uint8Array(width * TILE_PX * 4);
+  const stages = crackStages();
+  for (let stage = 0; stage < CRACK_STAGES; stage++) {
+    for (let y = 0; y < TILE_PX; y++) {
+      for (let x = 0; x < TILE_PX; x++) {
+        const appearsAt = stages[y * TILE_PX + x];
+        if (appearsAt < 0 || appearsAt > stage) continue;
+        strip.set(CRACK_RGBA, (y * width + stage * TILE_PX + x) * 4);
+      }
+    }
+  }
+  return { strip, width };
+}
 
 const pixels = new Uint8Array(WIDTH * HEIGHT * 4);
 
@@ -169,3 +244,7 @@ function crc32(buf) {
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, encodePng(pixels, WIDTH, HEIGHT));
 console.log(`已生成 ${OUT}（${WIDTH}×${HEIGHT}，${Object.keys(TILES).length} 张贴图）`);
+
+const { strip, width: crackWidth } = crackStrip();
+writeFileSync(CRACK_OUT, encodePng(strip, crackWidth, TILE_PX));
+console.log(`已生成 ${CRACK_OUT}（${crackWidth}×${TILE_PX}，${CRACK_STAGES} 阶裂纹）`);

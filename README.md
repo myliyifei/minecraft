@@ -41,7 +41,6 @@ src/
 ├── ui/            界面文字与样式
 ├── loop.ts        固定 20 tick/s 的游戏循环
 ├── debug.ts       调试句柄，只在开发与测试构建中挂到 window
-├── demo-scene.ts  临时：摆几块方块把泥土、石头、基岩的贴图显示出来，issue #7 落地后删除
 └── main.ts        接线层
 ```
 
@@ -50,11 +49,15 @@ src/
 - 游戏逻辑一律写在 `src/core/`，它必须能在 Node 里无依赖实例化——这是主测试接缝，`tests/architecture.test.ts` 会守住这条线。
 - 面剔除与贴图映射（`src/render/mesh.ts`、`src/render/atlas.ts`）不许 import three.js，这样它们能在 Node 里测。
 - `src/worker/chunk-worker.ts` 只许 import 核心与消息协议：Worker 里没有 DOM，牵进渲染层的东西页面一打开就报错。主线程这一侧（`chunk-stream.ts`）注入端口，因此能用假 Worker 在 Node 里测。
-- 输入适配器只把事件翻译成意图（`MoveIntent`）与视角增量，走多快、跳多高、撞不撞墙都在核心里。核心不认识任何按键。
+- 输入适配器只把事件翻译成意图（`MoveIntent`、挖掘按下与松开）与视角增量，走多快、跳多高、撞不撞墙、一块方块挖多久都在核心里。核心不认识任何按键。
 - 玩家可见的文字只写在 `src/ui/strings.ts`。
-- 硬度、掉落表、经验表、贴图映射、键位表都是数据，加内容只加数据行。按键名只写在 `src/input/keybindings.ts`。
+- 硬度、掉落表、经验表、贴图映射、键位表都是数据，加内容只加数据行。按键名与鼠标按钮编号只写在 `src/input/keybindings.ts`。
 
 ## 贴图
 
-`public/textures/atlas.png` 由 `tools/gen-atlas.mjs` 程序化生成，是本项目的原创 CC0 素材，
-不含任何《我的世界》原版资源。详见 [`public/textures/LICENSE.md`](public/textures/LICENSE.md)。
+`public/textures/` 下的两张图都由 `tools/gen-atlas.mjs` 程序化生成，是本项目的原创 CC0
+素材，不含任何《我的世界》原版资源。详见
+[`public/textures/LICENSE.md`](public/textures/LICENSE.md)。
+
+- `atlas.png`：方块图集，4×4 格，每格 16×16。
+- `crack.png`：挖掘裂纹，10 阶横排成一行。渲染层按挖掘进度横向偏移 uv 取其中一阶。

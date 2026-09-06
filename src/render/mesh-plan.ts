@@ -1,4 +1,13 @@
-import { byDistanceTo, chunkKey, chunksAround, type ChunkCoord } from '../core/world';
+import { CHUNK_SIZE } from '../core/constants';
+import type { Vec3 } from '../core/vec3';
+import {
+  byDistanceTo,
+  chunkKey,
+  chunkOf,
+  chunksAround,
+  localOf,
+  type ChunkCoord,
+} from '../core/world';
 
 /**
  * 一帧最多建几个区块的网格。
@@ -72,6 +81,37 @@ export function planChunkMeshes({
   );
   if (buildable.length > 1) buildable.sort(byDistanceTo(center));
   return { build: buildable.slice(0, Math.max(budget, 0)), drop };
+}
+
+/**
+ * 变过的方块让哪些区块的网格过期了。
+ *
+ * 方块自己那个区块一定要重建。它坐在区块边界上时，对面那个区块也要：边界上的面生不生成
+ * 取决于隔壁那一格是什么（见 `buildChunkMesh`），只重建自己就会在挖开的地方留下一个
+ * 看穿到虚空的洞，或者留下一堵本该消失的墙。
+ *
+ * 只看四个侧向的邻居，不看斜角：网格只问六个轴向的邻居，斜对角那一格与谁的面都无关。
+ */
+export function staleChunksFor(changed: Iterable<Vec3>): ChunkCoord[] {
+  const stale = new Map<number, ChunkCoord>();
+  const mark = (cx: number, cz: number): void => {
+    stale.set(chunkKey(cx, cz), { cx, cz });
+  };
+
+  for (const { x, z } of changed) {
+    const bx = Math.floor(x);
+    const bz = Math.floor(z);
+    const cx = chunkOf(bx);
+    const cz = chunkOf(bz);
+    mark(cx, cz);
+    const lx = localOf(bx);
+    const lz = localOf(bz);
+    if (lx === 0) mark(cx - 1, cz);
+    if (lx === CHUNK_SIZE - 1) mark(cx + 1, cz);
+    if (lz === 0) mark(cx, cz - 1);
+    if (lz === CHUNK_SIZE - 1) mark(cx, cz + 1);
+  }
+  return [...stale.values()];
 }
 
 /** 区块自己与四个侧面的邻居都已加载。 */

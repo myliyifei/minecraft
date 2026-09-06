@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { BlockType } from '../src/core/block';
+import { BlockType, miningTicks } from '../src/core/block';
 import {
   CHUNK_SIZE,
   DEFAULT_SEED,
@@ -7,11 +7,12 @@ import {
   SEA_LEVEL,
   TICK_RATE,
 } from '../src/core/constants';
-import { PLAYER_EYE_HEIGHT, WALK_SPEED, WALK_STEP } from '../src/core/player';
+import { MAX_PITCH, PLAYER_EYE_HEIGHT, WALK_SPEED, WALK_STEP } from '../src/core/player';
 import { plainsTreePlacement } from '../src/core/terrain';
 import { OAK_CANOPY_RADIUS, oakTreesTouching, type OakTree } from '../src/core/tree';
 import type { Vec3 } from '../src/core/vec3';
 import { KEY_BINDINGS } from '../src/input/keybindings';
+import { CRACK_STAGES } from '../src/render/atlas';
 import { STRINGS } from '../src/ui/strings';
 import { countCanvasColors, waitForFirstFrame } from './canvas';
 
@@ -466,6 +467,122 @@ test('相机跟在玩家眼睛上，并在两个 tick 之间插值', async ({ pa
   // 插值：alpha 0 与 1 之间差一个 tick 的位移，0.5 落在正中间
   expect(camera.atPrevTick - camera.atThisTick).toBeCloseTo(WALK_SPEED / TICK_RATE, 5);
   expect(camera.halfway).toBeCloseTo((camera.atPrevTick + camera.atThisTick) / 2, 10);
+});
+
+test('瞄准脚下的方块显示选框，挖掘中出裂纹，挖穿后网格重建', async ({ page }) => {
+  await waitForFullViewDistance(page);
+
+  // 整段跑在一次同步的 evaluate 里：游戏循环插不进来，tick 数与画面因此是精确的。
+  // 画面反馈要自己调 render()，帧是循环发起的，这里没有帧。
+  const dig = await page.evaluate(
+    ({ pitch, ticksToBreak }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const x = Math.floor(core.player.position.x);
+      const z = Math.floor(core.player.position.z);
+      // 脚下那一格：低头看到底，视线几乎竖直向下
+      const y = Math.floor(core.player.position.y) - 1;
+      core.turn(0, -pitch);
+
+      /**
+       * 画布正中那一像素的 RGB。
+       *
+       * 视线几乎竖直向下，画面正中正落在目标方块贴图的中心，而裂纹图案就是从那里长起来
+       * 的——裂纹与挖出来的坑因此都在这一像素上看得见。只对场景里那两个对象下断言的话，
+       * 证不到它们真的画进了画布。
+       */
+      const centerRgb = (): [number, number, number] => {
+        const canvas = document.querySelector('canvas');
+        if (!(canvas instanceof HTMLCanvasElement)) throw new Error('页面上没有画布');
+        const scratch = document.createElement('canvas');
+        scratch.width = canvas.width;
+        scratch.height = canvas.height;
+        const context = scratch.getContext('2d');
+        if (!context) throw new Error('拿不到 2D 上下文');
+        context.drawImage(canvas, 0, 0);
+        const { data } = context.getImageData(canvas.width >> 1, canvas.height >> 1, 1, 1);
+        return [data[0] ?? 0, data[1] ?? 0, data[2] ?? 0];
+      };
+
+      core.tick();
+      renderer.render();
+      const aimed = {
+        block: core.getBlock(x, y, z),
+        selection: renderer.selection,
+        rgb: centerRgb(),
+      };
+
+      core.setMining(true);
+      core.tick(ticksToBreak - 1);
+      renderer.render();
+      const meshBefore = renderer.chunkMeshVertexCount(0, 0);
+      const almost = {
+        block: core.getBlock(x, y, z),
+        selection: renderer.selection,
+        rgb: centerRgb(),
+      };
+
+      core.tick(1);
+      core.setMining(false);
+      renderer.syncChunkMeshes();
+      renderer.render();
+      const broken = {
+        block: core.getBlock(x, y, z),
+        selection: renderer.selection,
+        rgb: centerRgb(),
+        meshVertices: renderer.chunkMeshVertexCount(0, 0),
+      };
+
+      return { at: { x, y, z }, aimed, almost, meshBefore, broken };
+    },
+    { pitch: MAX_PITCH, ticksToBreak: miningTicks(BlockType.Grass) },
+  );
+
+  /** 一像素的亮度。 */
+  const brightness = (rgb: readonly number[]): number => rgb.reduce((sum, c) => sum + c, 0);
+
+  // 瞄上就有选框，还没挖所以没有裂纹；画面正中是草的绿
+  expect(dig.aimed.block).toBe(BlockType.Grass);
+  expect(dig.aimed.selection.target).toEqual(dig.at);
+  expect(dig.aimed.selection.crackStage).toBeUndefined();
+  expect(dig.aimed.rgb[1]).toBeGreaterThan(dig.aimed.rgb[0]);
+
+  // 差一 tick 碎：草还在，裂纹到了最后一阶，而且真画上去了——正中被压暗了一大截
+  expect(dig.almost.block).toBe(BlockType.Grass);
+  expect(dig.almost.selection.crackStage).toBe(CRACK_STAGES - 1);
+  expect(brightness(dig.almost.rgb)).toBeLessThan(brightness(dig.aimed.rgb) * 0.7);
+
+  // 挖穿：方块消失、网格重建，选框落到坑底那块泥土上，正中也从草绿变成泥土的褐
+  expect(dig.broken.block).toBe(BlockType.Air);
+  expect(dig.broken.meshVertices).not.toBe(dig.meshBefore);
+  expect(dig.broken.selection.target).toEqual({ ...dig.at, y: dig.at.y - 1 });
+  expect(dig.broken.selection.crackStage).toBeUndefined();
+  expect(dig.broken.rgb[0]).toBeGreaterThan(dig.broken.rgb[1]);
+  expect(errors).toEqual([]);
+});
+
+test('锁定鼠标后按住左键才挖，松开就停', async ({ page }) => {
+  await grabPointer(page);
+  await page.evaluate((pitch) => window.__VOXEL__!.core.turn(0, -pitch), MAX_PITCH);
+
+  /** 推进几个 tick，返回挖掘进度与目标。 */
+  const digForTicks = async (): Promise<{ progress: number; hasTarget: boolean }> =>
+    page.evaluate(() => {
+      const core = window.__VOXEL__!.core;
+      core.tick(5);
+      return { progress: core.mining.progress, hasTarget: core.mining.target !== undefined };
+    });
+
+  // 瞄着但没按左键：有目标，进度是 0
+  const idle = await digForTicks();
+  expect(idle.hasTarget).toBe(true);
+  expect(idle.progress).toBe(0);
+
+  await page.mouse.down();
+  expect((await digForTicks()).progress).toBeGreaterThan(0);
+
+  await page.mouse.up();
+  expect((await digForTicks()).progress).toBe(0);
+  expect(errors).toEqual([]);
 });
 
 test('核心以固定步长推进', async ({ page }) => {

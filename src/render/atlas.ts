@@ -57,6 +57,30 @@ export interface UvRect {
 }
 
 /**
+ * 裂纹贴图条：10 张 16×16 横排成一张图，第 n 张就是第 n 阶裂纹。
+ *
+ * 单独一张图而不是塞进方块图集：裂纹是贴在方块表面上的另一层，用的是另一种材质
+ * （半透明混合，而不是图集那样靠 alphaTest 抠树叶），而且要靠 uv 偏移逐阶切换——
+ * 偏移是贴图对象上的属性，两种材质共用一张贴图就得各自克隆一份。
+ */
+export const CRACK_PATH = 'textures/crack.png';
+
+/** 裂纹分几阶。 */
+export const CRACK_STAGES = 10;
+
+/**
+ * 挖掘进度对应的裂纹阶（0 到 `CRACK_STAGES` − 1），没在挖时没有裂纹，返回 undefined。
+ *
+ * 核心只报进度（见 `MiningView.progress`），分几阶是贴图的事：换一套阶数不同的贴图包
+ * 只改这个文件。进度刚过 0 就出第一阶——玩家一按下就得看到反馈；进度到 1 时钳在最后
+ * 一阶，不会越界取到下一张图。
+ */
+export function crackStage(progress: number): number | undefined {
+  if (!(progress > 0)) return undefined;
+  return Math.min(CRACK_STAGES - 1, Math.floor(progress * CRACK_STAGES));
+}
+
+/**
  * 格号对应的 uv 矩形。
  * v 轴向上，而格号从图集顶行开始编号，因此 row 0 落在 v 接近 1 的一侧——
  * 与 three.js 默认的 flipY 纹理一致，贴图才不会上下颠倒。

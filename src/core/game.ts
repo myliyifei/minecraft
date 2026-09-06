@@ -1,6 +1,7 @@
-import { BlockType, type BlockView } from './block';
+import { BlockType, type BlockEdit } from './block';
 import type { ChunkView } from './chunk';
 import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS } from './constants';
+import { Mining, type MiningView } from './mining';
 import { IDLE_INTENT, Player, type MoveIntent, type PlayerView } from './player';
 import { streamChunks } from './streaming';
 import { plainsTerrain } from './terrain';
@@ -29,16 +30,18 @@ export interface GameCoreOptions {
  * 无头游戏核心：纯 TypeScript，不依赖 Three.js 与 DOM，可在 Node 中直接实例化。
  * 这是主测试接缝——渲染与输入适配器只通过这里的指令和查询与游戏交互。
  *
- * 本切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」四件事。
- * 挖掘、掉落物等系统由后续切片挂进 step()。
+ * 本切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」「空手挖掘」
+ * 五件事。掉落物、经验等系统由后续切片挂进 step()。
  */
-export class GameCore implements BlockView {
+export class GameCore implements BlockEdit {
   private readonly world: World;
   private readonly worldSeed: number;
   private readonly radius: number;
   private readonly playerState: Player;
+  private readonly miningState: Mining;
   private ticks = 0;
   private intent: MoveIntent = IDLE_INTENT;
+  private miningHeld = false;
 
   constructor(options: GameCoreOptions = {}) {
     this.worldSeed = options.seed ?? DEFAULT_SEED;
@@ -49,11 +52,17 @@ export class GameCore implements BlockView {
     // 其余由 tick 补上——所以浏览器那一侧要先把出生点那一带备好，见 src/main.ts。
     streamChunks(this.world, ORIGIN_CHUNK, this.radius);
     this.playerState = new Player(this.world, this.spawnPoint);
+    this.miningState = new Mining(this.world, this.playerState);
   }
 
-  /** 玩家状态的只读视图。渲染层读它摆相机，改状态只能通过下面两个指令。 */
+  /** 玩家状态的只读视图。渲染层读它摆相机，改状态只能通过下面几个指令。 */
   get player(): PlayerView {
     return this.playerState;
+  }
+
+  /** 挖掘状态的只读视图：目标方块、命中面与进度。渲染层读它画选框与裂纹。 */
+  get mining(): MiningView {
+    return this.miningState;
   }
 
   /**
@@ -62,6 +71,14 @@ export class GameCore implements BlockView {
    */
   setMoveIntent(intent: MoveIntent): void {
     this.intent = intent;
+  }
+
+  /**
+   * 设定挖掘键按着没有，下一个 tick 生效。
+   * 与移动意图同一条路：它改变的是持续状态，不是「看向哪里」——见 ADR-0004。
+   */
+  setMining(held: boolean): void {
+    this.miningHeld = held;
   }
 
   /** 转动视角（弧度增量）。不等 tick，鼠标一动就生效——见 ADR-0004。 */
@@ -92,6 +109,11 @@ export class GameCore implements BlockView {
 
   setBlock(x: number, y: number, z: number, block: BlockType): boolean {
     return this.world.setBlock(x, y, z, block);
+  }
+
+  /** 取走「哪些方块变过」的记录并清空。渲染层每帧取一次，据此重建过期的区块网格。 */
+  takeChangedBlocks(): Vec3[] {
+    return this.world.takeChangedBlocks();
   }
 
   /**
@@ -150,5 +172,7 @@ export class GameCore implements BlockView {
     // 「未加载即空气」的虚空里往下掉。
     streamChunks(this.world, this.playerChunk, this.radius);
     this.playerState.step(this.intent);
+    // 挖掘必须排在移动之后，理由见 Mining.step。
+    this.miningState.step(this.miningHeld);
   }
 }

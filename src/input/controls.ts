@@ -1,6 +1,6 @@
 import type { GameCore } from '../core/game';
 import { IDLE_INTENT, type MoveIntent } from '../core/player';
-import { ACTION_BY_CODE, MOVE_ACTIONS, type MoveAction } from './keybindings';
+import { ACTION_BY_CODE, MOUSE_BINDINGS, MOVE_ACTIONS, type MoveAction } from './keybindings';
 import { isPointerSpike } from './pointer-spike';
 
 /**
@@ -10,13 +10,13 @@ import { isPointerSpike } from './pointer-spike';
 export const MOUSE_SENSITIVITY = 0.0022;
 
 /** 输入适配器要用到的核心指令。写成窄接口，接线接错了编译期就报。 */
-export type PlayerInputTarget = Pick<GameCore, 'setMoveIntent' | 'turn'>;
+export type PlayerInputTarget = Pick<GameCore, 'setMoveIntent' | 'turn' | 'setMining'>;
 
 /**
- * 输入适配器：把键鼠事件翻译成移动意图与视角增量交给核心。
+ * 输入适配器：把键鼠事件翻译成移动意图、挖掘意图与视角增量交给核心。
  *
- * 这里没有任何游戏逻辑——走多快、跳多高、撞不撞墙全在 `src/core/player.ts`。
- * 未锁定时按键不生效，因此 Esc 之后玩家不会继续走。
+ * 这里没有任何游戏逻辑——走多快、跳多高、撞不撞墙、一块方块挖多久全在 `src/core/`。
+ * 未锁定时按键与鼠标按钮都不生效，因此 Esc 之后玩家不会继续走、也不会继续挖。
  *
  * **Esc 不在键位表里**：退出指针锁定是浏览器按规范必须做的事，页面既拦不住也换不掉，
  * 所以把 `Escape` 写进可自定义的键位表反而是撒谎。设置界面（后续切片）改不到它。
@@ -49,9 +49,21 @@ export function installPlayerControls(
 
   const onLockChange = (): void => {
     if (locked()) return;
-    // 释放锁定时清掉按键状态：Esc 之后玩家不该还朝原方向走下去。
+    // 释放锁定时清掉按键状态：Esc 之后玩家不该还朝原方向走下去，也不该还在挖。
     pressed.clear();
     sendIntent();
+    target.setMining(false);
+  };
+
+  const onMouseDown = (event: MouseEvent): void => {
+    if (!locked() || event.button !== MOUSE_BINDINGS.mine) return;
+    target.setMining(true);
+  };
+
+  const onMouseUp = (event: MouseEvent): void => {
+    // 松开一律处理，哪怕这期间锁定丢了，否则会一直挖下去。
+    if (event.button !== MOUSE_BINDINGS.mine) return;
+    target.setMining(false);
   };
 
   const onMouseMove = (event: MouseEvent): void => {
@@ -89,6 +101,10 @@ export function installPlayerControls(
   canvas.addEventListener('click', onClick);
   document.addEventListener('pointerlockchange', onLockChange);
   document.addEventListener('mousemove', onMouseMove);
+  // 鼠标按钮挂在 document 而不是画布上：锁定期间事件本来就投给锁定的元素，而松开有可能
+  // 发生在画布之外，漏掉它按钮就卡住了。
+  document.addEventListener('mousedown', onMouseDown);
+  document.addEventListener('mouseup', onMouseUp);
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
 
@@ -96,6 +112,8 @@ export function installPlayerControls(
     canvas.removeEventListener('click', onClick);
     document.removeEventListener('pointerlockchange', onLockChange);
     document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mousedown', onMouseDown);
+    document.removeEventListener('mouseup', onMouseUp);
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
   };

@@ -87,7 +87,7 @@ export const OAK_SPAWN_CLEARANCE = 7;
 const OAK_TREE_SALT = 0x2f1a_9c37;
 
 /**
- * 一个树格的哈希切成四段互不重叠的位，各当一颗骰子用：格内落点 x、格内落点 z、
+ * 一个树格的哈希切成四段互不重叠的位，各当一个独立的随机数用：格内落点 x、格内落点 z、
  * 树干高度、这一格有没有树。`hashCoords` 已经把输入的每一位搅到输出的所有位上，
  * 切位段比对同一格算四次哈希便宜。
  */
@@ -96,10 +96,10 @@ const SLOT_Z_SHIFT = 3;
 const TRUNK_SHIFT = 6;
 const PRESENCE_SHIFT = 14;
 
-/** 一段 8 位的骰子，取值 0–255。 */
+/** 一段 8 位的随机数，取值 0–255。 */
 const ROLL_MASK = 0xff;
 
-/** 骰子小于这个数，这一格就长树。64/256 = 25%，一个区块 4 个树格，平均约一棵。 */
+/** 随机数小于这个数，这一格就长树。64/256 = 25%，一个区块 4 个树格，平均约一棵。 */
 const OAK_TREE_CHANCE = 64;
 
 /**
@@ -146,7 +146,7 @@ function cellOf(worldCoord: number): number {
  * 某个树格里的落点：树干那一列，与树干高度。这一格不长树则 undefined。
  *
  * 只问种子，不问地表高度——判断两棵树挨得开不开只看水平距离，而地表高度是这里最贵的
- * 一次计算（一次分形噪声），邻格检查不该为它付钱。
+ * 一次计算（一次分形噪声），邻格检查不该承担这个开销。
  */
 function oakSiteInCell(
   seed: number,
@@ -225,7 +225,7 @@ export function oakTreesTouching(
  * 把会写进这个区块的橡树种下去。
  *
  * 要在土石铺好之后调：树叶只往空气里长，得先有地面才知道哪里是空气。
- * 落在区块外的格子由 `Chunk` 自己丢掉，那部分是邻居区块的活。
+ * 落在区块外的格子由 `Chunk` 自己丢掉，那部分由邻居区块写。
  */
 export function plantOakTrees(placement: TreePlacement, chunk: Chunk): void {
   const originX = chunk.cx * CHUNK_SIZE;
@@ -249,7 +249,7 @@ function plantCanopy(chunk: Chunk, tree: OakTree, lx: number, lz: number): void 
         if (!corners && Math.abs(dx) === radius && Math.abs(dz) === radius) continue;
         // 只往空气里长，不顶掉已经在那儿的方块。平原上这一条其实一次也没触发过：树冠
         // 底面只比自己那一列的地表高两格，而两格外的地面最多也就高两格——两者相等时
-        // 那一格就是邻居的草方块，顶掉它就是地上一个洞。地形一变陡就不再是余量。
+        // 那一格就是邻居的草方块，顶掉它就是地上一个洞。地形一变陡这点余量就没了。
         if (chunk.get(lx + dx, y, lz + dz) !== BlockType.Air) continue;
         chunk.set(lx + dx, y, lz + dz, BlockType.OakLeaves);
       }

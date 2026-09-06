@@ -124,7 +124,7 @@ describe('World 记下变过的方块', () => {
 });
 
 describe('区块索引', () => {
-  it('相邻与远处的区块互不串台', () => {
+  it('相邻与远处的区块互不混淆', () => {
     const world = new World(flatTestTerrain);
     const spots: Array<[number, number]> = [
       [0, 0],

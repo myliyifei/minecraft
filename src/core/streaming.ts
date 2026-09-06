@@ -4,7 +4,7 @@ import { byDistanceTo, chunksAround, type ChunkCoord, type World } from './world
 /**
  * 让世界的已加载区块跟上一个中心区块：视距内缺的补上，太远的卸载。
  *
- * 加载范围是以中心为心、边长 2·radius+1 的方形（切比雪夫距离 ≤ radius），
+ * 加载范围是以中心区块为中心、边长 2·radius+1 的方形（切比雪夫距离 ≤ radius），
  * 卸载线比它多留 UNLOAD_MARGIN 环。
  *
  * 缺的区块按到中心的距离由近到远向来源要。来源可以答「还没准备好」（浏览器里区块在

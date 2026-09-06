@@ -27,10 +27,10 @@ export function startGameLoop(core: GameCore, render: (alpha: number) => void): 
       accumulator -= TICK_MS;
       steps++;
     }
-    // 落后太多就直接丢弃欠账，宁可跳过时间也不要卡住渲染。
+    // 落后太多就直接丢弃没补上的 tick，宁可跳过时间也不要卡住渲染。
     if (accumulator > TICK_MS * MAX_CATCHUP_TICKS) accumulator = 0;
 
-    // 一帧补不完 MAX_CATCHUP_TICKS 时欠账还剩不止一个 tick，alpha 会超过 1。
+    // 一帧补不完 MAX_CATCHUP_TICKS 时还剩不止一个 tick 没补，alpha 会超过 1。
     // 夹到 1：宁可画在当前 tick 的位置上，也不要外推到玩家还没走到的地方。
     render(Math.min(accumulator / TICK_MS, 1));
     handle = requestAnimationFrame(frame);

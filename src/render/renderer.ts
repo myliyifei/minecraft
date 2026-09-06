@@ -225,7 +225,7 @@ export class WorldRenderer {
   syncChunkMeshes(budget = MESH_BUDGET_PER_FRAME): void {
     // 挖掉的方块必须当帧就从画面上消失，所以重建不占这一帧的建网格预算——一次改动最多
     // 牵动三个区块（自己加两个侧向邻居），远小于铺开视距时的积压。还没建过网格的区块跳过：
-    // 它得等四邻齐全（见 planChunkMeshes），这里插一手会绕过那条规则。
+    // 它得等四邻齐全（见 planChunkMeshes），在这里建会绕过那条规则。
     for (const { cx, cz } of staleChunksFor(this.core.takeChangedBlocks())) {
       if (this.hasChunkMesh(cx, cz)) this.rebuildChunk(cx, cz);
     }
@@ -250,7 +250,7 @@ export class WorldRenderer {
   /**
    * 建一个区块的网格。
    *
-   * 一个面都没有的区块（整块空气）仍然要记进账里，只是不往场景里放东西：不记账的话
+   * 一个面都没有的区块（整块空气）仍然要记进已建网格的表里，只是不往场景里放东西：不记的话
    * `planChunkMeshes` 每帧都会重新提议它，这一帧的建网格预算就一直被它占着。
    */
   private buildChunk(cx: number, cz: number): void {

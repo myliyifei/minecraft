@@ -93,7 +93,7 @@ export interface DropSink {
  * 渲染层每帧读 `all()` 自己摆小方块，见 ADR-0007。
  *
  * 时间只由 `step()` 的调用次数表达（ADR-0002）；水平初速度由种子与坐标哈希出来
- * （ADR-0003），因此同一串 tick 每次都长出同一条轨迹。
+ * （ADR-0003），因此同一串 tick 每次都得到同一条轨迹。
  */
 export class Drops implements DropsView, DropSink {
   private readonly blocks: BlockView;

@@ -21,7 +21,7 @@ export const SPAWN_READY_RADIUS = 3;
  *
  * 超上限时丢最后到的那个：请求按由近到远发出，最后到的最远，最晚才会用到。
  * 上限远大于引导阶段一次要等的那一片（`SPAWN_READY_RADIUS`），否则等到的区块会在
- * `awaitChunks` resolve 之前就被丢掉，出生点算在虚空里；有测试守着这条。
+ * `awaitChunks` resolve 之前就被丢掉，出生点算在虚空里；有测试检查这条。
  */
 export const MAX_READY_CHUNKS = 512;
 
@@ -35,7 +35,7 @@ export interface ChunkStreamOptions {
  *
  * 核心每 tick 问一遍缺哪些区块（`streamChunks`）：手上有就当场给，没有就替它向 Worker
  * 发一次请求，并回答「还没准备好」。这就是 ADR-0003 说的「浏览器适配器负责在 Worker
- * 里调用生成器并异步回填」——核心那一侧仍然是同步的、可在 Node 里裸跑的。
+ * 里调用生成器并异步回填」——核心那一侧仍然是同步的、可在 Node 里单独运行的。
  */
 export interface ChunkStream {
   /** 生成这些区块用的种子。核心从这里拿，种子因此只有一个出处。 */

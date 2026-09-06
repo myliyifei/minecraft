@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   const canvas = document.querySelector('#game');
   if (!(canvas instanceof HTMLCanvasElement)) throw new Error('页面缺少 #game 画布');
 
-  // 地形生成搬进 Worker：铺满视距要生成几百个区块，摊在主线程上就是一串掉帧。
+  // 地形生成搬进 Worker：铺满视距要生成几百个区块，放在主线程上会连续掉帧。
   const seed = DEFAULT_SEED;
   const chunks = createChunkStream({
     seed,

@@ -342,7 +342,7 @@ describe('GameCore 的空手挖掘', () => {
   /**
    * 挖掉一块草要多少 tick。
    * 从耗时表里取而不是写 18：这一节测的是「按键 → tick → 方块消失」这条线接上了没有，
-   * 耗时表本身由 tests/core/block.test.ts 与 tests/core/mining.test.ts 钉住。
+   * 耗时表本身由 tests/core/block.test.ts 与 tests/core/mining.test.ts 断言。
    */
   const GRASS_TICKS = miningTicks(BlockType.Grass);
 
@@ -505,7 +505,7 @@ describe('GameCore 的空手挖掘', () => {
       core.setMining(true);
       core.tick(GRASS_TICKS);
       core.setMining(false);
-      // 挖掉那一格是方块变更，取走之后账上就该是空的
+      // 挖掉那一格是方块变更，取走之后记录就该是空的
       expect(core.takeChangedBlocks()).toHaveLength(1);
 
       // 掉落物在这几十 tick 里下落、被吸走，一次都不该让网格重建

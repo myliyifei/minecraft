@@ -22,7 +22,7 @@ function keysOf(coords: readonly ChunkCoord[]): string[] {
 
 const CENTER: ChunkCoord = { cx: 0, cz: 0 };
 
-/** 以 CENTER 为心、半径 radius 的方形内的全部区块。 */
+/** 以 CENTER 为中心、半径 radius 的方形内的全部区块。 */
 function square(radius: number, center: ChunkCoord = CENTER): ChunkCoord[] {
   return chunksAround(center, radius);
 }
@@ -137,7 +137,7 @@ describe('每帧的建网格预算', () => {
 
 describe('每帧的预算追不追得上走路', () => {
   /**
-   * 按 60fps、20tick/s 跑一遍「一直往前走」，返回每帧结束时还欠多少个区块的网格。
+   * 按 60fps、20tick/s 跑一遍「一直往前走」，返回每帧结束时还积压多少个区块的网格。
    *
    * 网格积压是「走动过程中不出现明显卡顿」这条验收的可测部分：一帧只建两个，只要积压
    * 不一路增长，网格补齐的速度就跟得上玩家走路的速度。真正建网格的动作在这里换成
@@ -180,7 +180,7 @@ describe('每帧的预算追不追得上走路', () => {
     // 之后每跨一条区块边界要补一列，积压跟着跳一下，但从不超过一列，也从不累积
     expect(Math.max(...walking)).toBeLessThanOrEqual(2 * DEFAULT_VIEW_RADIUS + 1);
     expect(walking.at(-1)).toBe(0);
-    // 走一格区块要 3.7 秒、两百多帧，尖峰几帧就消掉，绝大多数帧一个都不欠
+    // 走一格区块要 3.7 秒、两百多帧，尖峰几帧就消掉，绝大多数帧没有积压
     expect(idleFrames / walking.length).toBeGreaterThan(0.8);
   });
 });

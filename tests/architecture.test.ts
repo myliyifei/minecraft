@@ -70,8 +70,8 @@ describe('地形生成的纯性（ADR-0003：地形生成是纯函数）', () =>
   const coreFiles = tsFilesIn(join(SRC, 'core'));
 
   it('核心不用非确定性的来源', () => {
-    // 同一个种子必须每次长出同一个世界。真随机与真实时钟一旦进入核心，
-    // 「先加载 A 再 B 与反过来一致」这类断言就守不住了。
+    // 同一个种子必须每次生成同一个世界。真随机与真实时钟一旦进入核心，
+    // 「先加载 A 再 B 与反过来一致」这类断言就不成立了。
     const forbidden = /\b(Math\.random|Date\.now|performance\.now)\b/;
     for (const file of coreFiles) {
       expect(codeOf(file)).not.toMatch(forbidden);
@@ -91,7 +91,7 @@ describe('区块 Worker 的隔离（ADR-0003：Worker 只是适配器）', () =>
   const worker = join(SRC, 'worker/chunk-worker.ts');
 
   it('Worker 只从核心与协议里引入模块', () => {
-    // Worker 里没有 DOM 也没有 three。把渲染层的东西牵进来，页面一打开就报错，
+    // Worker 里没有 DOM 也没有 three。引入渲染层的模块后页面一打开就报错，
     // 而且是在一个不太好查的地方报。
     for (const specifier of importedModules(readFileSync(worker, 'utf8'))) {
       expect(specifier).toMatch(/^\.\.\/core\/|^\.\//);

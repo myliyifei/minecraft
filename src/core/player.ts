@@ -30,7 +30,7 @@ export const MAX_PITCH = Math.PI / 2 - 0.01;
 /**
  * 起跳的竖直初速度（方块/tick）。
  * 与 `physics.ts` 的重力、阻力配在一起，最高点落在 1.252 方块：够上一格台阶，够不上
- * 两格。改这三个数中的任何一个都会改变这条手感，`tests/core/player.test.ts` 守着它。
+ * 两格。改这三个数中的任何一个都会改变这条手感，`tests/core/player.test.ts` 会检查它。
  */
 export const JUMP_VELOCITY = 0.42;
 
@@ -67,7 +67,7 @@ export interface PlayerView {
   readonly yaw: number;
   readonly pitch: number;
   readonly onGround: boolean;
-  /** 当前的碰撞箱。掉落物的吸入范围是把它撑开一圈，见 `PICKUP_MARGIN`。 */
+  /** 当前的碰撞箱。掉落物的吸入范围是把它外扩一圈，见 `PICKUP_MARGIN`。 */
   readonly hitbox: Hitbox;
 }
 

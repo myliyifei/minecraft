@@ -25,7 +25,7 @@ export const SEA_LEVEL = 63;
 /**
  * 地表的最低高度。
  * 本切片只有平原一种群系，地形恒在海平面以上，因此不出现流体；大海与沙滩见后续切片。
- * 各群系的地形算法都必须守住这条线，平原的参数见 `terrain.ts`。
+ * 各群系的地形算法都必须满足这个下界，平原的参数见 `terrain.ts`。
  */
 export const MIN_SURFACE_Y = SEA_LEVEL + 1;
 
@@ -46,7 +46,7 @@ export const TICK_RATE = 20;
 export const TICK_MS = 1000 / TICK_RATE;
 
 /**
- * 默认视距（区块数）：以玩家所在区块为心，这个半径内的区块保持加载。
+ * 默认视距（区块数）：以玩家所在区块为中心，这个半径内的区块保持加载。
  * 建核心时可以换个值（`GameCoreOptions.viewRadius`）；让玩家在设置界面里现场调
  * 是后续切片的事。
  */

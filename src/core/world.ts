@@ -58,7 +58,7 @@ export class World implements BlockEdit {
 
   /**
    * 卸载所有离中心区块超过 keepRadius 的区块（切比雪夫距离，即方形范围之外）。
-   * 多远算太远是流式加载的政策，见 `streamChunks`；这里只负责走一遍自己那张表。
+   * 多远算太远由流式加载决定，见 `streamChunks`；这里只负责走一遍自己那张表。
    */
   unloadOutside(center: ChunkCoord, keepRadius: number): void {
     for (const { cx, cz } of this.chunks.values()) {
@@ -181,7 +181,7 @@ export function localOf(worldCoord: number): number {
 export const ORIGIN_CHUNK: ChunkCoord = { cx: 0, cz: 0 };
 
 /**
- * 以中心区块为心、半径 radius 的方形范围内的全部区块坐标。
+ * 以中心区块为中心、半径 radius 的方形范围内的全部区块坐标。
  * 加载范围、网格范围、引导阶段要等的那一片，说的都是这个形状。
  */
 export function chunksAround(center: ChunkCoord, radius: number): ChunkCoord[] {
@@ -197,7 +197,7 @@ export function chunksAround(center: ChunkCoord, radius: number): ChunkCoord[] {
 /**
  * 按到中心的距离由近到远排的比较函数。
  *
- * 用欧氏距离，而不是决定加载范围的那个切比雪夫距离：这样补齐的顺序是以玩家为心由近到
+ * 用欧氏距离，而不是决定加载范围的那个切比雪夫距离：这样补齐的顺序是以玩家为中心由近到
  * 远，而不是先补满一个方环。比平方就够，不必开根号。
  */
 export function byDistanceTo(center: ChunkCoord): (a: ChunkCoord, b: ChunkCoord) => number {

@@ -33,7 +33,7 @@ const SCAN_RADIUS = 4;
 /**
  * 树根落在这片区块里的全部橡树，按位置排好。
  *
- * 一棵树的树冠最多被 4 个区块认领，所以按列去重；只留树根在扫描范围内的，
+ * 一棵树的树冠最多被 4 个区块各算一遍，所以按列去重；只留树根在扫描范围内的，
  * 范围边上那些只伸进来半个树冠的不算，密度才数得准。
  */
 function oakTreesIn(seed: number, radius: number): OakTree[] {
@@ -81,7 +81,7 @@ function trunkColumnsIn(world: World, radius: number): string[] {
   return columns.sort();
 }
 
-/** 以树干为心、半径 radius 的那一层里有几格树叶。 */
+/** 以树干为中心、半径 radius 的那一层里有几格树叶。 */
 function leavesInLayer(world: World, tree: OakTree, y: number, radius: number): number {
   let count = 0;
   for (let dx = -radius; dx <= radius; dx++) {
@@ -205,7 +205,7 @@ describe('橡树的位置由种子决定', () => {
     expect(backwards).toEqual(forwards);
   });
 
-  it('世界里的树就是 oakTreesTouching 预告的那些', () => {
+  it('世界里的树就是 oakTreesTouching 算出的那些', () => {
     const world = worldWith(SEED, around);
     const predicted = oakTreesIn(SEED, radius)
       .map((tree) => `${tree.x},${tree.z}`)
@@ -298,7 +298,7 @@ describe('树叶只往空气里长', () => {
 
   it('高出来的那半边地面不会被树冠顶掉', () => {
     // 平原的坡太缓，树冠碰不到旁边的地面，这条规则在真实地形里几乎不触发。放树只认一个
-    // 「地表高度」函数，所以喂它一道陡台阶：某棵树落在矮的那半边，树冠伸进高的那半边的
+    // 「地表高度」函数，所以给它一道陡台阶：某棵树落在矮的那半边，树冠伸进高的那半边的
     // 地里去，规则本身因此被测到。
     const tree = oakTreesIn(SEED, SCAN_RADIUS - 1)[0];
     if (!tree) throw new Error('扫描范围内应有橡树');

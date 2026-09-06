@@ -1,7 +1,7 @@
 // 后缀要写全：vite.config.ts 会 import 本文件去填 index.html 的占位符，而 Vite 的原生
 // 配置加载器解析不了省略后缀的路径。这条约束是传递的——本文件与它 import 到的模块
 // （现在是 core/item.ts，那边一个 import 都没有）都在配置加载器的模块图里，往那条链上
-// 加省略后缀的 import 会让 `npm run dev` 报警。其余源文件不经过配置加载器，照旧不写后缀。
+// 加省略后缀的 import 会让 `npm run dev` 发出警告。其余源文件不经过配置加载器，照旧不写后缀。
 import { ItemType } from '../core/item.ts';
 
 /**

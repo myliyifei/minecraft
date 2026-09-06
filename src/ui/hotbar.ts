@@ -8,7 +8,7 @@ import { ITEM_NAMES, STRINGS } from './strings';
  *
  * 图标是方块图集的一张 CSS 精灵图——3D 场景与界面因此用同一份贴图，换贴图包时快捷栏
  * 跟着变，不必再准备一套图标。取哪一格由 `ITEM_TILES` 决定（`src/render/atlas.ts` 是
- * 纯数据，不牵 three.js）；格子多大、怎么排在 `style.css` 里，这里只写下标。
+ * 纯数据，不依赖 three.js）；格子多大、怎么排在 `style.css` 里，这里只写下标。
  */
 export interface HotbarHud {
   /** 让画面跟上背包。每帧调一次；某一格的内容没变就一个 DOM 属性都不碰。 */

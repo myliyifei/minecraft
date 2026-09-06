@@ -55,7 +55,7 @@ export class Inventory implements InventoryView, ItemSink {
    *
    * 与第二轮一样按下标升序走，「快捷栏优先」因此不需要额外一行代码。留意一点：走完
    * `add` 之后同一种物品最多只剩一个未满堆（先填满已有的才另起一堆），所以「快捷栏与
-   * 背包各有一堆未满、看谁先被填」这种局面在本切片的接口下攒不出来。
+   * 背包各有一堆未满、看谁先被填」这种局面在本切片的接口下构造不出来。
    */
   private topUpExisting(item: ItemType, limit: number, count: number): number {
     let left = count;

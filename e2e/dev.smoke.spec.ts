@@ -59,7 +59,7 @@ function spawnAreaTree(): OakTree {
  * 等视距内的区块全部到位。
  *
  * 页面打开时只等好了出生点那一小片（见 SPAWN_READY_RADIUS），
- * 其余由 Worker 陆续送来。要对整片地形下断言就得先等它长齐，否则读到的是
+ * 其余由 Worker 陆续送来。要对整片地形下断言就得先等它补齐，否则读到的是
  * 「未加载即空气」。
  */
 async function waitForFullViewDistance(page: Page): Promise<void> {
@@ -151,7 +151,7 @@ async function grabPointer(page: Page): Promise<void> {
 /**
  * 走一段路，返回起止位置。
  *
- * 时间由 `core.tick(n)` 显式推进，不等墙上时间：headless Chromium 在指针锁定期间会
+ * 时间由 `core.tick(n)` 显式推进，不等真实时钟：headless Chromium 在指针锁定期间会
  * 把页面的任务调度降到约 1/10 并继续退化（rAF 与 setInterval 一起变慢，解锁即恢复），
  * 靠 `waitForTimeout` 数 tick 在这里是不可靠的。整段跑在一次 evaluate 里，
  * 游戏循环插不进来，位移因此是精确值。真人按键的那条路（keydown → 移动意图）
@@ -291,7 +291,7 @@ test('地形生成在 Worker 里进行，视距内的区块陆续送到', async 
     delivered: window.__VOXEL__!.chunks.deliveredCount,
   }));
   // 送回来的不少于世界里现有的：视距铺满靠的是 Worker 的产出，不是主线程边跑边生成
-  // （主线程压根没有生成器——核心拿到的来源只有 chunks.source，见 src/main.ts）
+  // （主线程根本没有生成器——核心拿到的来源只有 chunks.source，见 src/main.ts）
   expect(state.delivered).toBeGreaterThanOrEqual(state.loaded);
   expect(errors).toEqual([]);
 });
@@ -451,7 +451,7 @@ test('手做不到的巨型鼠标增量不转动视角', async ({ page }) => {
 });
 
 test('相机跟在玩家眼睛上，并在两个 tick 之间插值', async ({ page }) => {
-  // 这条不用锁鼠标：主角是渲染层，移动意图直接给核心。
+  // 这条不用锁鼠标：测的是渲染层，移动意图直接给核心。
   const camera = await page.evaluate((ticks) => {
     const { core, renderer } = window.__VOXEL__!;
     const eyeAbove = (): number => renderer.cameraPosition.y - core.player.position.y;
@@ -614,7 +614,7 @@ test('按住左键一秒把脚下的草挖掉，掉出的泥土进快捷栏', as
   // **对准要在按下之后**：指针锁定下 Playwright 的 mouse.down 会连带投一发大位移的
   // mousemove，视角当场被甩到别处，按下之前对准的方向会被它抵消——真人按键不会有
   // 这发位移。
-  // 推进时间同样走 evaluate，不等墙上时间：throttle 之下靠时钟数 tick 不可靠。
+  // 推进时间同样走 evaluate，不等真实时钟：throttle 之下靠时钟数 tick 不可靠。
   const at = await page.evaluate(
     ({ pitch, ticks }) => {
       const core = window.__VOXEL__!.core;
@@ -698,7 +698,7 @@ test('快捷栏图标取的就是图集里泥土那一格', async ({ page }) => 
   );
 
   // 图集真解得开、尺寸就是图集那个尺寸，而且 CSS 那串 calc 算出来的偏移正好落在泥土
-  // 那一格上。`toBeVisible` 挡不住这两种错——图挂了、偏移指错格，元素照样有尺寸。
+  // 那一格上。`toBeVisible` 挡不住这两种错——图加载失败、偏移指错格，元素照样有尺寸。
   const { col, row } = tileCell(ITEM_TILES[ItemType.Dirt].side);
   expect(icon.decoded).toBe(true);
   expect(icon.atlasWidth).toBe(ATLAS_COLS * TILE_PX);
@@ -708,8 +708,8 @@ test('快捷栏图标取的就是图集里泥土那一格', async ({ page }) => 
 });
 
 test('挖两块并进同一堆，快捷栏这才显示数量', async ({ page }) => {
-  // 不锁鼠标：主角是 HUD，挖掘意图直接给核心。整段跑在一次同步的 evaluate 里，
-  // 游戏循环插不进来，捡到几个因此是精确的——锁定期间的任务调度会把这一点搅乱。
+  // 不锁鼠标：测的是 HUD，挖掘意图直接给核心。整段跑在一次同步的 evaluate 里，
+  // 游戏循环插不进来，捡到几个因此是精确的——锁定期间的任务调度会把这一点打乱。
   const shown = await page.evaluate(
     ({ pitch, grassTicks, dirtTicks, pickupDelay }) => {
       const { core, hud } = window.__VOXEL__!;

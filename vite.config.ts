@@ -29,7 +29,7 @@ export default defineConfig({
   build: {
     target: 'es2022',
     // 产物的大头是 three.js 本身，拆包对首屏没有实质帮助；把阈值抬到它之上，
-    // 免得真正的体积回归被这条固定噪音盖住。
+    // 免得真正的体积回归被这条每次都出现的警告掩盖。
     chunkSizeWarningLimit: 600,
   },
 });

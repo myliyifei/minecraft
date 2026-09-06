@@ -143,7 +143,7 @@ describe('等一片区块就位', () => {
     expect(stream.source(1, 0)).toBeDefined();
   });
 
-  it('两拨人等同一个区块，两个 promise 都 resolve', async () => {
+  it('两个调用方等同一个区块，两个 promise 都 resolve', async () => {
     const port = fakePort();
     const stream = createChunkStream({ seed: SEED, port });
     const coords = [{ cx: 0, cz: 0 }];

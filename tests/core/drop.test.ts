@@ -193,7 +193,7 @@ describe('掉落物的拾取', () => {
      * 站在掉落物 +X 一侧、两个碰撞箱之间正好隔 `gap` 格时的玩家碰撞箱。
      *
      * 间距写成字面值而不是从 `PICKUP_MARGIN` 算：拿实现的常量摆位置的话，这个常量
-     * 改成 0 或 2 测试也照样通过——要钉住的正是「约 1 格」这个数。
+     * 改成 0 或 2 测试也照样通过——要断言的正是「约 1 格」这个数。
      */
     const playerWithGap = (gap: number): Hitbox =>
       playerAt(at.x + DROP_SIZE / 2 + gap + PLAYER_WIDTH / 2, at.z);

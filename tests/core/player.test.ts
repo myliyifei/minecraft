@@ -366,7 +366,7 @@ describe('玩家的眼睛与视线', () => {
   });
 
   it('俯仰 45° 时竖直分量与水平分量一样长', () => {
-    // 不抄实现的式子，用几何关系钉住俯仰的幅度：tan 45° = 1
+    // 不抄实现的式子，用几何关系确定俯仰的幅度：tan 45° = 1
     const player = standingAt();
     player.turn(0, Math.PI / 4);
     const { x, y, z } = player.lookDirection;

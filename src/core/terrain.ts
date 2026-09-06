@@ -61,7 +61,7 @@ export function plainsSurfaceHeight(seed: number, x: number, z: number): number 
     PLAINS_OCTAVES,
   );
   const height = Math.round(PLAINS_BASE_Y + relief * PLAINS_RELIEF);
-  // 常量已经保证了下界，这里兜住「地表高于海平面」这条不变量，改常量改错也不会淹掉平原。
+  // 常量已经保证了下界，这里再保证一次「地表高于海平面」这条不变量，改常量改错也不会淹掉平原。
   return Math.max(MIN_SURFACE_Y, height);
 }
 

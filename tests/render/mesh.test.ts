@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType, type BlockView } from '../../src/core/block';
 import { Chunk } from '../../src/core/chunk';
-import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
-import { World } from '../../src/core/world';
+import {
+  CHUNK_SIZE,
+  DEFAULT_SEED,
+  WORLD_MAX_Y,
+  WORLD_MIN_Y,
+} from '../../src/core/constants';
+import { plainsTerrain, plainsTreePlacement } from '../../src/core/terrain';
+import { oakTreesTouching } from '../../src/core/tree';
+import { chunkOf, chunksAround, ORIGIN_CHUNK, World } from '../../src/core/world';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
-import { tileUvRect, TILE } from '../../src/render/atlas';
+import { ATLAS_COLS, ATLAS_ROWS, tileUvRect, TILE } from '../../src/render/atlas';
 import { buildChunkMesh, type MeshData } from '../../src/render/mesh';
 
 /**
@@ -269,6 +276,48 @@ describe('面到图集贴图的映射', () => {
       expect(uv).toBeGreaterThanOrEqual(0);
       expect(uv).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+describe('生成地形的网格', () => {
+  /** uv 落在哪一格贴图上——`tileUvRect` 的反函数。 */
+  function tileAtUv(u: number, v: number): number {
+    const col = Math.floor(u * ATLAS_COLS);
+    const row = ATLAS_ROWS - 1 - Math.floor(v * ATLAS_ROWS);
+    return row * ATLAS_COLS + col;
+  }
+
+  /**
+   * 网格里用到的全部贴图格号。
+   * 取每个面 uv 的中点反查：四个角正落在格的边界上，会同时算进相邻的格里。
+   */
+  function tilesUsed(mesh: MeshData): Set<number> {
+    const tiles = new Set<number>();
+    for (let f = 0; f < faceCount(mesh); f++) {
+      let u = 0;
+      let v = 0;
+      for (let c = 0; c < 4; c++) {
+        u += mesh.uvs[f * 8 + c * 2]!;
+        v += mesh.uvs[f * 8 + c * 2 + 1]!;
+      }
+      tiles.add(tileAtUv(u / 4, v / 4));
+    }
+    return tiles;
+  }
+
+  it('长了树的区块，网格里有橡木原木与橡树叶的贴图', () => {
+    // 从种子生成的世界一路走到网格：树长出来了，而且带着对的贴图上了画面。
+    // 单块方块的六面贴图在上一节断言过，这里补的是「生成的树真的进了网格」这一段。
+    const world = new World(plainsTerrain(DEFAULT_SEED));
+    for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 1)) world.loadChunk(cx, cz);
+    const tree = oakTreesTouching(plainsTreePlacement(DEFAULT_SEED), 0, 0)[0];
+    if (!tree) throw new Error('原点区块附近应有一棵橡树');
+
+    const tiles = tilesUsed(meshOf(fromWorld(world, chunkOf(tree.x), chunkOf(tree.z))));
+    expect(tiles).toContain(TILE.oakLogSide);
+    expect(tiles).toContain(TILE.oakLeaves);
+    // 地面的贴图也在：网格不是只剩一棵树
+    expect(tiles).toContain(TILE.grassTop);
   });
 });
 

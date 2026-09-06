@@ -40,7 +40,7 @@ export const JUMP_VELOCITY = 0.42;
 const HALF_WIDTH = PLAYER_WIDTH / 2;
 
 /** 一 tick 的步行位移（方块）。 */
-const WALK_STEP = WALK_SPEED / TICK_RATE;
+export const WALK_STEP = WALK_SPEED / TICK_RATE;
 
 /** 一整圈的弧度。 */
 const TAU = Math.PI * 2;

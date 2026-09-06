@@ -41,7 +41,7 @@ src/
 ├── ui/            界面文字与样式
 ├── loop.ts        固定 20 tick/s 的游戏循环
 ├── debug.ts       调试句柄，只在开发与测试构建中挂到 window
-├── demo-scene.ts  临时：摆几块方块把 6 种贴图显示出来，issue #6 / #7 落地后删除
+├── demo-scene.ts  临时：摆几块方块把泥土、石头、基岩的贴图显示出来，issue #7 落地后删除
 └── main.ts        接线层
 ```
 

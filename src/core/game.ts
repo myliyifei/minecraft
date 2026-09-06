@@ -136,8 +136,8 @@ export class GameCore implements BlockView {
   /**
    * 出生点：世界原点那一列最高实心方块的顶面，落在方块中心。
    *
-   * `highestBlockY` 找的是最高的非空气方块。当前除空气之外的方块都是实心的，
-   * 两者等价；issue #6 放树时要让树避开出生点这一列，免得玩家生在树冠上。
+   * `highestBlockY` 找的是最高的非空气方块。当前除空气之外的方块都是实心的，两者等价。
+   * 树冠会把它抬到树顶去，所以出生点那一带干脆不长树，见 `OAK_SPAWN_CLEARANCE`。
    */
   get spawnPoint(): Vec3 {
     return { x: 0.5, y: this.highestBlockY(0, 0) + 1, z: 0.5 };

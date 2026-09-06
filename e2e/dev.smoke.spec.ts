@@ -7,8 +7,9 @@ import {
   SEA_LEVEL,
   TICK_RATE,
 } from '../src/core/constants';
-import { DEMO_TREE_COLUMN } from '../src/demo-scene';
-import { PLAYER_EYE_HEIGHT, WALK_SPEED } from '../src/core/player';
+import { PLAYER_EYE_HEIGHT, WALK_SPEED, WALK_STEP } from '../src/core/player';
+import { plainsTreePlacement } from '../src/core/terrain';
+import { OAK_CANOPY_RADIUS, oakTreesTouching, type OakTree } from '../src/core/tree';
 import type { Vec3 } from '../src/core/vec3';
 import { KEY_BINDINGS } from '../src/input/keybindings';
 import { STRINGS } from '../src/ui/strings';
@@ -23,6 +24,19 @@ const CHUNKS_IN_VIEW = (2 * DEFAULT_VIEW_RADIUS + 1) ** 2;
 
 /** 采样时 z 的步长：抽十来行就够判断起伏与确定性，不必读满六千多列。 */
 const PROFILE_Z_STEP = 8;
+
+/**
+ * 默认种子下、会写进原点区块的第一棵橡树。树根不一定落在原点区块里，但一定在页面
+ * 打开时就等好了的那一片内（见 SPAWN_READY_RADIUS）。
+ *
+ * 在 Node 这一侧用纯地形函数算出来，再拿去核对页面里的世界——两边对得上，就说明
+ * Worker 生成的区块与核心认的是同一个世界（ADR-0003）。
+ */
+function spawnAreaTree(): OakTree {
+  const tree = oakTreesTouching(plainsTreePlacement(DEFAULT_SEED), 0, 0)[0];
+  if (!tree) throw new Error('默认种子的原点区块附近应有一棵橡树');
+  return tree;
+}
 
 /**
  * 等视距内的区块全部到位。
@@ -40,27 +54,54 @@ async function waitForFullViewDistance(page: Page): Promise<void> {
 }
 
 /**
- * 一直往前走 n 个 tick，中途把主线程让出去，好让 Worker 送回来的区块能被收下。
+ * 一直往前走 n 个 tick，绕开挡路的东西，中途把主线程让出去，好让 Worker 送回来的区块
+ * 能被收下。
  *
- * 分批 tick 而不是一次 `core.tick(n)`：区块是异步回填的，一整段跑在同一个任务里
- * 就一个区块也等不到，玩家会走进还没生成的地方。边走边跳是因为真实地形上相邻两列
- * 可能差一格，光走会被那一格挡住。
+ * 逐个 tick 走而不是一次 `core.tick(n)`：区块是异步回填的，一整段跑在同一个任务里
+ * 就一个区块也等不到，玩家会走进还没生成的地方。边走边跳是因为真实地形上相邻两列可能
+ * 差一格，光走会被那一格挡住；往前挪不动就侧身让一步、侧身也挪不动就换另一边，是因为
+ * 平原上散布着橡树，树干与低垂的树冠都是实心的。挡路的规避与 tests/core/game.test.ts
+ * 的 `walkForwardPastTrees` 是同一套。
  */
 async function walkForwardTicks(page: Page, ticks: number): Promise<void> {
-  await page.evaluate(async (total) => {
-    const core = window.__VOXEL__!.core;
-    const batch = 10;
-    core.setMoveIntent({ forward: true, back: false, left: false, right: false, jump: true });
-    for (let done = 0; done < total; done += batch) {
-      core.tick(batch);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    core.setMoveIntent({ forward: false, back: false, left: false, right: false, jump: false });
-  }, ticks);
+  await page.evaluate(
+    async ({ total, sidestepProgress }) => {
+      const core = window.__VOXEL__!.core;
+      /** 每这么多 tick 把主线程让出去一次。 */
+      const yieldEvery = 10;
+      let sidestep: 'none' | 'right' | 'left' = 'none';
+      let previous = core.player.position;
+      for (let done = 0; done < total; done++) {
+        core.setMoveIntent({
+          forward: true,
+          back: false,
+          left: sidestep === 'left',
+          right: sidestep === 'right',
+          jump: true,
+        });
+        core.tick();
+        const now = core.player.position;
+        if (now.z < previous.z) sidestep = 'none';
+        else if (sidestep === 'none') sidestep = 'right';
+        else if (Math.abs(now.x - previous.x) < sidestepProgress) {
+          sidestep = sidestep === 'right' ? 'left' : 'right';
+        }
+        previous = now;
+        if (done % yieldEvery === yieldEvery - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+      core.setMoveIntent({ forward: false, back: false, left: false, right: false, jump: false });
+    },
+    { total: ticks, sidestepProgress: WALK_STEP / 2 },
+  );
 }
 
-/** 读一片地表高度。地形起伏与确定性都靠它断言。 */
-async function readSurfaceProfile(page: Page): Promise<number[]> {
+/**
+ * 读一片列顶高度（`highestBlockY`）。地形起伏与确定性都靠它断言。
+ * 不是「地表高度」：有树的列上它报的是树冠。
+ */
+async function readTopBlockProfile(page: Page): Promise<number[]> {
   return page.evaluate(
     ({ from, to, zStep }) => {
       const core = window.__VOXEL__!.core;
@@ -154,31 +195,49 @@ test('调试句柄报告已加载区块与已建网格', async ({ page }) => {
 });
 
 test('调试句柄能读到核心的方块状态', async ({ page }) => {
-  const state = await page.evaluate(
-    ({ column, oakLog }) => {
-      const core = window.__VOXEL__!.core;
-      const spawn = core.spawnPoint;
-      // 演示橡树的树干在这一列上。地表高度随地形起伏，所以自上而下扫，不写死 y。
-      let trunkFound = false;
-      for (let y = core.highestBlockY(column.x, column.z); y > 0; y--) {
-        if (core.getBlock(column.x, y, column.z) === oakLog) {
-          trunkFound = true;
-          break;
-        }
-      }
-      return {
-        underSpawn: core.getBlock(spawn.x, spawn.y - 1, spawn.z),
-        atSpawn: core.getBlock(spawn.x, spawn.y, spawn.z),
-        aboveSpawn: core.getBlock(spawn.x, spawn.y + 1, spawn.z),
-        trunkFound,
-      };
-    },
-    { column: DEMO_TREE_COLUMN, oakLog: BlockType.OakLog },
-  );
+  const state = await page.evaluate(() => {
+    const core = window.__VOXEL__!.core;
+    const spawn = core.spawnPoint;
+    return {
+      underSpawn: core.getBlock(spawn.x, spawn.y - 1, spawn.z),
+      atSpawn: core.getBlock(spawn.x, spawn.y, spawn.z),
+      aboveSpawn: core.getBlock(spawn.x, spawn.y + 1, spawn.z),
+    };
+  });
   expect(state.underSpawn).toBe(BlockType.Grass);
   expect(state.atSpawn).toBe(BlockType.Air);
   expect(state.aboveSpawn).toBe(BlockType.Air);
-  expect(state.trunkFound).toBe(true);
+});
+
+test('页面里长着由种子生成的橡树，树干与树冠都在', async ({ page }) => {
+  const expected = spawnAreaTree();
+  // 树的坐标要当参数传进 evaluate：页面里没有 Node 这一侧的模块。
+  const tree = await page.evaluate(
+    ({ x, z, rootY, trunkHeight, radius }) => {
+      const core = window.__VOXEL__!.core;
+      // 地面、整根树干、树干顶上那一格
+      const column: number[] = [];
+      for (let y = rootY - 1; y <= rootY + trunkHeight; y++) {
+        column.push(core.getBlock(x, y, z));
+      }
+      // 树冠最宽那一层横着切一刀
+      const canopy: number[] = [];
+      const top = rootY + trunkHeight - 1;
+      for (let dx = -radius; dx <= radius; dx++) canopy.push(core.getBlock(x + dx, top - 1, z));
+      return { column, canopy };
+    },
+    { ...expected, radius: OAK_CANOPY_RADIUS },
+  );
+
+  const { OakLog: log, OakLeaves: leaves, Grass: grass } = BlockType;
+  // 自下而上：草地、连续原木、树干顶上一格树叶
+  expect(tree.column).toEqual([grass, ...Array<number>(expected.trunkHeight).fill(log), leaves]);
+  // 树冠比树干宽：最宽那一层左右各伸出 OAK_CANOPY_RADIUS 格树叶
+  expect(tree.canopy).toEqual([
+    ...Array<number>(OAK_CANOPY_RADIUS).fill(leaves),
+    log,
+    ...Array<number>(OAK_CANOPY_RADIUS).fill(leaves),
+  ]);
 });
 
 test('页面打开后是由默认种子生成的起伏平原', async ({ page }) => {
@@ -186,7 +245,7 @@ test('页面打开后是由默认种子生成的起伏平原', async ({ page }) 
   expect(seed).toBe(DEFAULT_SEED);
 
   await waitForFullViewDistance(page);
-  const heights = await readSurfaceProfile(page);
+  const heights = await readTopBlockProfile(page);
   // 出现多种高度才算「起伏」，而不是一片硬编码平地
   expect(new Set(heights).size).toBeGreaterThan(1);
   expect(Math.min(...heights)).toBeGreaterThan(SEA_LEVEL);
@@ -195,11 +254,11 @@ test('页面打开后是由默认种子生成的起伏平原', async ({ page }) 
 
 test('同一种子每次进入地形相同', async ({ page }) => {
   await waitForFullViewDistance(page);
-  const before = await readSurfaceProfile(page);
+  const before = await readTopBlockProfile(page);
   await page.reload();
   await waitForFirstFrame(page);
   await waitForFullViewDistance(page);
-  expect(await readSurfaceProfile(page)).toEqual(before);
+  expect(await readTopBlockProfile(page)).toEqual(before);
 });
 
 test('地形生成在 Worker 里进行，视距内的区块陆续送到', async ({ page }) => {

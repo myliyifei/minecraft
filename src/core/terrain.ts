@@ -2,11 +2,11 @@ import { BlockType } from './block';
 import { Chunk } from './chunk';
 import { CHUNK_SIZE, MIN_SURFACE_Y, WORLD_MIN_Y } from './constants';
 import { fbm2, hashCoords } from './noise';
+import { plantOakTrees, type TreePlacement } from './tree';
 
 /**
  * 地形生成是纯函数：区块坐标决定区块内容，不依赖相邻区块的加载顺序。
  * 种子由 `plainsTerrain(seed)` 捕获在闭包里，因此生成器本身只需要区块坐标。
- * issue #6 让橡树以确定性方式跨区块写入。
  */
 export type TerrainGenerator = (cx: number, cz: number) => Chunk;
 
@@ -25,7 +25,8 @@ export const PLAINS_RELIEF = 5;
 
 /**
  * 一次起伏的水平跨度（方块）。
- * 跨度远大于起伏幅度，坡度因此很缓——玩家不必跳跃就能走上任何一个坡（issue #4）。
+ * 跨度远大于起伏幅度，坡度因此很缓：相邻两列的高度差不超过一格。连续的高度场取整之后
+ * 那一格台阶仍然存在，而本切片没有自动上台阶，所以走上坡要跳一下。
  */
 export const PLAINS_FEATURE_SIZE = 64;
 
@@ -70,12 +71,22 @@ function dirtDepthAt(seed: number, x: number, z: number): number {
 }
 
 /**
+ * 平原上橡树的放置参数：种子，加平原自己的地表高度。
+ * 测试与端到端拿它算某个区块里有哪些树，不必把树的分布规则抄一遍。
+ */
+export function plainsTreePlacement(seed: number): TreePlacement {
+  return { seed, surfaceAt: (x, z) => plainsSurfaceHeight(seed, x, z) };
+}
+
+/**
  * 由种子生成平原地形的生成器。
  *
- * 每一列自上而下是：一层草方块、3–4 层泥土、一路石头到 y = −63、最底层 y = −64 基岩。
- * 同一个种子与区块坐标永远得到同样的区块——这是 ADR-0003 的核心约束。
+ * 每一列自上而下是：一层草方块、3–4 层泥土、一路石头到 y = −63、最底层 y = −64 基岩；
+ * 地表之上散布橡树。同一个种子与区块坐标永远得到同样的区块——这是 ADR-0003 的核心约束。
  */
 export function plainsTerrain(seed: number): TerrainGenerator {
+  const trees = plainsTreePlacement(seed);
+
   return (cx, cz) => {
     const chunk = new Chunk(cx, cz);
     chunk.fillLayer(WORLD_MIN_Y, BlockType.Bedrock);
@@ -94,6 +105,8 @@ export function plainsTerrain(seed: number): TerrainGenerator {
       }
     }
 
+    // 土石铺完再种树：树叶只往空气里长，得先有地面才知道哪里是空气。
+    plantOakTrees(trees, chunk);
     return chunk;
   };
 }

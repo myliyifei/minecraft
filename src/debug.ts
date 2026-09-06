@@ -1,7 +1,7 @@
 import { DEBUG_BUILD } from './build-flags';
 import type { GameCore } from './core/game';
 import type { WorldRenderer } from './render/renderer';
-import type { HotbarHud } from './ui/hotbar';
+import type { Hud } from './ui/hud';
 import type { ChunkStream } from './worker/chunk-stream';
 
 /**
@@ -12,10 +12,10 @@ export interface DebugHandle {
   readonly core: GameCore;
   readonly renderer: WorldRenderer;
   /**
-   * 快捷栏 HUD。端到端测试要在一次同步的 evaluate 里推进 tick 再看界面，
+   * 整套 HUD（快捷栏与等级条）。端到端测试要在一次同步的 evaluate 里推进 tick 再看界面，
    * 所以得自己调它的 `update()`——那一步平时是游戏循环发起的。
    */
-  readonly hud: HotbarHud;
+  readonly hud: Hud;
   /** 由 Worker 生成区块的来源。端到端测试用它确认地形生成真的发生在 Worker 里。 */
   readonly chunks: ChunkStream;
 }

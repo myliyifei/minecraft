@@ -41,6 +41,14 @@ export interface BlockDef {
    * 石头记 `null`，将来加了镐要改成圆石那一行，同时 `blockDrop` 得多看一个工具参数。
    */
   readonly drop: ItemStack | null;
+  /**
+   * 挖掉它生成的经验球给几点经验值（见 CONTEXT.md 的「经验球」），0 表示不生成经验球。
+   *
+   * 与 `drop` 是两列，不是一列：任何挖得动的方块都给经验，掉落却可能是空的——空手挖
+   * 石头什么都拿不到，经验照给 3 点。矿石那几档（煤 9 到钻石 24）见
+   * docs/design-decisions.md，等有矿石了往这里加行。
+   */
+  readonly experience: number;
 }
 
 /** 一个某种物品的掉落。掉落表里绝大多数行都是这个形状。 */
@@ -48,7 +56,10 @@ function one(item: ItemType): ItemStack {
   return { item, count: 1 };
 }
 
-/** 方块属性表。经验表是后续切片往这里加的数据列。 */
+/** 普通方块给的经验值。原木与将来的矿石各有自己的档，见 `BlockDef.experience`。 */
+const COMMON_EXPERIENCE = 3;
+
+/** 方块属性表——纯数据。加方块只加一行。 */
 export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
   // 空气不是挖掘目标，硬度只是占位。
   [BlockType.Air]: {
@@ -57,6 +68,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     hardness: 0,
     requiresTool: false,
     drop: null,
+    experience: 0,
   },
   // 草方块掉的是泥土，不是草方块本身——与原版一致。
   [BlockType.Grass]: {
@@ -65,6 +77,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     hardness: 0.6,
     requiresTool: false,
     drop: one(ItemType.Dirt),
+    experience: COMMON_EXPERIENCE,
   },
   [BlockType.Dirt]: {
     opaque: true,
@@ -72,6 +85,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     hardness: 0.5,
     requiresTool: false,
     drop: one(ItemType.Dirt),
+    experience: COMMON_EXPERIENCE,
   },
   // 空手挖得掉石头，但什么也拿不到（要镐）。
   [BlockType.Stone]: {
@@ -80,6 +94,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     hardness: 1.5,
     requiresTool: true,
     drop: null,
+    experience: COMMON_EXPERIENCE,
   },
   [BlockType.Bedrock]: {
     opaque: true,
@@ -87,6 +102,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     hardness: UNBREAKABLE,
     requiresTool: false,
     drop: null,
+    // 挖不动，所以它永远碎不了，也就不会生成经验球。
+    experience: 0,
   },
   [BlockType.OakLog]: {
     opaque: true,
@@ -94,6 +111,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     hardness: 2,
     requiresTool: false,
     drop: one(ItemType.OakLog),
+    // 原木自成一档，比普通方块高一倍。
+    experience: 6,
   },
   // 树叶什么都不掉。树苗与苹果要等树叶凋落（后续切片）。
   [BlockType.OakLeaves]: {
@@ -102,6 +121,9 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     hardness: 0.2,
     requiresTool: false,
     drop: null,
+    // 树叶什么都不掉，但「任何方块都给经验」（见 CONTEXT.md 的「经验球」），
+    // 所以它照普通方块给 3 点。原版的树叶不给经验，这一条是本项目自己定的。
+    experience: COMMON_EXPERIENCE,
   },
 };
 
@@ -160,6 +182,15 @@ export function miningTicks(block: BlockType): number {
  */
 export function blockDrop(block: BlockType): ItemStack | null {
   return BLOCKS[block].drop;
+}
+
+/**
+ * 挖掉一个方块生成的经验球给几点经验值，0 表示不生成经验球。
+ *
+ * 不看工具：经验与掉落独立，空手挖石头拿不到圆石，经验照给。
+ */
+export function blockExperience(block: BlockType): number {
+  return BLOCKS[block].experience;
 }
 
 /**

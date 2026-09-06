@@ -100,6 +100,15 @@ export function expand(box: Hitbox, margin: number): Hitbox {
   };
 }
 
+/** 碰撞箱的中心。朝一个实体飞过去时瞄的是这里，而不是它脚底。 */
+export function boxCenter(box: Hitbox): Vec3 {
+  return {
+    x: (box.min.x + box.max.x) / 2,
+    y: (box.min.y + box.max.y) / 2,
+    z: (box.min.z + box.max.z) / 2,
+  };
+}
+
 /** 两个碰撞箱有没有交叠。边界相切算交叠——差一丝就判成没碰上反而更奇怪。 */
 export function overlaps(a: Hitbox, b: Hitbox): boolean {
   return (

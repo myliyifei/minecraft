@@ -12,6 +12,8 @@ export const STRINGS = {
   // 省略号交给加载屏上那个闪动的方块光标，文案本身不带标点。
   loadingWorld: '正在生成世界',
   hotbar: '快捷栏',
+  levelBar: '等级',
+  levelProgress: '到下一级的经验',
 } as const;
 
 /**

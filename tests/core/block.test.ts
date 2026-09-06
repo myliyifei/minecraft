@@ -4,6 +4,7 @@ import {
   BlockType,
   UNBREAKABLE,
   blockDrop,
+  blockExperience,
   isBreakable,
   miningTicks,
 } from '../../src/core/block';
@@ -99,6 +100,46 @@ describe('空手挖掘的掉落表', () => {
     for (const block of Object.values(BlockType)) {
       const drop = BLOCKS[block].drop;
       if (drop) expect(drop.count, `方块 ${block}`).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('挖掉一块给多少经验', () => {
+  /**
+   * issue #9 给的经验表：普通方块 3、原木 6。同样写死字面值，不从 `BLOCKS` 反读。
+   * 矿石那几档（煤 9 到钻石 24，见 docs/design-decisions.md）等有矿石了再往这里加行。
+   */
+  const EXPERIENCE: Array<[string, BlockType, number]> = [
+    ['草方块', BlockType.Grass, 3],
+    ['泥土', BlockType.Dirt, 3],
+    ['石头', BlockType.Stone, 3],
+    ['树叶', BlockType.OakLeaves, 3],
+    ['原木', BlockType.OakLog, 6],
+  ];
+
+  for (const [name, block, amount] of EXPERIENCE) {
+    it(`${name}给 ${amount} 点`, () => {
+      expect(blockExperience(block)).toBe(amount);
+    });
+  }
+
+  it('空气与基岩不给经验：一个不是挖掘目标，一个挖不动', () => {
+    expect(blockExperience(BlockType.Air)).toBe(0);
+    expect(blockExperience(BlockType.Bedrock)).toBe(0);
+  });
+
+  it('经验与掉落各算各的：空手挖石头没有掉落，经验照给', () => {
+    expect(blockDrop(BlockType.Stone)).toBeNull();
+    expect(blockExperience(BlockType.Stone)).toBeGreaterThan(0);
+    // 树叶同理
+    expect(blockDrop(BlockType.OakLeaves)).toBeNull();
+    expect(blockExperience(BlockType.OakLeaves)).toBeGreaterThan(0);
+  });
+
+  it('挖得动的方块都给正的经验', () => {
+    for (const block of Object.values(BlockType)) {
+      if (!isBreakable(block)) continue;
+      expect(blockExperience(block), `方块 ${block}`).toBeGreaterThan(0);
     }
   });
 });

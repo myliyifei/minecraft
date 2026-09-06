@@ -1,5 +1,6 @@
 import type { BlockView } from './block';
 import { TAU } from './constants';
+import { stepEntities } from './entity';
 import type { ItemSink, ItemStack, ItemType } from './item';
 import { hashCoords } from './noise';
 import {
@@ -133,15 +134,11 @@ export class Drops implements DropsView, DropSink {
    */
   step(playerBox: Hitbox, into: ItemSink): void {
     const pickupBox = expand(playerBox, PICKUP_MARGIN);
-    // 原地压缩：留下来的往前挪，消失的直接跳过。每 tick 不必新建一个数组。
-    let write = 0;
-    for (const drop of this.list) {
+    stepEntities(this.list, (drop) => {
       drop.step(this.blocks);
-      if (drop.collectInto(pickupBox, into)) continue;
-      if (drop.age >= DROP_LIFETIME_TICKS) continue;
-      this.list[write++] = drop;
-    }
-    this.list.length = write;
+      if (drop.collectInto(pickupBox, into)) return false;
+      return drop.age < DROP_LIFETIME_TICKS;
+    });
   }
 }
 

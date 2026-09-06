@@ -514,6 +514,109 @@ describe('GameCore 的空手挖掘', () => {
       expect(core.takeChangedBlocks()).toEqual([]);
     });
   });
+
+  describe('挖掉的方块给经验', () => {
+    /** 把脚下那一格换成另一种方块，再低头对准它。 */
+    function lookingDownAt(block: BlockType): GameCore {
+      const core = lookingDown();
+      core.setBlock(...UNDERFOOT, block);
+      return core;
+    }
+
+    /** 经验球飞完全程要的 tick 数：玩家就在旁边，几 tick 就到。 */
+    const ABSORB_TICKS = TICK_RATE;
+
+    it('新开的世界没有经验，也没有经验球', () => {
+      const core = coreOnFlatGround();
+      expect(core.experience.total).toBe(0);
+      expect(core.experience.level).toBe(0);
+      expect(core.xpOrbs.count).toBe(0);
+    });
+
+    it('挖掉脚下那块草，原地生成一个 3 点的经验球', () => {
+      const core = lookingDown();
+      core.setMining(true);
+      core.tick(GRASS_TICKS);
+      core.setMining(false);
+
+      expect(core.xpOrbs.count).toBe(1);
+      const [orb] = core.xpOrbs.all();
+      expect(orb!.amount).toBe(3);
+      expect(Math.floor(orb!.position.x)).toBe(UNDERFOOT[0]);
+      expect(Math.floor(orb!.position.y)).toBe(UNDERFOOT[1]);
+      expect(Math.floor(orb!.position.z)).toBe(UNDERFOOT[2]);
+    });
+
+    it('经验球飞过来被吸收，玩家经验增加', () => {
+      const core = lookingDown();
+      core.setMining(true);
+      core.tick(GRASS_TICKS);
+      core.setMining(false);
+      expect(core.experience.total).toBe(0);
+
+      core.tick(ABSORB_TICKS);
+      expect(core.xpOrbs.count).toBe(0);
+      expect(core.experience.total).toBe(3);
+    });
+
+    it('挖原木给 6 点', () => {
+      const core = lookingDownAt(BlockType.OakLog);
+      core.setMining(true);
+      core.tick(miningTicks(BlockType.OakLog));
+      core.setMining(false);
+      core.tick(ABSORB_TICKS);
+
+      expect(core.experience.total).toBe(6);
+    });
+
+    it('空手挖石头拿不到东西，经验照给 3 点', () => {
+      const core = lookingDownAt(BlockType.Stone);
+      core.setMining(true);
+      core.tick(miningTicks(BlockType.Stone));
+      core.setMining(false);
+      core.tick(ABSORB_TICKS);
+
+      expect(core.inventory.hotbar().every((slot) => slot === undefined)).toBe(true);
+      expect(core.experience.total).toBe(3);
+    });
+
+    it('连着挖十几块，等级从 0 升到 1 以上', () => {
+      const core = lookingDown();
+      // 平地测试世界里草下面是石头（空手 150 tick 一块），把脚下这一列换成草，
+      // 「挖十几块」才是十几个 GRASS_TICKS 而不是几分钟
+      const blocks = 15;
+      for (let depth = 0; depth < blocks; depth++) {
+        core.setBlock(UNDERFOOT[0], UNDERFOOT[1] - depth, UNDERFOOT[2], BlockType.Grass);
+      }
+      core.takeChangedBlocks();
+
+      core.setMining(true);
+      // 一路往下挖：每挖穿一块，目标当场落到下面那块上。每块多给几 tick 的落地余量
+      core.tick(blocks * (GRASS_TICKS + 4));
+      core.setMining(false);
+      core.tick(ABSORB_TICKS);
+
+      // 一块 3 点，7 点升 1 级、16 点升 2 级
+      expect(core.experience.total).toBeGreaterThanOrEqual(16);
+      expect(core.experience.total % 3).toBe(0);
+      expect(core.experience.level).toBeGreaterThanOrEqual(2);
+      expect(core.experience.progress).toBeGreaterThanOrEqual(0);
+      expect(core.experience.progress).toBeLessThan(1);
+    });
+
+    it('经验球是实体，不进「变过的方块」那份记录', () => {
+      const core = lookingDown();
+      core.setMining(true);
+      core.tick(GRASS_TICKS);
+      core.setMining(false);
+      expect(core.takeChangedBlocks()).toHaveLength(1);
+
+      // 经验球在这几十 tick 里飞过来、被吸收，一次都不该让网格重建
+      core.tick(ABSORB_TICKS);
+      expect(core.xpOrbs.count).toBe(0);
+      expect(core.takeChangedBlocks()).toEqual([]);
+    });
+  });
 });
 
 describe('GameCore 的初始区块加载', () => {

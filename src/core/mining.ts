@@ -1,7 +1,15 @@
-import { BlockType, blockDrop, isBreakable, miningTicks, type BlockEdit } from './block';
+import {
+  BlockType,
+  blockDrop,
+  blockExperience,
+  isBreakable,
+  miningTicks,
+  type BlockEdit,
+} from './block';
 import type { DropSink } from './drop';
 import { PLAYER_REACH, type PlayerView } from './player';
 import { raycastBlocks, type BlockHit } from './raycast';
+import type { XpOrbSink } from './xp-orb';
 
 /**
  * 挖掘从玩家身上只要两件事：视线从哪儿出发、朝哪儿。
@@ -29,8 +37,9 @@ export interface MiningView {
  * 到空处）进度就归零，松开再按也从零开始。原版就是这个手感——挖到一半移开视线，回来
  * 得重挖。
  *
- * 挖穿的那一刻方块变成空气，掉落表里有东西的方块同时在原地掉出一个掉落物——挖掘
- * 只管把它交给 `DropSink`，之后怎么落、怎么被拾取是 `Drops` 的事。
+ * 挖穿的那一刻方块变成空气，掉落表里有东西的方块同时在原地掉出一个掉落物、一个经验球
+ * ——挖掘只管把两样交给 `DropSink` 与 `XpOrbSink`，之后怎么落、怎么飞、怎么被收走是
+ * `Drops` 与 `XpOrbs` 的事。掉落与经验各算各的：空手挖石头什么都不掉，经验照给。
  *
  * 时间只由 `step()` 的调用次数表达（ADR-0002），耗时表在 `miningTicks`。
  */
@@ -38,14 +47,16 @@ export class Mining implements MiningView {
   private readonly blocks: BlockEdit;
   private readonly aim: AimView;
   private readonly drops: DropSink;
+  private readonly experience: XpOrbSink;
   private hit: BlockHit | undefined;
   /** 已经对着当前目标挖了多少 tick。 */
   private elapsed = 0;
 
-  constructor(blocks: BlockEdit, aim: AimView, drops: DropSink) {
+  constructor(blocks: BlockEdit, aim: AimView, drops: DropSink, experience: XpOrbSink) {
     this.blocks = blocks;
     this.aim = aim;
     this.drops = drops;
+    this.experience = experience;
   }
 
   get target(): BlockHit | undefined {
@@ -81,10 +92,12 @@ export class Mining implements MiningView {
 
     const { x, y, z } = this.hit;
     this.blocks.setBlock(x, y, z, BlockType.Air);
-    // 掉落物落在方块原来那一格里。什么都不掉的方块（树叶、空手挖的石头）就只是消失。
-    // 经验球还没有，见 #9。
+    // 掉落物与经验球都落在方块原来那一格里。什么都不掉的方块（树叶、空手挖的石头）
+    // 只是没有掉落物，经验照给——两样各查自己那一列。
     const drop = blockDrop(block);
     if (drop) this.drops.spawnInBlock(drop, x, y, z);
+    const experience = blockExperience(block);
+    if (experience > 0) this.experience.spawnInBlock(experience, x, y, z);
     this.elapsed = 0;
     // 挖穿了，视线随即落到后面那块上。当场重瞄一次，选框不会在这一 tick 里还套着一个
     // 已经不存在的方块；按住不放因此接着挖下一块，与原版一致。

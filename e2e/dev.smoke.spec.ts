@@ -43,6 +43,12 @@ const PROFILE_Z_STEP = 8;
 const DROP_SETTLE_TICKS = 8;
 
 /**
+ * 挖穿之后再等这么多 tick，经验球一定已经飞到玩家身上并被吸收。
+ * 玩家就站在坑口，实际只要几 tick；一秒是宽松的上界。
+ */
+const XP_ABSORB_TICKS = TICK_RATE;
+
+/**
  * 默认种子下、会写进原点区块的第一棵橡树。树根不一定落在原点区块里，但一定在页面
  * 打开时就等好了的那一片内（见 SPAWN_READY_RADIUS）。
  *
@@ -835,6 +841,203 @@ test('掉落物画成会转会漂的小方块，被捡走后从画面上消失',
   expect(dug.dropCount).toBe(0);
   expect(dug.gone.drops).toEqual([]);
   expect(isDirtColored(dug.gone.rgb)).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+test('屏幕底部有等级条，压在快捷栏上方，开局 0 级、进度条是空的', async ({ page }) => {
+  const bar = page.locator('#level-bar');
+  await expect(bar).toBeVisible();
+  await expect(bar).toHaveAttribute('aria-label', STRINGS.levelBar);
+  await expect(bar).toHaveAttribute('data-level', '0');
+  await expect(page.locator('#level-bar .levelbar__level')).toHaveText('0');
+
+  const track = page.locator('#level-bar .levelbar__track');
+  await expect(track).toHaveAttribute('role', 'progressbar');
+  await expect(track).toHaveAttribute('aria-label', STRINGS.levelProgress);
+  await expect(track).toHaveAttribute('aria-valuenow', '0');
+  // 0 级升 1 级要 7 点，见 tests/core/experience.test.ts
+  await expect(track).toHaveAttribute('aria-valuemax', '7');
+
+  // 等级条整条压在快捷栏之上，两者不重叠
+  const barBox = await bar.boundingBox();
+  const hotbarBox = await page.locator('#hotbar').boundingBox();
+  expect(barBox).not.toBeNull();
+  expect(hotbarBox).not.toBeNull();
+  expect(barBox!.y + barBox!.height).toBeLessThanOrEqual(hotbarBox!.y);
+  // 进度条与快捷栏同宽：宽度只有快捷栏那一处算式
+  expect(barBox!.width).toBeCloseTo(hotbarBox!.width, 0);
+
+  // 一点经验都没有，填充是 0 宽
+  const fill = await page.evaluate(() => {
+    const element = document.querySelector('#level-bar .levelbar__fill');
+    if (!(element instanceof HTMLElement)) throw new Error('等级条缺填充');
+    return Number.parseFloat(getComputedStyle(element).width);
+  });
+  expect(fill).toBe(0);
+});
+
+test('挖方块把等级条填起来，攒够就升级', async ({ page }) => {
+  // 不锁鼠标：测的是 HUD，挖掘意图直接给核心。整段跑在一次同步的 evaluate 里，
+  // 游戏循环插不进来，攒了几点因此是精确的。
+  const samples = await page.evaluate(
+    ({ pitch, grassTicks, dirtTicks, absorbTicks }) => {
+      const { core, hud } = window.__VOXEL__!;
+
+      /** 等级条现在画的是什么，加核心里的经验值好对照。 */
+      const read = (): Record<string, unknown> => {
+        const bar = document.querySelector('#level-bar');
+        const track = document.querySelector('#level-bar .levelbar__track');
+        const fill = document.querySelector('#level-bar .levelbar__fill');
+        if (
+          !(bar instanceof HTMLElement) ||
+          !(track instanceof HTMLElement) ||
+          !(fill instanceof HTMLElement)
+        ) {
+          throw new Error('等级条不完整');
+        }
+        return {
+          level: bar.dataset.level,
+          text: bar.querySelector('.levelbar__level')?.textContent,
+          valueNow: track.getAttribute('aria-valuenow'),
+          valueMax: track.getAttribute('aria-valuemax'),
+          fillPx: Number.parseFloat(getComputedStyle(fill).width),
+          trackPx: Number.parseFloat(getComputedStyle(track).width),
+          total: core.experience.total,
+        };
+      };
+
+      /** 挖掉当前对准的那一块，等经验球飞过来被吸收，再刷新 HUD。 */
+      const digOneBlock = (ticks: number): void => {
+        core.setMining(true);
+        core.tick(ticks);
+        // 必须松手：按住不放会接着挖下面那块，一次就攒了两块的经验
+        core.setMining(false);
+        core.tick(absorbTicks);
+        hud.update();
+      };
+
+      core.turn(0, -pitch);
+      // 一路往下挖：草之下是泥土，都是空手挖得动的
+      digOneBlock(grassTicks);
+      const firstBlock = read();
+
+      // 再挖两块泥土，一块 3 点，攒过 7 点就升 1 级
+      digOneBlock(dirtTicks);
+      digOneBlock(dirtTicks);
+      return { firstBlock, levelledUp: read() };
+    },
+    {
+      pitch: MAX_PITCH,
+      grassTicks: miningTicks(BlockType.Grass),
+      dirtTicks: miningTicks(BlockType.Dirt),
+      absorbTicks: XP_ABSORB_TICKS,
+    },
+  );
+
+  // 一块草 3 点：还是 0 级，进度条填了 3/7
+  expect(samples.firstBlock.total).toBe(3);
+  expect(samples.firstBlock.level).toBe('0');
+  expect(samples.firstBlock.valueNow).toBe('3');
+  expect(samples.firstBlock.valueMax).toBe('7');
+  const { fillPx, trackPx } = samples.firstBlock as { fillPx: number; trackPx: number };
+  expect(fillPx / trackPx).toBeCloseTo(3 / 7, 2);
+
+  // 攒过 7 点：数字变成 1，等级内经验重新从头算
+  expect(samples.levelledUp.total).toBeGreaterThanOrEqual(7);
+  expect(Number(samples.levelledUp.level)).toBeGreaterThanOrEqual(1);
+  expect(samples.levelledUp.text).toBe(samples.levelledUp.level);
+  expect(Number(samples.levelledUp.valueNow)).toBeLessThan(Number(samples.levelledUp.valueMax));
+  expect(errors).toEqual([]);
+});
+
+test('经验球画成小方块飞向玩家，被吸收后从画面上消失', async ({ page }) => {
+  await waitForFullViewDistance(page);
+
+  // 整段跑在一次同步的 evaluate 里：游戏循环插不进来，画面与 tick 数因此是精确的。
+  const dug = await page.evaluate(
+    ({ pitch, stoneTicks, absorbTicks, stone }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const centerRgb = window.__CENTER_RGB__!;
+      const x = Math.floor(core.player.position.x);
+      const z = Math.floor(core.player.position.z);
+      const y = Math.floor(core.player.position.y) - 1;
+
+      // 挖石头而不是草：石头空手挖没有掉落，坑里因此只有经验球。挖草的话掉落物那个
+      // 小方块（0.25 格）比经验球（0.2 格）大，两者又都生成在同一格的中心，画面正中
+      // 那一像素看到的会是掉落物而不是经验球。
+      core.setBlock(x, y, z, stone);
+      core.turn(0, -pitch);
+      core.setMining(true);
+      core.tick(stoneTicks);
+      core.setMining(false);
+
+      // 方块刚碎，经验球还在原来那一格里。先画一帧：小方块是 render() 里摆进场景的
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+
+      // 把视线对准场景里那个小方块的中心，再用同一个 alpha 画一帧
+      const [mesh] = renderer.xpOrbs;
+      if (!mesh) throw new Error('场景里应该有一个经验球小方块');
+      const eye = core.player.eyePosition;
+      core.turn(
+        Math.atan2(-(mesh.position.x - eye.x), -(mesh.position.z - eye.z)) - core.player.yaw,
+        Math.atan2(
+          mesh.position.y - eye.y,
+          Math.hypot(mesh.position.x - eye.x, mesh.position.z - eye.z),
+        ) - core.player.pitch,
+      );
+      renderer.render(1);
+      const spawned = { orbs: renderer.xpOrbs, drops: renderer.drops, rgb: centerRgb() };
+
+      // 飞一个 tick：同一个编号的小方块换了位置
+      core.tick(1);
+      renderer.render(1);
+      const flying = renderer.xpOrbs;
+      // 同一份核心状态、另一个插值系数：位置该落在上一个 tick 与这一个 tick 之间
+      renderer.render(0);
+      const sameTick = renderer.xpOrbs;
+
+      // 玩家就站在坑口，几 tick 就吸收了，小方块随即从场景里移除
+      core.tick(absorbTicks);
+      renderer.render(1);
+      return {
+        spawned,
+        flying,
+        sameTick,
+        gone: renderer.xpOrbs,
+        rgbAfter: centerRgb(),
+        orbCount: core.xpOrbs.count,
+        total: core.experience.total,
+      };
+    },
+    {
+      pitch: MAX_PITCH,
+      stoneTicks: miningTicks(BlockType.Stone),
+      absorbTicks: XP_ABSORB_TICKS,
+      stone: BlockType.Stone,
+    },
+  );
+
+  /** 黄绿（经验球）而不是褐（泥土）：绿色分量明显压过红色。 */
+  const isXpColored = (rgb: readonly number[]): boolean => rgb[1]! > rgb[0]! * 1.2;
+
+  // 空手挖石头什么都不掉，坑里只有经验球
+  expect(dug.spawned.drops).toEqual([]);
+  // 场景里有一个小方块，而且真画进了画布：视线对准它，画面正中是经验球的黄绿
+  expect(dug.spawned.orbs).toHaveLength(1);
+  expect(isXpColored(dug.spawned.rgb)).toBe(true);
+
+  // 还是同一个经验球（渲染层按编号认对象），位置变了：它在往玩家那边飞
+  expect(dug.flying[0]!.id).toBe(dug.spawned.orbs[0]!.id);
+  expect(dug.flying[0]!.position.y).not.toBeCloseTo(dug.spawned.orbs[0]!.position.y, 4);
+  // 「每 tick 都离玩家更近、一次也不冲过头」要看整段飞行，那一条在 tests/core/xp-orb.test.ts
+  expect(dug.sameTick[0]!.position.y).not.toBeCloseTo(dug.flying[0]!.position.y, 4);
+
+  // 被吸收：核心里没有了，场景里那个小方块也不见了，同一条视线看到的是泥土的褐
+  expect(dug.orbCount).toBe(0);
+  expect(dug.gone).toEqual([]);
+  expect(isXpColored(dug.rgbAfter)).toBe(false);
+  expect(dug.total).toBe(3);
   expect(errors).toEqual([]);
 });
 

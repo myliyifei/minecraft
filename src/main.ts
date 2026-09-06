@@ -7,7 +7,7 @@ import { installPlayerControls } from './input/controls';
 import { startGameLoop } from './loop';
 import { ATLAS_PATH, CRACK_PATH } from './render/atlas';
 import { loadPixelTexture, WorldRenderer } from './render/renderer';
-import { installHotbar } from './ui/hotbar';
+import { installHud } from './ui/hud';
 import { createChunkStream, SPAWN_READY_RADIUS } from './worker/chunk-stream';
 
 /**
@@ -45,14 +45,14 @@ async function main(): Promise<void> {
 
   // 首帧画完才撤掉加载遮罩，页面不会闪一下空画布。
   loading.remove();
-  const hotbar = installHotbar(document.body, core.inventory);
-  hotbar.update();
+  const hud = installHud(document.body, core);
+  hud.update();
   installPlayerControls(canvas, core);
-  installDebugHandle({ core, renderer, hud: hotbar, chunks });
+  installDebugHandle({ core, renderer, hud, chunks });
   startGameLoop(core, (alpha) => {
     renderer.syncChunkMeshes();
     renderer.render(alpha);
-    hotbar.update();
+    hud.update();
   });
 }
 

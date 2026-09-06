@@ -1,7 +1,9 @@
 /*
  * 世界色板：界面与 3D 场景共用同一份颜色，来源就是方块图集的基色
  * （tools/gen-atlas.mjs 里的 GRASS / DIRT / STONE / BEDROCK）。
- * renderer.ts 通过 getComputedStyle 读 --sky，天空不会和界面对不上。
+ * renderer.ts 通过 getComputedStyle 读 --sky 与 --xp，天空与经验球不会和界面对不上。
+ *
+ * --xp 不来自图集：经验球没有贴图，它是一团纯色的光，等级条也用这个颜色。
  *
  * --tile 是一个方块的屏幕尺寸，也是界面的间距单位：贴图是 16×16，
  * 界面的竖向节奏就按 16 的倍数走。
@@ -12,6 +14,7 @@
   --dirt: #866043;
   --stone: #7f7f7f;
   --bedrock: #3f3f3f;
+  --xp: #7ee02a;
   --ink: #1c1712;
 
   --tile: 16px;
@@ -116,24 +119,68 @@ body {
 }
 
 /*
- * 快捷栏：屏幕底部一排格子，格子边长与间距都是 --tile 的倍数，与加载屏同一套节奏。
+ * HUD：屏幕底部中央的一叠，自上而下是等级条与快捷栏。
+ *
+ * 两者装在同一栏里，等级条因此自动跟快捷栏一样宽——9 格的宽度算式只有快捷栏那一处。
  * pointer-events: none 是必须的——它压在画布底部中央，能点得着就点不到画布，
  * 玩家点它时进不了第一人称。
  */
-.hotbar {
-  --hotbar-cell: calc(var(--tile) * 2.5);
-  --hotbar-icon: calc(var(--tile) * 2);
-
+.hud {
   position: fixed;
   bottom: var(--tile);
   left: 50%;
   transform: translateX(-50%);
+  display: grid;
+  gap: calc(var(--tile) / 2);
+  justify-items: stretch;
+  font-family: var(--font-ui);
+  pointer-events: none;
+}
+
+/*
+ * 等级条：等级数字在上、进度条在下，进度条撑满整栏。
+ * 数字与进度条同色，玩家一眼就看出这两样说的是一件事。
+ */
+.levelbar {
+  display: grid;
+  gap: calc(var(--tile) / 4);
+  justify-items: stretch;
+  text-align: center;
+}
+
+.levelbar__level {
+  font-size: calc(var(--tile) * 0.875);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--xp);
+  /* 一格硬阴影，没有模糊：与标题、快捷栏数量同一套做法。 */
+  text-shadow: 1px 1px 0 var(--ink);
+}
+
+.levelbar__track {
+  height: calc(var(--tile) / 2);
+  background: rgb(0 0 0 / 45%);
+  /* 一圈内描边而不是 border：进度条的外尺寸因此还是整数倍的 --tile。 */
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 35%);
+}
+
+/* 进度由 level-bar.ts 写成 --progress（0 到 1），宽度的算式留在这里。 */
+.levelbar__fill {
+  display: block;
+  width: calc(var(--progress, 0) * 100%);
+  height: 100%;
+  background: var(--xp);
+}
+
+/* 快捷栏：一排格子，格子边长与间距都是 --tile 的倍数，与加载屏同一套节奏。 */
+.hotbar {
+  --hotbar-cell: calc(var(--tile) * 2.5);
+  --hotbar-icon: calc(var(--tile) * 2);
+
   display: flex;
   gap: 2px;
   padding: 2px;
   background: rgb(0 0 0 / 35%);
-  font-family: var(--font-ui);
-  pointer-events: none;
 }
 
 .hotbar__slot {

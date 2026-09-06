@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { DEBUG_BUILD } from '../build-flags';
 import type { GameCore } from '../core/game';
 import { CHUNK_SIZE } from '../core/constants';
-import { DROP_SIZE, type DropView } from '../core/drop';
+import { DROP_SIZE } from '../core/drop';
 import type { ItemType } from '../core/item';
 import { PLAYER_EYE_HEIGHT } from '../core/player';
 import type { Vec3 } from '../core/vec3';
+import { XP_ORB_SIZE } from '../core/xp-orb';
 import { CRACK_STAGES, crackStage, itemCubeUvs } from './atlas';
 import { dropBob, dropSpin } from './drop-motion';
 import { buildChunkMesh, type MeshData } from './mesh';
@@ -83,6 +84,17 @@ export interface DropRenderView {
 }
 
 /**
+ * 场景里一个经验球小方块现在的样子。
+ * 与 `DropRenderView` 一样直接从场景对象上读，端到端测试验的是真摆进场景的东西。
+ */
+export interface XpOrbRenderView {
+  /** 对应核心里那个经验球的编号。 */
+  readonly id: number;
+  /** 小方块中心的世界坐标。 */
+  readonly position: Vec3;
+}
+
+/**
  * 渲染适配器：把核心的方块数据画成 Three.js 场景。
  *
  * 相机是第一人称的：跟着核心里的玩家走，位置在两次 tick 之间插值（ADR-0002）。
@@ -113,6 +125,11 @@ export class WorldRenderer {
   private readonly dropMeshes = new Map<number, THREE.Mesh>();
   /** 每种物品的小方块几何体，建一次就一直共用。 */
   private readonly dropGeometries = new Map<ItemType, THREE.BufferGeometry>();
+  /** 场景里的经验球小方块，按核心给的编号索引。与掉落物同一套做法，见 ADR-0007。 */
+  private readonly xpOrbMeshes = new Map<number, THREE.Mesh>();
+  /** 经验球的几何体与材质：所有经验球长得一样，各建一份共用就够。 */
+  private readonly xpOrbGeometry = new THREE.BoxGeometry(XP_ORB_SIZE, XP_ORB_SIZE, XP_ORB_SIZE);
+  private readonly xpOrbMaterial: THREE.Material;
 
   constructor({ canvas, core, texture, crackTexture }: WorldRendererOptions) {
     this.core = core;
@@ -130,6 +147,11 @@ export class WorldRenderer {
       map: texture,
       // 树叶贴图有镂空，用 alphaTest 剔掉透明像素，避免半透明排序问题。
       alphaTest: 0.5,
+    });
+
+    // 经验球不吃光照：它是一团光，六个面明暗一致才像发着光，而不像一小块黄绿方块。
+    this.xpOrbMaterial = new THREE.MeshBasicMaterial({
+      color: paletteColor('--xp', '#7ee02a'),
     });
 
     this.camera = new THREE.PerspectiveCamera(FIELD_OF_VIEW, 1, 0.1, 1000);
@@ -206,6 +228,14 @@ export class WorldRenderer {
       id,
       position: { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z },
       spin: mesh.rotation.y,
+    }));
+  }
+
+  /** 上一帧画出来的经验球小方块。 */
+  get xpOrbs(): XpOrbRenderView[] {
+    return [...this.xpOrbMeshes].map(([id, mesh]) => ({
+      id,
+      position: { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z },
     }));
   }
 
@@ -288,6 +318,7 @@ export class WorldRenderer {
     this.updateCamera(alpha);
     this.updateSelection();
     this.updateDrops(alpha);
+    this.updateXpOrbs(alpha);
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -301,33 +332,64 @@ export class WorldRenderer {
    * `age + alpha` 算，因此在两次 tick 之间也是连续的，不会以 20Hz 一跳一跳地转。
    */
   private updateDrops(alpha: number): void {
-    const alive = new Set<number>();
-    for (const drop of this.core.drops.all()) {
-      alive.add(drop.id);
-      const mesh = this.dropMeshes.get(drop.id) ?? this.addDropMesh(drop);
-      const { position, previousPosition } = drop;
-      const phase = drop.age + alpha;
-      // 核心报的是碰撞箱底面中心，小方块以自己的中心为原点。
-      mesh.position.set(
-        lerp(previousPosition.x, position.x, alpha),
-        lerp(previousPosition.y, position.y, alpha) + DROP_SIZE / 2 + dropBob(phase),
-        lerp(previousPosition.z, position.z, alpha),
-      );
-      mesh.rotation.y = dropSpin(phase);
-    }
-
-    for (const [id, mesh] of this.dropMeshes) {
-      if (alive.has(id)) continue;
-      this.scene.remove(mesh);
-      this.dropMeshes.delete(id);
-    }
+    this.syncEntityMeshes(
+      this.core.drops.all(),
+      this.dropMeshes,
+      (drop) => new THREE.Mesh(this.dropGeometry(drop.item), this.material),
+      (mesh, drop) => {
+        const phase = drop.age + alpha;
+        mesh.position.copy(entityCenter(drop, alpha, DROP_SIZE));
+        mesh.position.y += dropBob(phase);
+        mesh.rotation.y = dropSpin(phase);
+      },
+    );
   }
 
-  private addDropMesh(drop: DropView): THREE.Mesh {
-    const mesh = new THREE.Mesh(this.dropGeometry(drop.item), this.material);
-    this.scene.add(mesh);
-    this.dropMeshes.set(drop.id, mesh);
-    return mesh;
+  /**
+   * 让场景里的小方块跟上核心里的经验球。
+   *
+   * 与掉落物同一套做法（ADR-0007），只是经验球不转也不漂：它一生成就朝玩家飞过来，
+   * 几 tick 就没了，转与漂根本看不出来，加上只会让「它在往我这边来」这件事更难看清。
+   */
+  private updateXpOrbs(alpha: number): void {
+    this.syncEntityMeshes(
+      this.core.xpOrbs.all(),
+      this.xpOrbMeshes,
+      () => new THREE.Mesh(this.xpOrbGeometry, this.xpOrbMaterial),
+      (mesh, orb) => mesh.position.copy(entityCenter(orb, alpha, XP_ORB_SIZE)),
+    );
+  }
+
+  /**
+   * 让一批场景对象跟上核心里的一批实体：新出现的建好加进场景，消失的移出去，留着的
+   * 交给 `place` 摆位。
+   *
+   * 掉落物与经验球共用这一份：ADR-0007 定的实体同步就是「每帧全量遍历 + 按编号认对象」
+   * 这一套，各写一遍迟早有一边忘了从场景里移除。将来的生物也走这里。
+   */
+  private syncEntityMeshes<T extends { readonly id: number }>(
+    entities: readonly T[],
+    meshes: Map<number, THREE.Mesh>,
+    create: (entity: T) => THREE.Mesh,
+    place: (mesh: THREE.Mesh, entity: T) => void,
+  ): void {
+    const alive = new Set<number>();
+    for (const entity of entities) {
+      alive.add(entity.id);
+      let mesh = meshes.get(entity.id);
+      if (!mesh) {
+        mesh = create(entity);
+        this.scene.add(mesh);
+        meshes.set(entity.id, mesh);
+      }
+      place(mesh, entity);
+    }
+
+    for (const [id, mesh] of meshes) {
+      if (alive.has(id)) continue;
+      this.scene.remove(mesh);
+      meshes.delete(id);
+    }
   }
 
   /** 某种物品的小方块几何体。几何体不随掉落物销毁，同种物品一直共用同一份。 */
@@ -400,6 +462,23 @@ interface ChunkMesh extends ChunkCoord {
 
 function lerp(from: number, to: number, alpha: number): number {
   return from + (to - from) * alpha;
+}
+
+/**
+ * 一个实体这一帧该画在哪：位置在上一个 tick 与当前 tick 之间插值（ADR-0002），
+ * 再把碰撞箱底面抬到小方块的中心——核心报的是底面中心，场景对象以自己的中心为原点。
+ */
+function entityCenter(
+  entity: { readonly position: Vec3; readonly previousPosition: Vec3 },
+  alpha: number,
+  size: number,
+): THREE.Vector3 {
+  const { position, previousPosition } = entity;
+  return new THREE.Vector3(
+    lerp(previousPosition.x, position.x, alpha),
+    lerp(previousPosition.y, position.y, alpha) + size / 2,
+    lerp(previousPosition.z, position.z, alpha),
+  );
 }
 
 function toGeometry(data: MeshData): THREE.BufferGeometry {

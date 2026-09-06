@@ -6,8 +6,9 @@ import { byDistanceTo, chunkKey, chunksAround, type ChunkCoord } from '../core/w
  * 建一个区块的网格实测 1.3–1.6ms（桌面 Chrome，Node 里 4ms），两个加上这一帧本身的
  * 绘制仍在 60fps 的 16ms 预算里。玩家跨过一条区块边界时要补一整列区块（视距 8 是
  * 17 个），全挤在一帧里就是一次看得见的卡顿；摊到几十帧里则完全看不出来——走一格
- * 区块要 3.7 秒，有两百多帧可用。实测这个预算追得上走路：开局铺满视距要几秒，
- * 之后一路走下去积压恒为 0（tests/render/mesh-plan.test.ts）。
+ * 区块要 3.7 秒，有两百多帧可用。实测这个预算追得上走路：开局铺满视距要几秒，之后
+ * 每跨一条区块边界积压跳到十几个，几帧内消掉，八成以上的帧一个都不欠
+ * （tests/render/mesh-plan.test.ts）。
  */
 export const MESH_BUDGET_PER_FRAME = 2;
 

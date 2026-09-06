@@ -12,7 +12,7 @@ import {
 import type { ChunkRequest, ChunkWorkerPort } from '../../src/worker/protocol';
 
 /**
- * 假的 Worker 端口：请求先攒着，测试自己决定什么时候答、答哪一个。
+ * 假的 Worker 端口：请求先存下来，由测试决定什么时候答、答哪一个。
  * 真 Worker 什么时候回消息不由我们控制，这里把那个时机变成显式的一步。
  */
 function fakePort(): ChunkWorkerPort & {
@@ -45,7 +45,7 @@ function fakePort(): ChunkWorkerPort & {
 
 const SEED = 4242;
 
-describe('Worker 供货的区块来源', () => {
+describe('由 Worker 生成的区块来源', () => {
   it('第一次问的时候还没有区块，只是发出请求', () => {
     const port = fakePort();
     const stream = createChunkStream({ seed: SEED, port });
@@ -150,7 +150,7 @@ describe('等一片区块就位', () => {
 
     const first = stream.awaitChunks(coords);
     const second = stream.awaitChunks(coords);
-    // 第二拨不必再下单
+    // 第二拨不必再发一次请求
     expect(port.requests).toHaveLength(1);
 
     port.deliverAll();
@@ -168,7 +168,7 @@ describe('等一片区块就位', () => {
   });
 });
 
-describe('攒着的区块有上限', () => {
+describe('存着待取的区块有上限', () => {
   /** 请求并收下 count 个区块，一个都不取走。 */
   function flood(stream: ChunkStream, port: ReturnType<typeof fakePort>, count: number): void {
     for (let i = 0; i < count; i++) stream.source(i, 0);
@@ -181,7 +181,7 @@ describe('攒着的区块有上限', () => {
 
     flood(stream, port, MAX_READY_CHUNKS + 1);
 
-    // 最后到的那个最远、最不着急，被挤掉了，于是又发了一次请求
+    // 最后到的那个最远、最晚才用到，没有留下，于是又发了一次请求
     const last = MAX_READY_CHUNKS;
     expect(stream.source(last, 0)).toBeUndefined();
     expect(port.requests).toEqual([{ seed: SEED, cx: last, cz: 0 }]);
@@ -189,12 +189,12 @@ describe('攒着的区块有上限', () => {
     expect(stream.source(0, 0)).toBeDefined();
   });
 
-  it('引导阶段在等的区块不会被挤掉：出生点不能算在虚空里', async () => {
+  it('引导阶段正在等的区块不会被丢掉：出生点不能算在虚空里', async () => {
     const port = fakePort();
     const stream = createChunkStream({ seed: SEED, port });
     flood(stream, port, MAX_READY_CHUNKS);
 
-    // 再来一个就超上限，但这个是有人在等的
+    // 再来一个就超上限，但引导阶段正在等这一个
     const awaited = { cx: MAX_READY_CHUNKS, cz: 0 };
     const waiting = stream.awaitChunks([awaited]);
     port.deliverAll();

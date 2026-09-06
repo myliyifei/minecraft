@@ -10,7 +10,7 @@ import type { ChunkStream } from './worker/chunk-stream';
 export interface DebugHandle {
   readonly core: GameCore;
   readonly renderer: WorldRenderer;
-  /** Worker 供货的区块来源。端到端测试用它确认地形生成真的发生在 Worker 里。 */
+  /** 由 Worker 生成区块的来源。端到端测试用它确认地形生成真的发生在 Worker 里。 */
   readonly chunks: ChunkStream;
 }
 

@@ -401,5 +401,4 @@ describe('玩家不会被卡死', () => {
     }
     expect(stuck).toEqual([]);
   });
-
 });

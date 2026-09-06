@@ -80,7 +80,7 @@ export class WorldRenderer {
     this.updateCamera(1);
 
     // 固定光照：环境光打底，方向光让方块的六个面有明暗区分（本切片不做天光）。
-    // 两者的比例决定体积感——环境光太强，方块就摊平成一张色卡。
+    // 两者的比例决定体积感——环境光太强，六个面的明暗差别就没了，方块看上去是平的。
     this.scene.add(new THREE.AmbientLight(0xffffff, 1.05));
     const sun = new THREE.DirectionalLight(0xffffff, 1.45);
     sun.position.set(0.5, 1, 0.28);
@@ -135,7 +135,7 @@ export class WorldRenderer {
    * 建一个区块的网格。
    *
    * 一个面都没有的区块（整块空气）仍然要记进账里，只是不往场景里放东西：不记账的话
-   * `planChunkMeshes` 每帧都会重新提议它，它会一直白占着这一帧的建网格预算。
+   * `planChunkMeshes` 每帧都会重新提议它，这一帧的建网格预算就一直被它占着。
    */
   private buildChunk(cx: number, cz: number): void {
     const chunk = this.core.chunkAt(cx, cz);

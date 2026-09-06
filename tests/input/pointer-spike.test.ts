@@ -45,7 +45,7 @@ const REAL_MOVES: ReadonlyArray<readonly [px: number, ms: number]> = [
   [16, 0.6],
 ];
 
-describe('剔掉浏览器吐出的假鼠标增量', () => {
+describe('剔掉浏览器投来的假鼠标增量', () => {
   it('实测到的每一发巨型增量都判成假的', () => {
     const kept = SPIKES.filter(([px, ms]) => !isPointerSpike(px, ms));
     expect(kept).toEqual([]);

@@ -12,18 +12,21 @@ import {
   WORLD_MAX_Y,
   WORLD_MIN_Y,
 } from '../../src/core/constants';
-import { IDLE_INTENT, WALK_SPEED } from '../../src/core/player';
+import { IDLE_INTENT, WALK_SPEED, WALK_STEP } from '../../src/core/player';
 import {
   DIRT_DEPTH_MAX,
   DIRT_DEPTH_MIN,
   plainsSurfaceHeight,
+  plainsTreePlacement,
 } from '../../src/core/terrain';
+import { oakTreesTouching } from '../../src/core/tree';
+import { ABOVE_SURFACE } from '../helpers/above-surface';
 import { flatTestTerrain } from '../helpers/flat-terrain';
 
 /**
  * 采样用的视距（区块数）。
  * 地形形态与方块查询的断言只需要原点周围一小片；按默认视距 8 建一个核心要生成
- * 289 个区块（实测 95ms），这一节几十个核心加起来就是好几秒。视距本身的断言在
+ * 289 个区块（实测 105ms），这一节几十个核心加起来就是好几秒。视距本身的断言在
  * 「初始区块加载」那一节里，用的是真正的默认值。
  */
 const SAMPLE_RADIUS = 2;
@@ -127,11 +130,12 @@ describe('GameCore 在 Node 中的方块查询', () => {
     [31, -32],
   ];
 
-  it('地表以上是空气', () => {
+  it('地表以上只有空气与树，树顶之上什么都没有', () => {
     const core = sampleCore();
     for (const [x, z] of columns) {
       const surface = surfaceAt(x, z);
-      expect(core.getBlock(x, surface + 1, z)).toBe(BlockType.Air);
+      expect(ABOVE_SURFACE.has(core.getBlock(x, surface + 1, z))).toBe(true);
+      // 最高的树也就地表往上十来格，40 格之外一定出了树冠
       expect(core.getBlock(x, surface + 40, z)).toBe(BlockType.Air);
       expect(core.getBlock(x, WORLD_MAX_Y, z)).toBe(BlockType.Air);
     }
@@ -201,15 +205,26 @@ describe('GameCore 的地形形态', () => {
     expect(heights.size).toBeGreaterThan(1);
   });
 
-  it('highestBlockY 就是那一列草方块的高度', () => {
+  it('没有树的列上 highestBlockY 就是草方块的高度', () => {
     const core = sampleCore();
+    // 出生点那一带不长树（见 OAK_SPAWN_CLEARANCE），最高的方块就是地表那层草
     for (const [x, z] of [
       [0, 0],
-      [-9, 21],
-      [40, -20],
+      [1, -1],
+      [-1, 1],
     ] as Array<[number, number]>) {
       expect(core.highestBlockY(x, z)).toBe(surfaceAt(x, z));
     }
+  });
+
+  it('有树的列上 highestBlockY 报的是树冠，比地表高', () => {
+    // highestBlockY 不是「地表高度」：树一长出来两者就分叉，树冠会把它抬起来。
+    const core = sampleCore();
+    // 会写进原点区块的第一棵树。树根不一定在这个区块里，但一定在采样视距内。
+    const tree = oakTreesTouching(plainsTreePlacement(DEFAULT_SEED), 0, 0)[0];
+    if (!tree) throw new Error('原点区块附近应有一棵橡树');
+    expect(core.getBlock(tree.x, tree.rootY, tree.z)).toBe(BlockType.OakLog);
+    expect(core.highestBlockY(tree.x, tree.z)).toBeGreaterThan(surfaceAt(tree.x, tree.z));
   });
 
   it('未加载区块的列没有最高方块', () => {
@@ -364,6 +379,47 @@ describe('GameCore 的区块随玩家流式加载', () => {
     core.tick(ticks);
   }
 
+  /**
+   * 侧身让路时，横向挪了这么多才算真挪动了。
+   * 半步：斜着走一 tick 横向挪 0.71 步，被挡住则一步不挪，阈值取在两者中间。
+   */
+  const SIDESTEP_PROGRESS = WALK_STEP / 2;
+
+  /**
+   * 在真实地形上一直往前走，绕开挡路的东西，每个 tick 之后调一次 `check`。
+   *
+   * 边走边跳，因为相邻两列可能差一格，光走会被那一格挡住（没有自动上台阶）。挡路的还有
+   * 树：树干与低垂的树冠都是实心的，一味往前只会永远卡在第一棵树上——这条测的是流式
+   * 加载，不该让一棵树决定它过不过。所以往前挪不动就侧身让一步，侧身也挪不动就换另一边
+   * （树冠是 5×5 的一片，玩家会正好落进右边不通的那个角）。
+   *
+   * 侧身与前进同时给：两个轴分开解算碰撞，侧出树干之后这一 tick 就能继续往前。
+   */
+  function walkForwardPastTrees(core: GameCore, ticks: number, check: () => void): void {
+    let sidestep: 'none' | 'right' | 'left' = 'none';
+    let previous = core.player.position;
+    for (let i = 0; i < ticks; i++) {
+      core.setMoveIntent({
+        ...IDLE_INTENT,
+        forward: true,
+        jump: true,
+        right: sidestep === 'right',
+        left: sidestep === 'left',
+      });
+      core.tick();
+      check();
+      const now = core.player.position;
+      if (now.z < previous.z) {
+        sidestep = 'none';
+      } else if (sidestep === 'none') {
+        sidestep = 'right';
+      } else if (Math.abs(now.x - previous.x) < SIDESTEP_PROGRESS) {
+        sidestep = sidestep === 'right' ? 'left' : 'right';
+      }
+      previous = now;
+    }
+  }
+
   it('玩家所在区块由脚下的位置决定，负坐标也算对', () => {
     const core = sampleCore({ chunkSource: () => flatTestTerrain });
     expect(core.playerChunk).toEqual({ cx: 0, cz: 0 });
@@ -405,15 +461,12 @@ describe('GameCore 的区块随玩家流式加载', () => {
     const core = sampleCore();
     const falls: string[] = [];
 
-    // 边走边跳：真实地形上相邻两列可能差一格，光走会被这一格挡住（没有自动上台阶）。
-    core.setMoveIntent({ ...IDLE_INTENT, forward: true, jump: true });
-    for (let i = 0; i < 60 * TICK_RATE; i++) {
-      core.tick();
+    walkForwardPastTrees(core, 60 * TICK_RATE, () => {
       const { x, y, z } = core.player.position;
       // 脚底始终在自己这一列的地表之上——低于它就说明踩进了没加载的区块
       const surface = plainsSurfaceHeight(DEFAULT_SEED, Math.floor(x), Math.floor(z));
-      if (y < surface + 1) falls.push(`第 ${i} tick：y=${y}，地表=${surface}`);
-    }
+      if (y < surface + 1) falls.push(`y=${y}，地表=${surface}`);
+    });
 
     expect(falls).toEqual([]);
     // 一分钟走出去二百多格，跨过十几个区块边界

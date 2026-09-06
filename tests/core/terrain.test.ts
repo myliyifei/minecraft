@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import type { Chunk } from '../../src/core/chunk';
-import { CHUNK_SIZE, SEA_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
+import {
+  CHUNK_SIZE,
+  MIN_SURFACE_Y,
+  SEA_LEVEL,
+  WORLD_MAX_Y,
+  WORLD_MIN_Y,
+} from '../../src/core/constants';
 import {
   DIRT_DEPTH_MAX,
   DIRT_DEPTH_MIN,
@@ -10,6 +16,7 @@ import {
   plainsSurfaceHeight,
   plainsTerrain,
 } from '../../src/core/terrain';
+import { ABOVE_SURFACE } from '../helpers/above-surface';
 
 // 两个与 DEFAULT_SEED 无关的种子：地形的性质不该只在默认种子下成立。
 const SEED = 314_159;
@@ -128,7 +135,6 @@ describe('plainsTerrain 生成的区块', () => {
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
         const surface = plainsSurfaceHeight(SEED, -2 * CHUNK_SIZE + lx, 4 * CHUNK_SIZE + lz);
-        expect(chunk.get(lx, surface + 1, lz)).toBe(BlockType.Air);
         expect(chunk.get(lx, surface, lz)).toBe(BlockType.Grass);
 
         const dirt = dirtDepthBelow(chunk, lx, surface, lz);
@@ -183,18 +189,38 @@ describe('plainsTerrain 生成的区块', () => {
     expect(strays).toEqual([]);
   });
 
-  it('地表以上全是空气', () => {
+  it('地表以上只有空气与树', () => {
+    // 树是长在地表之上的，土石不是——「地表高度」说的是地面，见 CONTEXT.md。
     const chunk = generate(-1, -1);
-    const solids: string[] = [];
+    const strays: string[] = [];
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
         const surface = plainsSurfaceHeight(SEED, -CHUNK_SIZE + lx, -CHUNK_SIZE + lz);
         for (let y = surface + 1; y <= WORLD_MAX_Y; y++) {
-          if (chunk.get(lx, y, lz) !== BlockType.Air) solids.push(`(${lx}, ${y}, ${lz})`);
+          const block = chunk.get(lx, y, lz);
+          if (!ABOVE_SURFACE.has(block)) strays.push(`(${lx}, ${y}, ${lz}) 是 ${block}`);
         }
       }
     }
-    expect(solids).toEqual([]);
+    expect(strays).toEqual([]);
+  });
+
+  it('地表之上长出了树', () => {
+    // 密度是平均一个区块一棵，具体某个区块可能一棵也没有，所以扫一小片。
+    // 树的形状与分布断言在 tests/core/tree.test.ts，这里只确认地形生成真的种了树。
+    const kinds = new Set<BlockType>();
+    for (let cx = 0; cx < 3; cx++) {
+      for (let cz = 0; cz < 3; cz++) {
+        const chunk = generate(cx, cz);
+        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+          for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+            for (let y = MIN_SURFACE_Y; y <= WORLD_MAX_Y; y++) kinds.add(chunk.get(lx, y, lz));
+          }
+        }
+      }
+    }
+    expect(kinds).toContain(BlockType.OakLog);
+    expect(kinds).toContain(BlockType.OakLeaves);
   });
 
   it('换种子得到不同的地形', () => {

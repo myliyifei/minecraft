@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_VIEW_RADIUS } from '../../src/core/constants';
+import { CHUNK_SIZE, DEFAULT_VIEW_RADIUS } from '../../src/core/constants';
 import { GameCore } from '../../src/core/game';
 import { IDLE_INTENT } from '../../src/core/player';
+import type { Vec3 } from '../../src/core/vec3';
 import { chunkKey, chunksAround, type ChunkCoord } from '../../src/core/world';
-import { MESH_BUDGET_PER_FRAME, planChunkMeshes } from '../../src/render/mesh-plan';
+import {
+  MESH_BUDGET_PER_FRAME,
+  planChunkMeshes,
+  staleChunksFor,
+} from '../../src/render/mesh-plan';
 
 /** 已加载区块由一组 "cx,cz" 决定的世界。 */
 function worldWith(loaded: Iterable<ChunkCoord>) {
@@ -204,5 +209,52 @@ describe('该丢掉哪些网格', () => {
       budget: Infinity,
     });
     expect(plan.drop).toEqual([]);
+  });
+});
+
+describe('变过的方块让哪些网格过期', () => {
+  /** 区块内部、四条边都不挨着的一格。 */
+  const INSIDE: Vec3 = { x: 5, y: 70, z: 7 };
+
+  it('区块内部的一格只让自己那个区块过期', () => {
+    expect(keysOf(staleChunksFor([INSIDE]))).toEqual(['0,0']);
+  });
+
+  it('没有变过的方块时没有网格过期', () => {
+    expect(staleChunksFor([])).toEqual([]);
+  });
+
+  it('区块边界上的一格连对面那个区块一起过期', () => {
+    const cases: Array<[string, Vec3, string[]]> = [
+      ['−X 边', { x: 0, y: 70, z: 7 }, ['0,0', '-1,0']],
+      ['+X 边', { x: CHUNK_SIZE - 1, y: 70, z: 7 }, ['0,0', '1,0']],
+      ['−Z 边', { x: 5, y: 70, z: 0 }, ['0,0', '0,-1']],
+      ['+Z 边', { x: 5, y: 70, z: CHUNK_SIZE - 1 }, ['0,0', '0,1']],
+    ];
+    for (const [name, block, expected] of cases) {
+      expect(keysOf(staleChunksFor([block])), name).toEqual(expected);
+    }
+  });
+
+  it('区块角上的一格牵动两个侧向邻居，不牵动斜对角', () => {
+    // 网格只问六个轴向的邻居，斜对角那一格与谁的面都无关
+    expect(keysOf(staleChunksFor([{ x: 0, y: 70, z: 0 }]))).toEqual(['0,0', '-1,0', '0,-1']);
+  });
+
+  it('负坐标归到正确的区块', () => {
+    expect(keysOf(staleChunksFor([{ x: -1, y: 70, z: -17 }]))).toEqual([
+      '-1,-2',
+      '0,-2',
+      '-1,-1',
+    ]);
+  });
+
+  it('同一个区块里的几格只报一次', () => {
+    const changed: Vec3[] = [INSIDE, { x: 6, y: 71, z: 7 }, { x: 5, y: 72, z: 8 }];
+    expect(keysOf(staleChunksFor(changed))).toEqual(['0,0']);
+  });
+
+  it('小数坐标按 floor 归格', () => {
+    expect(keysOf(staleChunksFor([{ x: 15.9, y: 70, z: 7.2 }]))).toEqual(['0,0', '1,0']);
   });
 });

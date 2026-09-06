@@ -23,6 +23,16 @@ export const KEY_BINDINGS: Readonly<Record<MoveAction, string>> = {
 /** 所有可绑键的动作。 */
 export const MOVE_ACTIONS = Object.keys(KEY_BINDINGS) as MoveAction[];
 
+/**
+ * 鼠标按钮绑定：`MouseEvent.button` 的编号。别处不许再写按钮编号。
+ *
+ * 与 `KEY_BINDINGS` 分成两张表，因为它们查的是不同的事件字段。挖掘是左键，
+ * 放置（#10）会是右键。
+ */
+export const MOUSE_BINDINGS = {
+  mine: 0,
+} as const;
+
 /** 反查：按下的 `code` 对应哪个动作。没绑过的键查不到。 */
 export const ACTION_BY_CODE: ReadonlyMap<string, MoveAction> = new Map(
   MOVE_ACTIONS.map((action) => [KEY_BINDINGS[action], action]),

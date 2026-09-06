@@ -116,6 +116,15 @@ describe('键位表是单一数据源', () => {
     }
   });
 
+  it('鼠标按钮编号只写在键位表里', () => {
+    // 同理：左键挖、右键放，编号要能改，别处就不能再写一个裸的 0 或 2。
+    const buttonNumber = /\.button\s*[!=]==?\s*\d/;
+    for (const file of tsFilesIn(SRC)) {
+      if (file === table) continue;
+      expect(codeOf(file), file).not.toMatch(buttonNumber);
+    }
+  });
+
   it('核心不知道任何按键', () => {
     // 移动意图是核心与输入之间的边界：核心收到的是「向前」，不是「W 被按下」。
     for (const file of tsFilesIn(join(SRC, 'core'))) {

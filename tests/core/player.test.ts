@@ -5,6 +5,7 @@ import {
   GRAVITY,
   IDLE_INTENT,
   MAX_PITCH,
+  PLAYER_EYE_HEIGHT,
   PLAYER_HEIGHT,
   PLAYER_WIDTH,
   Player,
@@ -319,6 +320,87 @@ describe('玩家的视角', () => {
     for (let i = 0; i < TICK_RATE; i++) player.step(FORWARD_INTENT);
     expect(player.position.y).toBe(FLAT_STAND_Y);
     expect(0.5 - player.position.z).toBeCloseTo(WALK_SPEED, 6);
+  });
+});
+
+describe('玩家的眼睛与视线', () => {
+  it('眼睛在脚底往上 1.62 格，水平位置与脚底一致', () => {
+    const player = standingAt();
+    expect(player.eyePosition).toEqual({
+      x: 0.5,
+      y: FLAT_STAND_Y + PLAYER_EYE_HEIGHT,
+      z: 0.5,
+    });
+  });
+
+  it('眼睛跟着玩家走', () => {
+    const player = standingAt();
+    for (let i = 0; i < TICK_RATE; i++) player.step(FORWARD_INTENT);
+    expect(player.eyePosition.z).toBeCloseTo(player.position.z, 10);
+    expect(player.eyePosition.y).toBeCloseTo(player.position.y + PLAYER_EYE_HEIGHT, 10);
+  });
+
+  it('初始视线朝 −Z，与相机的默认朝向一致', () => {
+    const look = standingAt().lookDirection;
+    expect(look.x).toBeCloseTo(0, 10);
+    expect(look.y).toBeCloseTo(0, 10);
+    expect(look.z).toBeCloseTo(-1, 10);
+  });
+
+  it('往右转 90° 后视线朝 +X', () => {
+    const player = standingAt();
+    player.turn(FACING_PLUS_X, 0);
+    expect(player.lookDirection.x).toBeCloseTo(1, 10);
+    expect(player.lookDirection.z).toBeCloseTo(0, 10);
+  });
+
+  it('抬头视线朝上，低头视线朝下，幅度对称', () => {
+    const up = standingAt();
+    up.turn(0, 0.5);
+    expect(up.lookDirection.y).toBeGreaterThan(0);
+
+    const down = standingAt();
+    down.turn(0, -0.5);
+    expect(down.lookDirection.y).toBeLessThan(0);
+    expect(down.lookDirection.y).toBeCloseTo(-up.lookDirection.y, 10);
+  });
+
+  it('俯仰 45° 时竖直分量与水平分量一样长', () => {
+    // 不抄实现的式子，用几何关系钉住俯仰的幅度：tan 45° = 1
+    const player = standingAt();
+    player.turn(0, Math.PI / 4);
+    const { x, y, z } = player.lookDirection;
+    expect(y).toBeCloseTo(Math.hypot(x, z), 10);
+  });
+
+  it('俯仰到底时视线几乎竖直向下', () => {
+    const player = standingAt();
+    player.turn(0, -100);
+    const { x, y, z } = player.lookDirection;
+    expect(y).toBeLessThan(-0.999);
+    // 留了一点余量而不是取满 90°，水平分量因此不为零——射线方向不会退化成纯竖直
+    expect(Math.hypot(x, z)).toBeGreaterThan(0);
+  });
+
+  it('任意视角下视线都是单位向量', () => {
+    const player = standingAt();
+    for (let i = 0; i < 40; i++) {
+      player.turn(0.37, 0.11);
+      const { x, y, z } = player.lookDirection;
+      expect(Math.hypot(x, y, z)).toBeCloseTo(1, 10);
+    }
+  });
+
+  it('视线的水平分量与走路的方向同向', () => {
+    const player = standingAt();
+    player.turn(1.1, -0.7);
+    const look = player.lookDirection;
+    const before = player.position;
+    player.step(FORWARD_INTENT);
+    const moved = { x: player.position.x - before.x, z: player.position.z - before.z };
+    // 俯仰只压扁水平分量的长度，不改方向：叉积为零即同向
+    expect(look.x * moved.z - look.z * moved.x).toBeCloseTo(0, 10);
+    expect(look.x * moved.x + look.z * moved.z).toBeGreaterThan(0);
   });
 });
 

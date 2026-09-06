@@ -74,6 +74,55 @@ describe('World 的写入结果', () => {
   });
 });
 
+describe('World 记下变过的方块', () => {
+  /** 一个已加载区块的平地世界。 */
+  function loadedWorld(): World {
+    const world = new World(flatTestTerrain);
+    world.loadChunk(0, 0);
+    return world;
+  }
+
+  it('新建的世界没有变过的方块', () => {
+    expect(loadedWorld().takeChangedBlocks()).toEqual([]);
+  });
+
+  it('挖掉一格之后记下它的方块坐标', () => {
+    const world = loadedWorld();
+    world.setBlock(3.7, FLAT_GROUND_Y, 4.2, BlockType.Air);
+    // 坐标按 floor 取整，记的是格子而不是传进来的小数
+    expect(world.takeChangedBlocks()).toEqual([{ x: 3, y: FLAT_GROUND_Y, z: 4 }]);
+  });
+
+  it('取走之后清空，同一次改动不会报两遍', () => {
+    const world = loadedWorld();
+    world.setBlock(3, FLAT_GROUND_Y, 4, BlockType.Air);
+    expect(world.takeChangedBlocks()).toHaveLength(1);
+    expect(world.takeChangedBlocks()).toEqual([]);
+  });
+
+  it('同一格改了几次只报一遍', () => {
+    const world = loadedWorld();
+    world.setBlock(3, FLAT_GROUND_Y, 4, BlockType.Air);
+    world.setBlock(3, FLAT_GROUND_Y, 4, BlockType.Stone);
+    expect(world.takeChangedBlocks()).toEqual([{ x: 3, y: FLAT_GROUND_Y, z: 4 }]);
+  });
+
+  it('写成原本就是的方块不算变过', () => {
+    const world = loadedWorld();
+    expect(world.setBlock(3, FLAT_GROUND_Y, 4, BlockType.Grass)).toBe(true);
+    expect(world.takeChangedBlocks()).toEqual([]);
+  });
+
+  it('没落到世界里的写入不算变过', () => {
+    const world = loadedWorld();
+    // 区块未加载
+    world.setBlock(1000, FLAT_GROUND_Y, 0, BlockType.Air);
+    // y 越界
+    world.setBlock(3, WORLD_MAX_Y + 1, 4, BlockType.Stone);
+    expect(world.takeChangedBlocks()).toEqual([]);
+  });
+});
+
 describe('区块索引', () => {
   it('相邻与远处的区块互不串台', () => {
     const world = new World(flatTestTerrain);

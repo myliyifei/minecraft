@@ -9,3 +9,10 @@ export interface Vec3 {
   readonly y: number;
   readonly z: number;
 }
+
+/**
+ * 轴向。
+ * 直接用 Vec3 的字段名，逐轴解算的代码（碰撞扫掠、体素射线检测）因此能按名字取分量，
+ * 不必靠「0 是 x」这类下标约定。
+ */
+export type Axis = keyof Vec3;

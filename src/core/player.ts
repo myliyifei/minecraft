@@ -1,6 +1,6 @@
 import { isSolid, type BlockView } from './block';
 import { TICK_RATE } from './constants';
-import type { Vec3 } from './vec3';
+import type { Axis, Vec3 } from './vec3';
 
 /** 碰撞箱的水平边长（方块）。 */
 export const PLAYER_WIDTH = 0.6;
@@ -8,8 +8,14 @@ export const PLAYER_WIDTH = 0.6;
 /** 碰撞箱的高度（方块）。 */
 export const PLAYER_HEIGHT = 1.8;
 
-/** 眼睛相对脚底的高度（方块）。第一人称相机放在这里。 */
+/** 眼睛相对脚底的高度（方块）。第一人称相机放在这里，视线射线也从这里出发。 */
 export const PLAYER_EYE_HEIGHT = 1.62;
+
+/**
+ * 触及距离（方块）：从眼睛量起，能挖到、能放到的最远距离。与原版一致。
+ * 挖掘（#7）与放置（#10）共用它——玩家的手只有这么长，两件事没道理不一样。
+ */
+export const PLAYER_REACH = 4.5;
 
 /** 步行速度（方块/秒）。与原版一致。疾跑与潜行是后续切片的事。 */
 export const WALK_SPEED = 4.317;
@@ -76,6 +82,8 @@ export const IDLE_INTENT: MoveIntent = Object.freeze({
 export interface PlayerView {
   readonly position: Vec3;
   readonly previousPosition: Vec3;
+  readonly eyePosition: Vec3;
+  readonly lookDirection: Vec3;
   readonly yaw: number;
   readonly pitch: number;
   readonly onGround: boolean;
@@ -116,6 +124,27 @@ export class Player implements PlayerView {
   /** 上一个 tick 结束时的位置。渲染层在它和当前位置之间插值（ADR-0002）。 */
   get previousPosition(): Vec3 {
     return { x: this.prevX, y: this.prevY, z: this.prevZ };
+  }
+
+  /** 眼睛的位置。找目标方块的那条视线射线从这里出发，不是从脚底。 */
+  get eyePosition(): Vec3 {
+    return { x: this.x, y: this.y + PLAYER_EYE_HEIGHT, z: this.z };
+  }
+
+  /**
+   * 视线方向的单位向量。
+   *
+   * 与相机的朝向是同一个式子：偏航 0、俯仰 0 时是 (0, 0, −1)，抬头 y 为正。
+   * 水平分量和 `moveHorizontally` 的前向量一致，只是多乘了俯仰的余弦——走路不看俯仰，
+   * 瞄准看。
+   */
+  get lookDirection(): Vec3 {
+    const cosPitch = Math.cos(this.pitchAngle);
+    return {
+      x: -Math.sin(this.yawAngle) * cosPitch,
+      y: Math.sin(this.pitchAngle),
+      z: -Math.cos(this.yawAngle) * cosPitch,
+    };
   }
 
   /** 偏航（弧度）。0 表示看向 −Z，与 Three.js 相机的默认朝向一致。 */
@@ -207,9 +236,6 @@ export class Player implements PlayerView {
     };
   }
 }
-
-/** 轴向。直接用 Vec3 的字段名，扫掠因此能按名字取分量，不必靠下标约定。 */
-type Axis = keyof Vec3;
 
 /** 世界坐标中的一个轴对齐碰撞箱。 */
 interface Hitbox {

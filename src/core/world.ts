@@ -1,6 +1,7 @@
-import { BlockType, type BlockView } from './block';
+import { BlockType, type BlockEdit } from './block';
 import { Chunk } from './chunk';
 import { CHUNK_SHIFT, CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from './constants';
+import type { Vec3 } from './vec3';
 
 export interface ChunkCoord {
   readonly cx: number;
@@ -30,8 +31,17 @@ export type ChunkSourceFactory = (seed: number) => ChunkSource;
  * 未加载的区块视为边界：读到空气，写入被丢弃。这与连锁挖掘「未加载区块视为边界」
  * 的规则一致，也让区块流式加载不必给读写路径加特例。
  */
-export class World implements BlockView {
+export class World implements BlockEdit {
   private readonly chunks = new Map<number, Chunk>();
+  /**
+   * 自上次取走以来内容变过的方块，按坐标去重。
+   *
+   * 键用 `"x,y,z"` 字符串而不是像 `chunkKey` 那样打包成数字：这条路每 tick 最多走几次
+   * （挖掉一块、放下一块），不是网格生成那种每帧几十万次的热路径，而三个无界的整数
+   * 打包成安全整数并不划算。没人来取时它会一直攒着——浏览器里渲染层每帧取一次
+   * （见 `WorldRenderer.syncChunkMeshes`），核心层测试里世界是一次性的。
+   */
+  private readonly changed = new Map<string, Vec3>();
   private readonly source: ChunkSource;
 
   constructor(source: ChunkSource) {
@@ -121,8 +131,25 @@ export class World implements BlockView {
     if (by < WORLD_MIN_Y || by > WORLD_MAX_Y) return false;
     const chunk = this.chunks.get(chunkKey(chunkOf(bx), chunkOf(bz)));
     if (!chunk) return false;
-    chunk.set(localOf(bx), by, localOf(bz), block);
+    const lx = localOf(bx);
+    const lz = localOf(bz);
+    // 写成同样的方块不算变过：网格没必要为一次空写重建。
+    if (chunk.get(lx, by, lz) === block) return true;
+    chunk.set(lx, by, lz, block);
+    this.changed.set(`${bx},${by},${bz}`, { x: bx, y: by, z: bz });
     return true;
+  }
+
+  /**
+   * 取走「哪些方块变过」的记录并清空。
+   *
+   * 世界不知道网格是怎么回事，只报格子；哪些网格因此过期由渲染层判断
+   * （边界上的方块还牵动邻居区块，见 `staleChunksFor`）。
+   */
+  takeChangedBlocks(): Vec3[] {
+    const blocks = [...this.changed.values()];
+    this.changed.clear();
+    return blocks;
   }
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GameCore, type GameCoreOptions } from '../../src/core/game';
-import { BlockType } from '../../src/core/block';
+import { BlockType, miningTicks } from '../../src/core/block';
 import { Chunk } from '../../src/core/chunk';
 import {
   CHUNK_SIZE,
@@ -12,7 +12,7 @@ import {
   WORLD_MAX_Y,
   WORLD_MIN_Y,
 } from '../../src/core/constants';
-import { IDLE_INTENT, WALK_SPEED, WALK_STEP } from '../../src/core/player';
+import { IDLE_INTENT, MAX_PITCH, WALK_SPEED, WALK_STEP } from '../../src/core/player';
 import {
   DIRT_DEPTH_MAX,
   DIRT_DEPTH_MIN,
@@ -21,7 +21,7 @@ import {
 } from '../../src/core/terrain';
 import { oakTreesTouching } from '../../src/core/tree';
 import { ABOVE_SURFACE } from '../helpers/above-surface';
-import { flatTestTerrain } from '../helpers/flat-terrain';
+import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 
 /**
  * 采样用的视距（区块数）。
@@ -34,6 +34,11 @@ const SAMPLE_RADIUS = 2;
 /** 采样用的核心：视距收小，其余按默认。 */
 function sampleCore(options: GameCoreOptions = {}): GameCore {
   return new GameCore({ viewRadius: SAMPLE_RADIUS, ...options });
+}
+
+/** 固定平地上的核心：移动与瞄准的断言要的是可预测的地面，不是真实地形的起伏。 */
+function coreOnFlatGround(): GameCore {
+  return sampleCore({ chunkSource: () => flatTestTerrain });
 }
 
 /** 采样核心的已加载区块覆盖的世界坐标区间。 */
@@ -278,11 +283,6 @@ describe('GameCore 的出生点', () => {
 });
 
 describe('GameCore 的玩家', () => {
-  /** 固定平地上的核心：移动断言要的是可预测的地面，不是真实地形的起伏。 */
-  function coreOnFlatGround(): GameCore {
-    return sampleCore({ chunkSource: () => flatTestTerrain });
-  }
-
   it('新建世界后玩家位于出生点', () => {
     const core = sampleCore();
     expect(core.player.position).toEqual(core.spawnPoint);
@@ -329,6 +329,92 @@ describe('GameCore 的玩家', () => {
     core.tick();
     expect(core.player.previousPosition).toEqual(spawn);
     expect(core.player.position).not.toEqual(spawn);
+  });
+});
+
+describe('GameCore 的空手挖掘', () => {
+  /** 脚下那块草：平地上出生点正下方的一格。 */
+  const UNDERFOOT: [number, number, number] = [0, FLAT_GROUND_Y, 0];
+
+  /**
+   * 挖掉一块草要多少 tick。
+   * 从耗时表里取而不是写 18：这一节测的是「按键 → tick → 方块消失」这条线接上了没有，
+   * 耗时表本身由 tests/core/block.test.ts 与 tests/core/mining.test.ts 钉住。
+   */
+  const GRASS_TICKS = miningTicks(BlockType.Grass);
+
+  /** 低头看脚下那块草的核心。俯仰到底，视线几乎竖直向下。 */
+  function lookingDown(): GameCore {
+    const core = coreOnFlatGround();
+    core.turn(0, -MAX_PITCH);
+    return core;
+  }
+
+  it('瞄着脚下那块草，目标坐标与命中面都对', () => {
+    const core = lookingDown();
+    core.tick();
+    expect(core.mining.target).toMatchObject({
+      x: UNDERFOOT[0],
+      y: UNDERFOOT[1],
+      z: UNDERFOOT[2],
+      normal: { x: 0, y: 1, z: 0 },
+    });
+  });
+
+  it('抬头看天时没有目标', () => {
+    const core = coreOnFlatGround();
+    core.turn(0, MAX_PITCH);
+    core.tick();
+    expect(core.mining.target).toBeUndefined();
+    expect(core.mining.progress).toBe(0);
+  });
+
+  it('不按挖掘键时 tick 多久都不掉方块', () => {
+    const core = lookingDown();
+    core.tick(10 * TICK_RATE);
+    expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Grass);
+    expect(core.mining.progress).toBe(0);
+  });
+
+  it('按住挖掘键，耗时到了那块草变成空气', () => {
+    const core = lookingDown();
+    core.setMining(true);
+    core.tick(GRASS_TICKS - 1);
+    expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Grass);
+    core.tick(1);
+    expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Air);
+  });
+
+  it('挖掘键松开后进度归零，再按住也要重新挖满', () => {
+    const core = lookingDown();
+    core.setMining(true);
+    core.tick(GRASS_TICKS - 1);
+    core.setMining(false);
+    core.tick(1);
+    expect(core.mining.progress).toBe(0);
+
+    core.setMining(true);
+    core.tick(GRASS_TICKS - 1);
+    expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Grass);
+  });
+
+  it('挖掉的那一格出现在「变过的方块」里，取走后清空', () => {
+    const core = lookingDown();
+    core.setMining(true);
+    core.tick(GRASS_TICKS);
+    expect(core.takeChangedBlocks()).toEqual([
+      { x: UNDERFOOT[0], y: UNDERFOOT[1], z: UNDERFOOT[2] },
+    ]);
+    expect(core.takeChangedBlocks()).toEqual([]);
+  });
+
+  it('挖穿脚下之后玩家掉进坑里', () => {
+    const core = lookingDown();
+    const standing = core.player.position.y;
+    core.setMining(true);
+    core.tick(GRASS_TICKS + TICK_RATE);
+    expect(core.player.position.y).toBe(standing - 1);
+    expect(core.player.onGround).toBe(true);
   });
 });
 

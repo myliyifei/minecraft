@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { TICK_RATE } from '../../src/core/constants';
+import { GRAVITY } from '../../src/core/physics';
 import {
-  GRAVITY,
   IDLE_INTENT,
   MAX_PITCH,
   PLAYER_EYE_HEIGHT,

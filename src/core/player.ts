@@ -1,5 +1,6 @@
-import { isSolid, type BlockView } from './block';
-import { TICK_RATE } from './constants';
+import type { BlockView } from './block';
+import { TAU, TICK_RATE } from './constants';
+import { fallStep, hitboxAt, isOnGround, movedAlong, type Hitbox } from './physics';
 import type { Axis, Vec3 } from './vec3';
 
 /** 碰撞箱的水平边长（方块）。 */
@@ -22,40 +23,19 @@ export const WALK_SPEED = 4.317;
 
 /**
  * 俯仰的上下限（弧度）。
- * 留一点余量而不是取满 90°，视线方向因此不会退化成纯竖直——将来的方块拾取
- * 要拿它当射线方向。
+ * 留一点余量而不是取满 90°，视线方向因此不会退化成纯竖直——瞄准要拿它当射线方向。
  */
 export const MAX_PITCH = Math.PI / 2 - 0.01;
 
-/** 重力加速度（方块/tick²）。 */
-export const GRAVITY = 0.08;
-
-/**
- * 竖直速度每 tick 保留的比例。
- * 它让自由落体收敛到约 3.92 方块/tick（≈78 方块/秒）而不是一路加速下去。
- */
-export const VERTICAL_DRAG = 0.98;
-
 /**
  * 起跳的竖直初速度（方块/tick）。
- * 与上面的重力、阻力配在一起，最高点落在 1.252 方块：够上一格台阶，够不上两格。
- * 改这三个数中的任何一个都会改变这条手感，`tests/core/player.test.ts` 守着它。
+ * 与 `physics.ts` 的重力、阻力配在一起，最高点落在 1.252 方块：够上一格台阶，够不上
+ * 两格。改这三个数中的任何一个都会改变这条手感，`tests/core/player.test.ts` 守着它。
  */
 export const JUMP_VELOCITY = 0.42;
 
-const HALF_WIDTH = PLAYER_WIDTH / 2;
-
 /** 一 tick 的步行位移（方块）。 */
 export const WALK_STEP = WALK_SPEED / TICK_RATE;
-
-/** 一整圈的弧度。 */
-const TAU = Math.PI * 2;
-
-/**
- * 贴地探测的深度（方块）。
- * 只用来问「脚下踩实了没有」，取值远小于一 tick 的位移，也远大于浮点误差。
- */
-const GROUND_PROBE = 1e-4;
 
 /**
  * 一个 tick 的移动意图。
@@ -87,6 +67,8 @@ export interface PlayerView {
   readonly yaw: number;
   readonly pitch: number;
   readonly onGround: boolean;
+  /** 当前的碰撞箱。掉落物的吸入范围是把它撑开一圈，见 `PICKUP_MARGIN`。 */
+  readonly hitbox: Hitbox;
 }
 
 /**
@@ -157,12 +139,14 @@ export class Player implements PlayerView {
     return this.pitchAngle;
   }
 
-  /**
-   * 脚下紧贴着实心方块。
-   * 往下探一丝走不动就算站住了——这样它是个当下的判断，不依赖上一个 tick 碰没碰到东西。
-   */
+  /** 脚下紧贴着实心方块。 */
   get onGround(): boolean {
-    return this.movedAlong('y', -GROUND_PROBE) === this.y;
+    return isOnGround(this.blocks, this.hitbox);
+  }
+
+  /** 当前的碰撞箱：0.6 × 1.8 × 0.6，底面中心落在玩家坐标上。 */
+  get hitbox(): Hitbox {
+    return hitboxAt(this.position, PLAYER_WIDTH, PLAYER_HEIGHT);
   }
 
   /**
@@ -186,11 +170,11 @@ export class Player implements PlayerView {
     // 只有踩在地上才能起跳，所以按住空格是原地反复起跳，不是二段跳。
     if (intent.jump && this.onGround) this.velocityY = JUMP_VELOCITY;
 
-    // 先按当前速度移动再更新速度，与原版的顺序一致——这个顺序决定了最高点是 1.252 方块。
-    const target = this.y + this.velocityY;
-    this.y = this.movedAlong('y', this.velocityY);
-    if (this.y !== target) this.velocityY = 0;
-    this.velocityY = (this.velocityY - GRAVITY) * VERTICAL_DRAG;
+    // 重力与竖直碰撞和掉落物共用一份（`fallStep`）：那里的「先移动再更新速度」决定了
+    // 跳跃最高点是 1.252 方块。
+    const fall = fallStep(this.blocks, this.hitbox, this.velocityY);
+    this.y = fall.y;
+    this.velocityY = fall.velocityY;
 
     // 竖直走完再走水平：跳到台阶上时这一 tick 已经抬到了台阶顶面之上，
     // 水平方向因此不再被台阶挡住。
@@ -217,106 +201,9 @@ export class Player implements PlayerView {
     this.z = this.movedAlong('z', (-cos * forward - sin * strafe) * step);
   }
 
-  /**
-   * 沿一个轴移动之后玩家在这个轴上的新坐标，撞上实心方块则停在接触面上。
-   *
-   * 扫掠算出来的是碰撞箱 min 端的落点：竖直方向那就是脚底高度，水平方向要把半宽
-   * 加回来才是玩家坐标。
-   */
   private movedAlong(axis: Axis, delta: number): number {
-    const stopped = sweep(this.blocks, this.hitbox, axis, delta);
-    return axis === 'y' ? stopped : stopped + HALF_WIDTH;
+    return movedAlong(this.blocks, this.hitbox, axis, delta);
   }
-
-  /** 当前的碰撞箱：0.6 × 1.8 × 0.6，底面中心落在玩家坐标上。 */
-  private get hitbox(): Hitbox {
-    return {
-      min: { x: this.x - HALF_WIDTH, y: this.y, z: this.z - HALF_WIDTH },
-      max: { x: this.x + HALF_WIDTH, y: this.y + PLAYER_HEIGHT, z: this.z + HALF_WIDTH },
-    };
-  }
-}
-
-/** 世界坐标中的一个轴对齐碰撞箱。 */
-interface Hitbox {
-  readonly min: Vec3;
-  readonly max: Vec3;
-}
-
-/** 除某个轴之外的另两个轴。 */
-const OTHER_AXES: Readonly<Record<Axis, readonly [Axis, Axis]>> = {
-  x: ['y', 'z'],
-  y: ['x', 'z'],
-  z: ['x', 'y'],
-};
-
-/**
- * 单轴扫掠：碰撞箱沿 `axis` 移动 `delta` 之后，这个轴上箱 min 端落在哪里。
- *
- * 只动一个轴时，扫掠体正好是「起点箱到终点箱」的外接箱，所以沿移动轴逐个方块扫一遍
- * 就够，速度再快也不会穿过方块——自由落体的终端速度接近 4 方块/tick。
- *
- * 撞上方块时返回的是方块边界本身而不是累加出来的位移，因此落地高度是精确的整数。
- */
-function sweep(blocks: BlockView, hitbox: Hitbox, axis: Axis, delta: number): number {
-  const min = hitbox.min[axis];
-  if (delta === 0) return min;
-
-  const max = hitbox.max[axis];
-  const target = min + delta;
-  const from = delta > 0 ? min : target;
-  const to = delta > 0 ? max + delta : max;
-
-  let limit = target;
-  for (let at = firstBlock(from); at <= lastBlock(to); at++) {
-    if (!blockedAt(blocks, hitbox, axis, at)) continue;
-    limit =
-      delta > 0
-        ? Math.min(limit, at - (max - min)) // 箱的 max 端顶在这个方块的下边界上
-        : Math.max(limit, at + 1); //         箱的 min 端落在这个方块的上边界上
-  }
-
-  // 碰撞箱已经卡在方块里时（比如有方块被放进玩家所在的位置），上面的钳位会算出反向
-  // 位移。夹住方向：宁可不动，也不要把玩家往回推。
-  return delta > 0 ? Math.max(min, limit) : Math.min(min, limit);
-}
-
-/**
- * 移动轴上 `at` 这一层截面里有没有实心方块。
- * 有一块就整层挡住，不必看是哪一块。
- */
-function blockedAt(blocks: BlockView, hitbox: Hitbox, axis: Axis, at: number): boolean {
-  const [first, second] = OTHER_AXES[axis];
-  const probe: Record<Axis, number> = { x: 0, y: 0, z: 0 };
-  probe[axis] = at;
-  for (let a = firstBlock(hitbox.min[first]); a <= lastBlock(hitbox.max[first]); a++) {
-    probe[first] = a;
-    for (let b = firstBlock(hitbox.min[second]); b <= lastBlock(hitbox.max[second]); b++) {
-      probe[second] = b;
-      if (isSolid(blocks.getBlock(probe.x, probe.y, probe.z))) return true;
-    }
-  }
-  return false;
-}
-
-/**
- * 碰撞箱某一端覆盖到的第一个 / 最后一个方块坐标。
- * 两个函数都把「边界重合」算作不相交——贴着面站着不算卡在方块里。
- *
- * 容差是必须的，不是保险：钳位落点是算出来的，`(x + 0.3) − (x − 0.3)` 并不总等于
- * 0.6，于是贴住墙面的碰撞箱可能算出比墙面多 1e-16 的坐标（实测约 3% 的位置会这样）。
- * 少了这点容差，那一格就被判成嵌进了墙里，而嵌进方块之后各个方向的扫掠都返回零位移
- * ——玩家永久卡死，走不动也跳不起来。容差远大于那点舍入误差，又远小于一 tick 的位移
- * 与贴地探测深度，所以只吃掉误差，不改变任何看得见的行为。
- */
-const TOUCH_EPSILON = 1e-9;
-
-function firstBlock(min: number): number {
-  return Math.floor(min + TOUCH_EPSILON);
-}
-
-function lastBlock(max: number): number {
-  return Math.ceil(max - TOUCH_EPSILON) - 1;
 }
 
 function clamp(value: number, min: number, max: number): number {

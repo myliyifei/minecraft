@@ -2,14 +2,18 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
+import { ItemType } from '../../src/core/item';
 import {
   ATLAS_COLS,
   ATLAS_ROWS,
   BLOCK_TILES,
   CRACK_STAGES,
+  ITEM_TILES,
   TILE,
   TILE_PX,
   crackStage,
+  itemCubeUvs,
+  tileCell,
   tileUvRect,
 } from '../../src/render/atlas';
 
@@ -52,6 +56,78 @@ describe('方块到贴图格号的映射表', () => {
     }
     const keys = new Set(rects.map((r) => `${r.u0},${r.v0}`));
     expect(keys.size).toBe(rects.length);
+  });
+});
+
+describe('物品到贴图格号的映射表', () => {
+  it('每种物品都有贴图，格号都在图集范围内', () => {
+    const capacity = ATLAS_COLS * ATLAS_ROWS;
+    for (const item of Object.values(ItemType)) {
+      const tiles = ITEM_TILES[item];
+      expect(tiles, `物品 ${item} 缺贴图`).toBeDefined();
+      for (const tile of [tiles.top, tiles.bottom, tiles.side]) {
+        expect(tile).toBeGreaterThanOrEqual(0);
+        expect(tile).toBeLessThan(capacity);
+      }
+    }
+  });
+
+  it('格号换算成图集的列与行', () => {
+    // 4 列 4 行：格号 0 在左上角，格号 5 在第二行第二列
+    expect(tileCell(0)).toEqual({ col: 0, row: 0 });
+    expect(tileCell(3)).toEqual({ col: 3, row: 0 });
+    expect(tileCell(5)).toEqual({ col: 1, row: 1 });
+  });
+});
+
+describe('掉落物小方块的 uv', () => {
+  /** 一个面四个顶点的 uv，从 24 个 uv 对里取第 face 个面那一段。 */
+  function faceUvs(uvs: Float32Array, face: number): number[] {
+    return [...uvs.slice(face * 8, face * 8 + 8)];
+  }
+
+  it('六个面各 4 个顶点，共 24 对 uv', () => {
+    expect(itemCubeUvs(ItemType.Dirt)).toHaveLength(6 * 4 * 2);
+  });
+
+  it('泥土六面同图，每一面都正好铺满泥土那一格', () => {
+    const uvs = itemCubeUvs(ItemType.Dirt);
+    const rect = tileUvRect(TILE.dirt);
+    for (let face = 0; face < 6; face++) {
+      // 四个角落在这一格的四个角上，顺序是左上、右上、左下、右下
+      expect(faceUvs(uvs, face), `第 ${face} 面`).toEqual([
+        rect.u0,
+        rect.v1,
+        rect.u1,
+        rect.v1,
+        rect.u0,
+        rect.v0,
+        rect.u1,
+        rect.v0,
+      ]);
+    }
+  });
+
+  it('原木的顶面底面取年轮、四个侧面取树皮', () => {
+    const uvs = itemCubeUvs(ItemType.OakLog);
+    const top = tileUvRect(TILE.oakLogTop);
+    const side = tileUvRect(TILE.oakLogSide);
+    // BoxGeometry 的面序是 +X、−X、+Y、−Y、+Z、−Z
+    const startsAt = (face: number): number[] => faceUvs(uvs, face).slice(0, 2);
+    expect(startsAt(2)).toEqual([top.u0, top.v1]);
+    expect(startsAt(3)).toEqual([top.u0, top.v1]);
+    for (const face of [0, 1, 4, 5]) {
+      expect(startsAt(face), `第 ${face} 面`).toEqual([side.u0, side.v1]);
+    }
+  });
+
+  it('uv 全落在 [0, 1] 内', () => {
+    for (const item of Object.values(ItemType)) {
+      for (const value of itemCubeUvs(item)) {
+        expect(value).toBeGreaterThanOrEqual(0);
+        expect(value).toBeLessThanOrEqual(1);
+      }
+    }
   });
 });
 

@@ -38,7 +38,7 @@ src/
 ├── render/        渲染适配器：mesh.ts / atlas.ts 是纯数据变换，renderer.ts 用 three.js
 ├── input/         输入适配器：键鼠事件翻译成移动意图，keybindings.ts 是键位的唯一来源
 ├── worker/        区块生成 Worker 与主线程这一侧的收发，地形生成不占主线程
-├── ui/            界面文字与样式
+├── ui/            界面文字、样式与 HUD（快捷栏；DOM 与 CSS，不碰 three.js）
 ├── loop.ts        固定 20 tick/s 的游戏循环
 ├── debug.ts       调试句柄，只在开发与测试构建中挂到 window
 └── main.ts        接线层

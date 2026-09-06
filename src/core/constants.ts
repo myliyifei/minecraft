@@ -36,6 +36,9 @@ export const MIN_SURFACE_Y = SEA_LEVEL + 1;
  */
 export const DEFAULT_SEED = 20_260_905;
 
+/** 一整圈的弧度。折回偏航、按哈希取一个随机方向都要用它。 */
+export const TAU = Math.PI * 2;
+
 /** 核心的固定推进频率（tick/s）。渲染在两次 tick 之间插值，不参与逻辑。 */
 export const TICK_RATE = 20;
 

@@ -114,3 +114,65 @@ body {
     animation: none;
   }
 }
+
+/*
+ * 快捷栏：屏幕底部一排格子，格子边长与间距都是 --tile 的倍数，与加载屏同一套节奏。
+ * pointer-events: none 是必须的——它压在画布底部中央，能点得着就点不到画布，
+ * 玩家点它时进不了第一人称。
+ */
+.hotbar {
+  --hotbar-cell: calc(var(--tile) * 2.5);
+  --hotbar-icon: calc(var(--tile) * 2);
+
+  position: fixed;
+  bottom: var(--tile);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: rgb(0 0 0 / 35%);
+  font-family: var(--font-ui);
+  pointer-events: none;
+}
+
+.hotbar__slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--hotbar-cell);
+  height: var(--hotbar-cell);
+  background: rgb(255 255 255 / 14%);
+  /* 一圈内描边而不是 border：格子的外尺寸因此还是整数倍的 --tile。 */
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 35%);
+}
+
+/*
+ * 图标是方块图集的一张精灵图。格数由 hotbar.ts 写成 --atlas-cols / --atlas-rows，
+ * 取哪一格是 --tile-col / --tile-row，算式留在这里：JS 只管下标，不管像素。
+ */
+.hotbar__icon {
+  width: var(--hotbar-icon);
+  height: var(--hotbar-icon);
+  background-repeat: no-repeat;
+  background-size:
+    calc(var(--hotbar-icon) * var(--atlas-cols))
+    calc(var(--hotbar-icon) * var(--atlas-rows));
+  background-position:
+    calc(var(--tile-col) * var(--hotbar-icon) * -1)
+    calc(var(--tile-row) * var(--hotbar-icon) * -1);
+  /* 像素风贴图放大不许插值，否则 16×16 的图标会糊成一团。 */
+  image-rendering: pixelated;
+}
+
+.hotbar__count {
+  position: absolute;
+  right: 2px;
+  bottom: 0;
+  font-size: calc(var(--tile) * 0.75);
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  /* 一格硬阴影，没有模糊：与标题同一套做法，数字压在任何贴图上都读得出来。 */
+  text-shadow: 1px 1px 0 var(--ink);
+}

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { BLOCKS, BlockType, UNBREAKABLE, isBreakable, miningTicks } from '../../src/core/block';
+import {
+  BLOCKS,
+  BlockType,
+  UNBREAKABLE,
+  blockDrop,
+  isBreakable,
+  miningTicks,
+} from '../../src/core/block';
+import { ItemType } from '../../src/core/item';
 
 /**
  * issue #7 给的硬度与空手耗时，全部写死字面值。
@@ -53,6 +61,44 @@ describe('方块的硬度表', () => {
   it('本切片只有石头需要工具', () => {
     for (const block of Object.values(BlockType)) {
       expect(BLOCKS[block].requiresTool, `方块 ${block}`).toBe(block === BlockType.Stone);
+    }
+  });
+});
+
+describe('空手挖掘的掉落表', () => {
+  /**
+   * issue #8 给的掉落表，`null` 是「什么都不掉」。
+   * 与硬度那张表一样写死字面值，不从 `BLOCKS` 反读。
+   */
+  const HAND_DROPS: Array<[string, BlockType, ItemType | null]> = [
+    ['草方块掉泥土', BlockType.Grass, ItemType.Dirt],
+    ['泥土掉泥土', BlockType.Dirt, ItemType.Dirt],
+    ['橡木原木掉原木', BlockType.OakLog, ItemType.OakLog],
+    ['树叶什么都不掉', BlockType.OakLeaves, null],
+    // 石头要镐，空着手挖掉了也拿不到东西
+    ['空手挖石头什么都不掉', BlockType.Stone, null],
+    ['基岩什么都不掉', BlockType.Bedrock, null],
+  ];
+
+  for (const [name, block, item] of HAND_DROPS) {
+    it(name, () => {
+      const drop = blockDrop(block);
+      if (item === null) {
+        expect(drop).toBeNull();
+      } else {
+        expect(drop).toEqual({ item, count: 1 });
+      }
+    });
+  }
+
+  it('空气不掉东西', () => {
+    expect(blockDrop(BlockType.Air)).toBeNull();
+  });
+
+  it('掉落表里每一堆都至少有一个', () => {
+    for (const block of Object.values(BlockType)) {
+      const drop = BLOCKS[block].drop;
+      if (drop) expect(drop.count, `方块 ${block}`).toBeGreaterThan(0);
     }
   });
 });

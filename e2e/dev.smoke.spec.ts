@@ -7,14 +7,24 @@ import {
   SEA_LEVEL,
   TICK_RATE,
 } from '../src/core/constants';
+import { PICKUP_DELAY_TICKS } from '../src/core/drop';
+import { HOTBAR_SIZE } from '../src/core/inventory';
+import { ItemType } from '../src/core/item';
 import { MAX_PITCH, PLAYER_EYE_HEIGHT, WALK_SPEED, WALK_STEP } from '../src/core/player';
 import { plainsTreePlacement } from '../src/core/terrain';
 import { OAK_CANOPY_RADIUS, oakTreesTouching, type OakTree } from '../src/core/tree';
 import type { Vec3 } from '../src/core/vec3';
 import { KEY_BINDINGS } from '../src/input/keybindings';
-import { CRACK_STAGES } from '../src/render/atlas';
-import { STRINGS } from '../src/ui/strings';
-import { countCanvasColors, waitForFirstFrame } from './canvas';
+import {
+  ATLAS_COLS,
+  ATLAS_ROWS,
+  CRACK_STAGES,
+  ITEM_TILES,
+  TILE_PX,
+  tileCell,
+} from '../src/render/atlas';
+import { ITEM_NAMES, STRINGS } from '../src/ui/strings';
+import { countCanvasColors, installPixelProbe, waitForFirstFrame } from './canvas';
 
 /** 默认视距下已加载区块覆盖的世界坐标区间。 */
 const LOADED_MIN = -DEFAULT_VIEW_RADIUS * CHUNK_SIZE;
@@ -25,6 +35,12 @@ const CHUNKS_IN_VIEW = (2 * DEFAULT_VIEW_RADIUS + 1) ** 2;
 
 /** 采样时 z 的步长：抽十来行就够判断起伏与确定性，不必读满六千多列。 */
 const PROFILE_Z_STEP = 8;
+
+/**
+ * 挖穿之后再等这么多 tick：掉落物落到坑底、玩家也掉进坑里站稳。
+ * 必须小于拾取延迟（`PICKUP_DELAY_TICKS`），否则掉落物在断言之前就被吸走了。
+ */
+const DROP_SETTLE_TICKS = 8;
 
 /**
  * 默认种子下、会写进原点区块的第一棵橡树。树根不一定落在原点区块里，但一定在页面
@@ -165,6 +181,7 @@ test.beforeEach(async ({ page }) => {
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
   });
+  await installPixelProbe(page);
   await page.goto('/');
   await waitForFirstFrame(page);
 });
@@ -483,25 +500,10 @@ test('瞄准脚下的方块显示选框，挖掘中出裂纹，挖穿后网格�
       const y = Math.floor(core.player.position.y) - 1;
       core.turn(0, -pitch);
 
-      /**
-       * 画布正中那一像素的 RGB。
-       *
-       * 视线几乎竖直向下，画面正中正落在目标方块贴图的中心，而裂纹图案就是从那里长起来
-       * 的——裂纹与挖出来的坑因此都在这一像素上看得见。只对场景里那两个对象下断言的话，
-       * 证不到它们真的画进了画布。
-       */
-      const centerRgb = (): [number, number, number] => {
-        const canvas = document.querySelector('canvas');
-        if (!(canvas instanceof HTMLCanvasElement)) throw new Error('页面上没有画布');
-        const scratch = document.createElement('canvas');
-        scratch.width = canvas.width;
-        scratch.height = canvas.height;
-        const context = scratch.getContext('2d');
-        if (!context) throw new Error('拿不到 2D 上下文');
-        context.drawImage(canvas, 0, 0);
-        const { data } = context.getImageData(canvas.width >> 1, canvas.height >> 1, 1, 1);
-        return [data[0] ?? 0, data[1] ?? 0, data[2] ?? 0];
-      };
+      // 视线几乎竖直向下，画面正中正落在目标方块贴图的中心，而裂纹图案就是从那里长起来
+      // 的——裂纹与挖出来的坑因此都在这一像素上看得见。只对场景里那两个对象下断言的话，
+      // 证不到它们真的画进了画布。
+      const centerRgb = window.__CENTER_RGB__!;
 
       core.tick();
       renderer.render();
@@ -582,6 +584,256 @@ test('锁定鼠标后按住左键才挖，松开就停', async ({ page }) => {
 
   await page.mouse.up();
   expect((await digForTicks()).progress).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('屏幕底部有 9 格快捷栏，开局全是空的', async ({ page }) => {
+  const hotbar = page.locator('#hotbar');
+  await expect(hotbar).toBeVisible();
+  await expect(hotbar).toHaveAttribute('aria-label', STRINGS.hotbar);
+  await expect(page.locator('#hotbar .hotbar__slot')).toHaveCount(HOTBAR_SIZE);
+
+  // 真的在屏幕下半边
+  const box = await hotbar.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).not.toBeNull();
+  expect(box!.y).toBeGreaterThan(viewport!.height / 2);
+
+  // 开局空手：没有一格带物品
+  await expect(page.locator('#hotbar .hotbar__slot[data-item]')).toHaveCount(0);
+  await expect(page.locator('#hotbar .hotbar__icon:visible')).toHaveCount(0);
+});
+
+test('按住左键一秒把脚下的草挖掉，掉出的泥土进快捷栏', async ({ page }) => {
+  await grabPointer(page);
+
+  // 按下与松开走的是真实的鼠标事件（指针锁定下 mouse.down 投得到 document 上的监听器）。
+  // 中间只留两次 evaluate：锁定期间 headless Chromium 把整页任务调度降到约 1/10，
+  // 每来回一次都要好几秒，多一次就顶到测试超时上去了。
+  await page.mouse.down();
+  // **对准要在按下之后**：指针锁定下 Playwright 的 mouse.down 会连带投一发大位移的
+  // mousemove，视角当场被甩到别处去，先对准就白对了——真人按键不会有这发位移。
+  // 推进时间同样走 evaluate，不等墙上时间：throttle 之下靠时钟数 tick 不可靠。
+  const at = await page.evaluate(
+    ({ pitch, ticks }) => {
+      const core = window.__VOXEL__!.core;
+      const target = {
+        x: Math.floor(core.player.position.x),
+        y: Math.floor(core.player.position.y) - 1,
+        z: Math.floor(core.player.position.z),
+      };
+      // 低头看到底、偏航归零：视线因此几乎竖直向下，对着脚下那一格
+      core.turn(-core.player.yaw, -pitch - core.player.pitch);
+      // 一秒 = 20 tick，草 18 tick 碎
+      core.tick(ticks);
+      return target;
+    },
+    { pitch: MAX_PITCH, ticks: TICK_RATE },
+  );
+  await page.mouse.up();
+  // 掉落物落在坑里，拾取延迟一过就被吸走。HUD 那一步平时由游戏循环发起，
+  // 同步 evaluate 里没有帧，得自己调。
+  const dugOut = await page.evaluate(
+    ({ ticks, block }) => {
+      const { core, hud } = window.__VOXEL__!;
+      core.tick(ticks);
+      hud.update();
+      return core.getBlock(block.x, block.y, block.z);
+    },
+    { ticks: PICKUP_DELAY_TICKS + 1, block: at },
+  );
+  expect(dugOut).toBe(BlockType.Air);
+
+  // 快捷栏第一格出现泥土图标
+  const first = page.locator('#hotbar .hotbar__slot[data-slot="0"]');
+  await expect(first).toHaveAttribute('data-item', String(ItemType.Dirt));
+  await expect(first).toHaveAttribute('title', ITEM_NAMES[ItemType.Dirt]);
+  await expect(first.locator('.hotbar__icon')).toBeVisible();
+  // 图标贴的是不是泥土那一格，在下面那条不锁鼠标的测试里验：读图集要发一次请求，
+  // 而指针锁定期间页面的任务调度被降到约 1/10，异步的活在这里会被饿死。
+  expect(errors).toEqual([]);
+});
+
+test('快捷栏图标取的就是图集里泥土那一格', async ({ page }) => {
+  // 不锁鼠标：这条要发一次网络请求，锁定期间的 throttle 会让它迟迟回不来。
+  const icon = await page.evaluate(
+    async ({ pitch, grassTicks, pickupDelay }) => {
+      const { core, hud } = window.__VOXEL__!;
+      core.turn(0, -pitch);
+      core.setMining(true);
+      core.tick(grassTicks);
+      core.setMining(false);
+      core.tick(pickupDelay + 1);
+      hud.update();
+
+      const element = document.querySelector('#hotbar .hotbar__slot[data-slot="0"] .hotbar__icon');
+      if (!(element instanceof HTMLElement)) throw new Error('快捷栏第一格没有图标');
+      const style = getComputedStyle(element);
+      const url = style.backgroundImage.replace(/^url\(["']?/, '').replace(/["']?\)$/, '');
+
+      // 真去解一遍这张图，而不是看 fetch 的状态码：开发服务器对认不出的路径回的是
+      // index.html，状态码 200，光看 ok 那条断言等于没有。
+      const atlas = new Image();
+      const decoded = await new Promise<boolean>((resolve) => {
+        atlas.onload = () => resolve(true);
+        atlas.onerror = () => resolve(false);
+        atlas.src = url;
+      });
+
+      return {
+        decoded,
+        atlasWidth: atlas.naturalWidth,
+        atlasHeight: atlas.naturalHeight,
+        // 计算值是解析过 calc 的像素数
+        backgroundPosition: style.backgroundPosition,
+        iconPx: Number.parseFloat(style.width),
+      };
+    },
+    {
+      pitch: MAX_PITCH,
+      grassTicks: miningTicks(BlockType.Grass),
+      pickupDelay: PICKUP_DELAY_TICKS,
+    },
+  );
+
+  // 图集真解得开、尺寸就是图集那个尺寸，而且 CSS 那串 calc 算出来的偏移正好落在泥土
+  // 那一格上。`toBeVisible` 挡不住这两种错——图挂了、偏移指错格，元素照样有尺寸。
+  const { col, row } = tileCell(ITEM_TILES[ItemType.Dirt].side);
+  expect(icon.decoded).toBe(true);
+  expect(icon.atlasWidth).toBe(ATLAS_COLS * TILE_PX);
+  expect(icon.atlasHeight).toBe(ATLAS_ROWS * TILE_PX);
+  expect(icon.backgroundPosition).toBe(`${-col * icon.iconPx}px ${-row * icon.iconPx}px`);
+  expect(errors).toEqual([]);
+});
+
+test('挖两块并进同一堆，快捷栏这才显示数量', async ({ page }) => {
+  // 不锁鼠标：主角是 HUD，挖掘意图直接给核心。整段跑在一次同步的 evaluate 里，
+  // 游戏循环插不进来，捡到几个因此是精确的——锁定期间的任务调度会把这一点搅乱。
+  const shown = await page.evaluate(
+    ({ pitch, grassTicks, dirtTicks, pickupDelay }) => {
+      const { core, hud } = window.__VOXEL__!;
+      const countText = (): string =>
+        document.querySelector('#hotbar .hotbar__slot[data-slot="0"] .hotbar__count')
+          ?.textContent ?? '缺格子';
+
+      /** 挖掉当前对准的那一块，等它被吸进背包，再刷新 HUD。 */
+      const digAndPickUp = (ticks: number): void => {
+        core.setMining(true);
+        core.tick(ticks);
+        core.setMining(false);
+        core.tick(pickupDelay + 1);
+        hud.update();
+      };
+
+      core.turn(0, -pitch);
+      // 地表的草，掉 1 个泥土
+      digAndPickUp(grassTicks);
+      const one = countText();
+      // 玩家掉进坑里，脚下换成了坑底那格泥土，再掉 1 个
+      digAndPickUp(dirtTicks);
+      return {
+        one,
+        two: countText(),
+        slot0: core.inventory.slot(0),
+        filledSlots: document.querySelectorAll('#hotbar .hotbar__slot[data-item]').length,
+      };
+    },
+    {
+      pitch: MAX_PITCH,
+      grassTicks: miningTicks(BlockType.Grass),
+      dirtTicks: miningTicks(BlockType.Dirt),
+      pickupDelay: PICKUP_DELAY_TICKS,
+    },
+  );
+
+  // 只有一个时不写数字，与原版一致：满屏的「1」除了占地方没有信息
+  expect(shown.one).toBe('');
+  expect(shown.two).toBe('2');
+  // 并成一堆而不是占两格
+  expect(shown.slot0).toEqual({ item: ItemType.Dirt, count: 2 });
+  expect(shown.filledSlots).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test('掉落物画成会转会漂的小方块，被捡走后从画面上消失', async ({ page }) => {
+  await waitForFullViewDistance(page);
+
+  // 整段跑在一次同步的 evaluate 里：游戏循环插不进来，画面与 tick 数因此是精确的。
+  const dug = await page.evaluate(
+    ({ pitch, grassTicks, pickupDelay, settleTicks, stone }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const centerRgb = window.__CENTER_RGB__!;
+      const x = Math.floor(core.player.position.x);
+      const z = Math.floor(core.player.position.z);
+      const y = Math.floor(core.player.position.y) - 1;
+
+      // 把坑底换成石头：掉落物是泥土的褐色，衬在石头的灰上，画面正中那一像素才分得出
+      // 小方块在不在。默认地形里草下面也是泥土，两者同色，就验不到东西了。
+      core.setBlock(x, y - 1, z, stone);
+      core.turn(0, -pitch);
+      core.setMining(true);
+      core.tick(grassTicks);
+      core.setMining(false);
+      // 等掉落物落定、玩家也掉进坑里站稳，再往下都在拾取延迟之内
+      core.tick(settleTicks);
+
+      // 先画一帧：小方块是 render() 里摆进场景的，不画就没有它的位置可读
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+
+      // 把视线对准场景里那个小方块的中心
+      const [mesh] = renderer.drops;
+      if (!mesh) throw new Error('场景里应该有一个掉落物小方块');
+      const eye = core.player.eyePosition;
+      const dx = mesh.position.x - eye.x;
+      const dy = mesh.position.y - eye.y;
+      const dz = mesh.position.z - eye.z;
+      core.turn(
+        Math.atan2(-dx, -dz) - core.player.yaw,
+        Math.atan2(dy, Math.hypot(dx, dz)) - core.player.pitch,
+      );
+
+      // 同一个 alpha 再画一帧：相位没变，小方块还在刚才那个位置，只是视线转过去了
+      renderer.render(1);
+      const settled = { drops: renderer.drops, rgb: centerRgb() };
+      // 同一份核心状态、另一个插值系数：漂浮与旋转是逐帧算的，所以高度与角度都该不一样
+      renderer.render(0);
+      const sameTick = renderer.drops;
+
+      // 玩家就站在掉落物旁边，拾取延迟一过就被吸走，小方块随即从场景里移除
+      core.tick(pickupDelay + 1);
+      renderer.render(1);
+      const gone = { drops: renderer.drops, rgb: centerRgb() };
+
+      return { settled, sameTick, gone, dropCount: core.drops.count };
+    },
+    {
+      pitch: MAX_PITCH,
+      grassTicks: miningTicks(BlockType.Grass),
+      pickupDelay: PICKUP_DELAY_TICKS,
+      settleTicks: DROP_SETTLE_TICKS,
+      stone: BlockType.Stone,
+    },
+  );
+
+  /** 褐（泥土）而不是灰（石头）：红色分量明显压过蓝色。 */
+  const isDirtColored = (rgb: readonly number[]): boolean => rgb[0]! > rgb[2]! * 1.5;
+
+  // 场景里有一个小方块，而且真画进了画布：视线对准它，画面正中是泥土的褐
+  expect(dug.settled.drops).toHaveLength(1);
+  expect(isDirtColored(dug.settled.rgb)).toBe(true);
+
+  // 会转、会漂：同一个 tick 的两帧之间，角度与高度都变了
+  expect(dug.sameTick[0]!.id).toBe(dug.settled.drops[0]!.id);
+  expect(dug.sameTick[0]!.spin).not.toBeCloseTo(dug.settled.drops[0]!.spin, 4);
+  expect(dug.sameTick[0]!.position.y).not.toBeCloseTo(dug.settled.drops[0]!.position.y, 4);
+  // 「漂浮整段都在落点之上、不沉进地面」要看一整个周期，浏览器里抓不到那么多帧
+  // （中途就被捡走了），那一条在 tests/render/drop-motion.test.ts 里。
+
+  // 被捡走：核心里没有了，场景里那个小方块也不见了，同一条视线看到的是石头的灰
+  expect(dug.dropCount).toBe(0);
+  expect(dug.gone.drops).toEqual([]);
+  expect(isDirtColored(dug.gone.rgb)).toBe(false);
   expect(errors).toEqual([]);
 });
 

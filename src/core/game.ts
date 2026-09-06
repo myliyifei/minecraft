@@ -1,6 +1,8 @@
 import { BlockType, type BlockEdit } from './block';
 import type { ChunkView } from './chunk';
 import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS } from './constants';
+import { Drops, type DropsView } from './drop';
+import { Inventory, type InventoryView } from './inventory';
 import { Mining, type MiningView } from './mining';
 import { IDLE_INTENT, Player, type MoveIntent, type PlayerView } from './player';
 import { streamChunks } from './streaming';
@@ -31,13 +33,15 @@ export interface GameCoreOptions {
  * 这是主测试接缝——渲染与输入适配器只通过这里的指令和查询与游戏交互。
  *
  * 本切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」「空手挖掘」
- * 五件事。掉落物、经验等系统由后续切片挂进 step()。
+ * 「掉落物与背包」六件事。经验等系统由后续切片挂进 step()。
  */
 export class GameCore implements BlockEdit {
   private readonly world: World;
   private readonly worldSeed: number;
   private readonly radius: number;
   private readonly playerState: Player;
+  private readonly dropsState: Drops;
+  private readonly inventoryState: Inventory;
   private readonly miningState: Mining;
   private ticks = 0;
   private intent: MoveIntent = IDLE_INTENT;
@@ -52,7 +56,9 @@ export class GameCore implements BlockEdit {
     // 其余由 tick 补上——所以浏览器那一侧要先把出生点那一带备好，见 src/main.ts。
     streamChunks(this.world, ORIGIN_CHUNK, this.radius);
     this.playerState = new Player(this.world, this.spawnPoint);
-    this.miningState = new Mining(this.world, this.playerState);
+    this.dropsState = new Drops(this.world, this.worldSeed);
+    this.inventoryState = new Inventory();
+    this.miningState = new Mining(this.world, this.playerState, this.dropsState);
   }
 
   /** 玩家状态的只读视图。渲染层读它摆相机，改状态只能通过下面几个指令。 */
@@ -63,6 +69,16 @@ export class GameCore implements BlockEdit {
   /** 挖掘状态的只读视图：目标方块、命中面与进度。渲染层读它画选框与裂纹。 */
   get mining(): MiningView {
     return this.miningState;
+  }
+
+  /** 世界里现有的掉落物，只读。渲染层每帧读它摆那些漂浮旋转的小方块。 */
+  get drops(): DropsView {
+    return this.dropsState;
+  }
+
+  /** 玩家背包的只读视图。HUD 读它画快捷栏。 */
+  get inventory(): InventoryView {
+    return this.inventoryState;
   }
 
   /**
@@ -174,5 +190,8 @@ export class GameCore implements BlockEdit {
     this.playerState.step(this.intent);
     // 挖掘必须排在移动之后，理由见 Mining.step。
     this.miningState.step(this.miningHeld);
+    // 掉落物排在挖掘之后：这一 tick 刚挖出来的东西同一 tick 就开始下落，而它的拾取
+    // 延迟（PICKUP_DELAY_TICKS）也从这里起算。吸入判定用的是玩家走完之后的碰撞箱。
+    this.dropsState.step(this.playerState.hitbox, this.inventoryState);
   }
 }

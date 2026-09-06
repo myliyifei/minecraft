@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
+import type { DropSink } from '../../src/core/drop';
+import { ItemType, type ItemStack } from '../../src/core/item';
 import { Mining, type AimView } from '../../src/core/mining';
 import { PLAYER_REACH } from '../../src/core/player';
 import type { Vec3 } from '../../src/core/vec3';
@@ -41,10 +43,29 @@ function turntable(initial: Vec3 = LOOK_X): { aim: AimView; look: (next: Vec3) =
   };
 }
 
+/** 一格里掉出来的东西。 */
+type SpawnedDrop = { stack: ItemStack; at: BlockCoord };
+
+/** 记下挖掘交出来的掉落物，不真的模拟它们。 */
+function dropLog(): { sink: DropSink; spawned: SpawnedDrop[] } {
+  const spawned: SpawnedDrop[] = [];
+  return {
+    sink: {
+      spawnInBlock: (stack, x, y, z) => spawned.push({ stack, at: [x, y, z] }),
+    },
+    spawned,
+  };
+}
+
 /** 盯着正前方那块方块的挖掘状态机。 */
-function miningTowards(block: BlockType): { world: World; mining: Mining } {
+function miningTowards(block: BlockType): {
+  world: World;
+  mining: Mining;
+  spawned: SpawnedDrop[];
+} {
   const world = worldWith([TARGET, block]);
-  return { world, mining: new Mining(world, turntable().aim) };
+  const { sink, spawned } = dropLog();
+  return { world, mining: new Mining(world, turntable().aim, sink), spawned };
 }
 
 /** 按住挖掘键推进 n 个 tick。 */
@@ -89,7 +110,7 @@ describe('挖掘进度绑定目标方块', () => {
   it('把目标切到另一块，两块都从零开始', () => {
     const world = worldWith([TARGET, BlockType.Dirt], [[0, LAYER_Y, 3], BlockType.Dirt]);
     const table = turntable();
-    const mining = new Mining(world, table.aim);
+    const mining = new Mining(world, table.aim, dropLog().sink);
 
     hold(mining, 10);
     expect(mining.progress).toBeCloseTo(10 / 15, 10);
@@ -108,7 +129,7 @@ describe('挖掘进度绑定目标方块', () => {
   it('视线移开再回来，要重新挖满整份耗时', () => {
     const world = worldWith([TARGET, BlockType.Dirt]);
     const table = turntable();
-    const mining = new Mining(world, table.aim);
+    const mining = new Mining(world, table.aim, dropLog().sink);
 
     hold(mining, 14);
     table.look(LOOK_EMPTY);
@@ -148,7 +169,7 @@ describe('挖掘进度绑定目标方块', () => {
     const block: BlockCoord = [2, LAYER_Y - 1, 0];
     const world = worldWith([block, BlockType.Dirt]);
     const table = turntable(unit({ x: 1, y: -0.25, z: 0 }));
-    const mining = new Mining(world, table.aim);
+    const mining = new Mining(world, table.aim, dropLog().sink);
 
     hold(mining, 7);
     expect(mining.target).toMatchObject({ x: 2, y: LAYER_Y - 1, normal: { y: 1 } });
@@ -166,7 +187,7 @@ describe('挖掘的触及距离', () => {
   it('触及距离之内的方块挖得掉', () => {
     const near: BlockCoord = [REACHABLE_X, LAYER_Y, 0];
     const world = worldWith([near, BlockType.Dirt]);
-    const mining = new Mining(world, turntable().aim);
+    const mining = new Mining(world, turntable().aim, dropLog().sink);
     hold(mining, 15);
     expect(world.getBlock(...near)).toBe(BlockType.Air);
   });
@@ -174,7 +195,7 @@ describe('挖掘的触及距离', () => {
   it('再远一格就不是目标，按住也挖不动', () => {
     const far: BlockCoord = [REACHABLE_X + 1, LAYER_Y, 0];
     const world = worldWith([far, BlockType.Dirt]);
-    const mining = new Mining(world, turntable().aim);
+    const mining = new Mining(world, turntable().aim, dropLog().sink);
     hold(mining, 100);
     expect(mining.target).toBeUndefined();
     expect(mining.progress).toBe(0);
@@ -183,10 +204,59 @@ describe('挖掘的触及距离', () => {
 
   it('什么都没对准时按住挖掘键不出事', () => {
     const world = flatTestWorld();
-    const mining = new Mining(world, turntable(LOOK_EMPTY).aim);
+    const mining = new Mining(world, turntable(LOOK_EMPTY).aim, dropLog().sink);
     hold(mining, 100);
     expect(mining.target).toBeUndefined();
     expect(mining.progress).toBe(0);
+  });
+});
+
+describe('挖穿之后掉出什么', () => {
+  it('草方块碎掉时在原地掉出一个泥土', () => {
+    const { mining, spawned } = miningTowards(BlockType.Grass);
+
+    hold(mining, 17);
+    // 还没碎，什么都没掉
+    expect(spawned).toEqual([]);
+
+    hold(mining, 1);
+    expect(spawned).toEqual([{ stack: { item: ItemType.Dirt, count: 1 }, at: TARGET }]);
+  });
+
+  it('原木掉原木', () => {
+    const { mining, spawned } = miningTowards(BlockType.OakLog);
+    hold(mining, 60);
+    expect(spawned).toEqual([{ stack: { item: ItemType.OakLog, count: 1 }, at: TARGET }]);
+  });
+
+  it('树叶与空手挖的石头碎了也不掉东西', () => {
+    for (const [block, ticks] of [
+      [BlockType.OakLeaves, 6],
+      [BlockType.Stone, 150],
+    ] as const) {
+      const { world, mining, spawned } = miningTowards(block);
+      hold(mining, ticks);
+      expect(world.getBlock(...TARGET), `方块 ${block}`).toBe(BlockType.Air);
+      expect(spawned, `方块 ${block}`).toEqual([]);
+    }
+  });
+
+  it('挖不动的基岩不掉东西', () => {
+    const { mining, spawned } = miningTowards(BlockType.Bedrock);
+    hold(mining, 1000);
+    expect(spawned).toEqual([]);
+  });
+
+  it('连着挖两块，一块掉一个', () => {
+    const world = worldWith([[2, LAYER_Y, 0], BlockType.Dirt], [TARGET, BlockType.Dirt]);
+    const { sink, spawned } = dropLog();
+    const mining = new Mining(world, turntable().aim, sink);
+
+    hold(mining, 30);
+    expect(spawned).toEqual([
+      { stack: { item: ItemType.Dirt, count: 1 }, at: [2, LAYER_Y, 0] },
+      { stack: { item: ItemType.Dirt, count: 1 }, at: TARGET },
+    ]);
   });
 });
 
@@ -208,7 +278,7 @@ describe('挖掘的目标查询', () => {
 
   it('挖穿之后目标当场换到后面那块，按住不放接着挖', () => {
     const world = worldWith([[2, LAYER_Y, 0], BlockType.Dirt], [TARGET, BlockType.Dirt]);
-    const mining = new Mining(world, turntable().aim);
+    const mining = new Mining(world, turntable().aim, dropLog().sink);
 
     hold(mining, 15);
     expect(world.getBlock(2, LAYER_Y, 0)).toBe(BlockType.Air);

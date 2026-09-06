@@ -134,10 +134,13 @@ describe('键位表是单一数据源', () => {
 });
 
 describe('网格生成的可测性', () => {
-  // buildChunkMesh 与图集映射必须是纯数据变换，否则核心层测试无法覆盖面剔除。
-  const pureRenderFiles = ['render/mesh.ts', 'render/atlas.ts'].map((f) => join(SRC, f));
+  // buildChunkMesh、图集映射与掉落物的漂浮旋转必须是纯数据变换，否则核心层测试
+  // 覆盖不到面剔除，也覆盖不到「漂浮整段都在落点之上」这类要看一整个周期的性质。
+  const pureRenderFiles = ['render/mesh.ts', 'render/atlas.ts', 'render/drop-motion.ts'].map(
+    (f) => join(SRC, f),
+  );
 
-  it('mesh 与 atlas 不依赖 three', () => {
+  it('mesh、atlas 与掉落物的运动学不依赖 three', () => {
     for (const file of pureRenderFiles) {
       expect(importedModules(readFileSync(file, 'utf8'))).not.toContain('three');
     }

@@ -1,5 +1,37 @@
 import type { Page } from '@playwright/test';
 
+declare global {
+  interface Window {
+    /** 画布正中那一像素的 RGB。由 `installPixelProbe` 装上。 */
+    __CENTER_RGB__?: () => [number, number, number];
+  }
+}
+
+/**
+ * 往页面里装一个「读画布正中那一像素」的函数。
+ *
+ * 必须是页面里的函数，不能是 Node 这一侧的：读像素得和被测的那几个 tick 挤在同一个
+ * evaluate 里——分成两次的话游戏循环会插进来接着 tick，画面就不是刚才断言的那一帧了。
+ *
+ * 要在 `page.goto` 之前调。
+ */
+export async function installPixelProbe(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.__CENTER_RGB__ = (): [number, number, number] => {
+      const source = document.querySelector('canvas');
+      if (!(source instanceof HTMLCanvasElement)) throw new Error('页面上没有画布');
+      const scratch = document.createElement('canvas');
+      scratch.width = source.width;
+      scratch.height = source.height;
+      const context = scratch.getContext('2d');
+      if (!context) throw new Error('拿不到 2D 上下文');
+      context.drawImage(source, 0, 0);
+      const { data } = context.getImageData(source.width >> 1, source.height >> 1, 1, 1);
+      return [data[0] ?? 0, data[1] ?? 0, data[2] ?? 0];
+    };
+  });
+}
+
 /**
  * 数一数画布上出现了多少种不同颜色。
  *

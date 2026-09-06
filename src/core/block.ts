@@ -1,4 +1,5 @@
 import { TICK_RATE } from './constants';
+import { ItemType, type ItemStack } from './item';
 
 /**
  * 方块种类。数值直接存进区块的 Uint8Array，因此已发布的编号不可改动，新方块追加即可。
@@ -33,23 +34,75 @@ export interface BlockDef {
    * 1.5 秒变成 5 秒，石头因此是 150 tick 而不是 45。工具本身是 #8 之后的事。
    */
   readonly requiresTool: boolean;
+  /**
+   * 挖掉它掉出什么（见 CONTEXT.md 的「掉落表」），`null` 表示什么都不掉。
+   *
+   * 本切片只有空手，所以「需要工具的方块空手挖没有掉落」这条规则也写在数据里：
+   * 石头记 `null`，将来加了镐要改成圆石那一行，同时 `blockDrop` 得多看一个工具参数。
+   */
+  readonly drop: ItemStack | null;
 }
 
-/** 方块属性表。掉落表、经验表是后续切片往这里加的数据列。 */
+/** 一个某种物品的掉落。掉落表里绝大多数行都是这个形状。 */
+function one(item: ItemType): ItemStack {
+  return { item, count: 1 };
+}
+
+/** 方块属性表。经验表是后续切片往这里加的数据列。 */
 export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
   // 空气不是挖掘目标，硬度只是占位。
-  [BlockType.Air]: { opaque: false, solid: false, hardness: 0, requiresTool: false },
-  [BlockType.Grass]: { opaque: true, solid: true, hardness: 0.6, requiresTool: false },
-  [BlockType.Dirt]: { opaque: true, solid: true, hardness: 0.5, requiresTool: false },
-  [BlockType.Stone]: { opaque: true, solid: true, hardness: 1.5, requiresTool: true },
+  [BlockType.Air]: {
+    opaque: false,
+    solid: false,
+    hardness: 0,
+    requiresTool: false,
+    drop: null,
+  },
+  // 草方块掉的是泥土，不是草方块本身——与原版一致。
+  [BlockType.Grass]: {
+    opaque: true,
+    solid: true,
+    hardness: 0.6,
+    requiresTool: false,
+    drop: one(ItemType.Dirt),
+  },
+  [BlockType.Dirt]: {
+    opaque: true,
+    solid: true,
+    hardness: 0.5,
+    requiresTool: false,
+    drop: one(ItemType.Dirt),
+  },
+  // 空手挖得掉石头，但什么也拿不到（要镐）。
+  [BlockType.Stone]: {
+    opaque: true,
+    solid: true,
+    hardness: 1.5,
+    requiresTool: true,
+    drop: null,
+  },
   [BlockType.Bedrock]: {
     opaque: true,
     solid: true,
     hardness: UNBREAKABLE,
     requiresTool: false,
+    drop: null,
   },
-  [BlockType.OakLog]: { opaque: true, solid: true, hardness: 2, requiresTool: false },
-  [BlockType.OakLeaves]: { opaque: false, solid: true, hardness: 0.2, requiresTool: false },
+  [BlockType.OakLog]: {
+    opaque: true,
+    solid: true,
+    hardness: 2,
+    requiresTool: false,
+    drop: one(ItemType.OakLog),
+  },
+  // 树叶什么都不掉。树苗与苹果要等树叶凋落（后续切片）。
+  [BlockType.OakLeaves]: {
+    opaque: false,
+    solid: true,
+    hardness: 0.2,
+    requiresTool: false,
+    drop: null,
+  },
 };
 
 export function isAir(block: BlockType): boolean {
@@ -97,6 +150,16 @@ export function miningTicks(block: BlockType): number {
   const { hardness, requiresTool } = BLOCKS[block];
   const seconds = requiresTool ? SECONDS_PER_HARDNESS_WITHOUT_TOOL : SECONDS_PER_HARDNESS;
   return Math.ceil(hardness * seconds * TICK_RATE - TICK_EPSILON);
+}
+
+/**
+ * 空手挖掉一个方块掉出什么，什么都不掉时返回 `null`。
+ *
+ * 与 `miningTicks` 一样，本切片只有空手：持有工具时的掉落（石头出圆石、树叶出树苗）
+ * 要等工具落地，那时这里多一个工具参数。
+ */
+export function blockDrop(block: BlockType): ItemStack | null {
+  return BLOCKS[block].drop;
 }
 
 /**

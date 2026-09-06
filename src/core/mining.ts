@@ -1,4 +1,5 @@
-import { BlockType, isBreakable, miningTicks, type BlockEdit } from './block';
+import { BlockType, blockDrop, isBreakable, miningTicks, type BlockEdit } from './block';
+import type { DropSink } from './drop';
 import { PLAYER_REACH, type PlayerView } from './player';
 import { raycastBlocks, type BlockHit } from './raycast';
 
@@ -28,18 +29,23 @@ export interface MiningView {
  * 到空处）进度就归零，松开再按也从零开始。原版就是这个手感——挖到一半移开视线，回来
  * 得重挖。
  *
+ * 挖穿的那一刻方块变成空气，掉落表里有东西的方块同时在原地掉出一个掉落物——挖掘
+ * 只管把它交给 `DropSink`，之后怎么落、怎么被拾取是 `Drops` 的事。
+ *
  * 时间只由 `step()` 的调用次数表达（ADR-0002），耗时表在 `miningTicks`。
  */
 export class Mining implements MiningView {
   private readonly blocks: BlockEdit;
   private readonly aim: AimView;
+  private readonly drops: DropSink;
   private hit: BlockHit | undefined;
   /** 已经对着当前目标挖了多少 tick。 */
   private elapsed = 0;
 
-  constructor(blocks: BlockEdit, aim: AimView) {
+  constructor(blocks: BlockEdit, aim: AimView, drops: DropSink) {
     this.blocks = blocks;
     this.aim = aim;
+    this.drops = drops;
   }
 
   get target(): BlockHit | undefined {
@@ -73,8 +79,12 @@ export class Mining implements MiningView {
     this.elapsed++;
     if (this.elapsed < miningTicks(block)) return;
 
-    // 本切片方块直接消失，不产生掉落物与经验（#8、#9）。
-    this.blocks.setBlock(this.hit.x, this.hit.y, this.hit.z, BlockType.Air);
+    const { x, y, z } = this.hit;
+    this.blocks.setBlock(x, y, z, BlockType.Air);
+    // 掉落物落在方块原来那一格里。什么都不掉的方块（树叶、空手挖的石头）就只是消失。
+    // 经验球还没有，见 #9。
+    const drop = blockDrop(block);
+    if (drop) this.drops.spawnInBlock(drop, x, y, z);
     this.elapsed = 0;
     // 挖穿了，视线随即落到后面那块上。当场重瞄一次，选框不会在这一 tick 里还套着一个
     // 已经不存在的方块；按住不放因此接着挖下一块，与原版一致。

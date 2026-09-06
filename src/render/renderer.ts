@@ -2,9 +2,12 @@ import * as THREE from 'three';
 import { DEBUG_BUILD } from '../build-flags';
 import type { GameCore } from '../core/game';
 import { CHUNK_SIZE } from '../core/constants';
+import { DROP_SIZE, type DropView } from '../core/drop';
+import type { ItemType } from '../core/item';
 import { PLAYER_EYE_HEIGHT } from '../core/player';
 import type { Vec3 } from '../core/vec3';
-import { CRACK_STAGES, crackStage } from './atlas';
+import { CRACK_STAGES, crackStage, itemCubeUvs } from './atlas';
+import { dropBob, dropSpin } from './drop-motion';
 import { buildChunkMesh, type MeshData } from './mesh';
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes, staleChunksFor } from './mesh-plan';
 import { chunkKey, type ChunkCoord } from '../core/world';
@@ -67,6 +70,19 @@ export interface SelectionView {
 }
 
 /**
+ * 场景里一个掉落物小方块现在的样子。
+ * 与 `SelectionView` 一样直接从场景对象上读，端到端测试验的是真摆进场景的东西。
+ */
+export interface DropRenderView {
+  /** 对应核心里那个掉落物的编号。 */
+  readonly id: number;
+  /** 小方块中心的世界坐标。漂浮的偏移已经算在里面。 */
+  readonly position: Vec3;
+  /** 绕竖直轴转过的角度（弧度）。 */
+  readonly spin: number;
+}
+
+/**
  * 渲染适配器：把核心的方块数据画成 Three.js 场景。
  *
  * 相机是第一人称的：跟着核心里的玩家走，位置在两次 tick 之间插值（ADR-0002）。
@@ -86,6 +102,17 @@ export class WorldRenderer {
   /** 贴在目标方块表面的裂纹。 */
   private readonly crackBox: THREE.Mesh;
   private readonly crackTexture: THREE.Texture;
+  /**
+   * 场景里的掉落物小方块，按核心给的编号索引。
+   *
+   * 一个掉落物一个 `Mesh`，没有合并成 InstancedMesh：视距内同时存在的掉落物是几个到
+   * 几十个的量级（挖出来就被捡走），而每个还要各自转、各自漂浮，合并省下的那点绘制调用
+   * 换不回按物品分组、逐实例写矩阵的复杂度。真到了几百个（比如连锁挖掘一次挖 64 块，
+   * 见 #11）再改——这条与整套实体同步的取舍都记在 ADR-0007 里。
+   */
+  private readonly dropMeshes = new Map<number, THREE.Mesh>();
+  /** 每种物品的小方块几何体，建一次就一直共用。 */
+  private readonly dropGeometries = new Map<ItemType, THREE.BufferGeometry>();
 
   constructor({ canvas, core, texture, crackTexture }: WorldRendererOptions) {
     this.core = core;
@@ -173,6 +200,15 @@ export class WorldRenderer {
     };
   }
 
+  /** 上一帧画出来的掉落物小方块。 */
+  get drops(): DropRenderView[] {
+    return [...this.dropMeshes].map(([id, mesh]) => ({
+      id,
+      position: { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z },
+      spin: mesh.rotation.y,
+    }));
+  }
+
   /** 这个区块的网格有多少个顶点。没建过网格、或者一个面都没有时是 0。 */
   chunkMeshVertexCount(cx: number, cz: number): number {
     const mesh = this.meshes.get(chunkKey(cx, cz))?.mesh;
@@ -251,7 +287,58 @@ export class WorldRenderer {
   render(alpha = 1): void {
     this.updateCamera(alpha);
     this.updateSelection();
+    this.updateDrops(alpha);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * 让场景里的小方块跟上核心里的掉落物：新掉出来的加进场景，被捡走或超时的移出去。
+   *
+   * 每帧全量遍历一遍，而不是等核心来告诉「哪个变了」：实体每 tick 都在动，脏集那套
+   * 反而更贵，理由与三个被否的候选都在 ADR-0007 里。
+   *
+   * 漂浮与旋转纯粹是表现，核心里没有这两个量——它只报位置与存活 tick 数，相位由
+   * `age + alpha` 算，因此在两次 tick 之间也是连续的，不会以 20Hz 一跳一跳地转。
+   */
+  private updateDrops(alpha: number): void {
+    const alive = new Set<number>();
+    for (const drop of this.core.drops.all()) {
+      alive.add(drop.id);
+      const mesh = this.dropMeshes.get(drop.id) ?? this.addDropMesh(drop);
+      const { position, previousPosition } = drop;
+      const phase = drop.age + alpha;
+      // 核心报的是碰撞箱底面中心，小方块以自己的中心为原点。
+      mesh.position.set(
+        lerp(previousPosition.x, position.x, alpha),
+        lerp(previousPosition.y, position.y, alpha) + DROP_SIZE / 2 + dropBob(phase),
+        lerp(previousPosition.z, position.z, alpha),
+      );
+      mesh.rotation.y = dropSpin(phase);
+    }
+
+    for (const [id, mesh] of this.dropMeshes) {
+      if (alive.has(id)) continue;
+      this.scene.remove(mesh);
+      this.dropMeshes.delete(id);
+    }
+  }
+
+  private addDropMesh(drop: DropView): THREE.Mesh {
+    const mesh = new THREE.Mesh(this.dropGeometry(drop.item), this.material);
+    this.scene.add(mesh);
+    this.dropMeshes.set(drop.id, mesh);
+    return mesh;
+  }
+
+  /** 某种物品的小方块几何体。几何体不随掉落物销毁，同种物品一直共用同一份。 */
+  private dropGeometry(item: ItemType): THREE.BufferGeometry {
+    const cached = this.dropGeometries.get(item);
+    if (cached) return cached;
+    const geometry = new THREE.BoxGeometry(DROP_SIZE, DROP_SIZE, DROP_SIZE);
+    // BoxGeometry 默认每个面都铺满整张贴图，得换成图集里那一格，见 itemCubeUvs。
+    geometry.setAttribute('uv', new THREE.BufferAttribute(itemCubeUvs(item), 2));
+    this.dropGeometries.set(item, geometry);
+    return geometry;
   }
 
   /**

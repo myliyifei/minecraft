@@ -12,6 +12,9 @@ import {
   WORLD_MAX_Y,
   WORLD_MIN_Y,
 } from '../../src/core/constants';
+import { PICKUP_DELAY_TICKS } from '../../src/core/drop';
+import { INVENTORY_SIZE } from '../../src/core/inventory';
+import { ItemType } from '../../src/core/item';
 import { IDLE_INTENT, MAX_PITCH, WALK_SPEED, WALK_STEP } from '../../src/core/player';
 import {
   DIRT_DEPTH_MAX,
@@ -415,6 +418,101 @@ describe('GameCore 的空手挖掘', () => {
     core.tick(GRASS_TICKS + TICK_RATE);
     expect(core.player.position.y).toBe(standing - 1);
     expect(core.player.onGround).toBe(true);
+  });
+
+  describe('挖掉的东西进背包', () => {
+    /** 把脚下那一格换成另一种方块，再低头对准它。 */
+    function lookingDownAt(block: BlockType): GameCore {
+      const core = lookingDown();
+      core.setBlock(...UNDERFOOT, block);
+      return core;
+    }
+
+    it('新开的世界背包是空的', () => {
+      const core = coreOnFlatGround();
+      expect(core.inventory.size).toBe(INVENTORY_SIZE);
+      expect(core.inventory.hotbar().every((slot) => slot === undefined)).toBe(true);
+      expect(core.drops.count).toBe(0);
+    });
+
+    it('挖掉脚下那块草，原地掉出一个泥土', () => {
+      const core = lookingDown();
+      core.setMining(true);
+      core.tick(GRASS_TICKS);
+      core.setMining(false);
+
+      expect(core.drops.count).toBe(1);
+      const [drop] = core.drops.all();
+      expect(drop!.item).toBe(ItemType.Dirt);
+      expect(drop!.count).toBe(1);
+      // 掉在原来那一格里，不是别处（初速度已经让它偏离格心一点点）
+      expect(Math.floor(drop!.position.x)).toBe(UNDERFOOT[0]);
+      expect(Math.floor(drop!.position.z)).toBe(UNDERFOOT[2]);
+    });
+
+    it('掉落物被吸进快捷栏的第一格', () => {
+      const core = lookingDown();
+      core.setMining(true);
+      core.tick(GRASS_TICKS);
+      core.setMining(false);
+      expect(core.inventory.slot(0)).toBeUndefined();
+
+      // 玩家就站在坑口，拾取延迟一过就吸进来
+      core.tick(PICKUP_DELAY_TICKS + 1);
+      expect(core.drops.count).toBe(0);
+      expect(core.inventory.slot(0)).toEqual({ item: ItemType.Dirt, count: 1 });
+      expect(core.inventory.hotbar()[0]).toEqual({ item: ItemType.Dirt, count: 1 });
+    });
+
+    it('挖两块草得到一堆 2 个泥土，不是两堆', () => {
+      const core = lookingDown();
+      core.setMining(true);
+      // 第一块碎了之后目标当场落到下面那块上，按住不放接着挖
+      core.tick(GRASS_TICKS);
+      core.setBlock(UNDERFOOT[0], UNDERFOOT[1] - 1, UNDERFOOT[2], BlockType.Grass);
+      core.tick(GRASS_TICKS + PICKUP_DELAY_TICKS + 1);
+      core.setMining(false);
+      core.tick(PICKUP_DELAY_TICKS + 1);
+
+      expect(core.inventory.slot(0)).toEqual({ item: ItemType.Dirt, count: 2 });
+      expect(core.inventory.slot(1)).toBeUndefined();
+    });
+
+    it('空手挖石头，方块碎了但什么都拿不到', () => {
+      const core = lookingDownAt(BlockType.Stone);
+      core.setMining(true);
+      core.tick(miningTicks(BlockType.Stone));
+      core.setMining(false);
+
+      expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Air);
+      expect(core.drops.count).toBe(0);
+      core.tick(PICKUP_DELAY_TICKS + 1);
+      expect(core.inventory.hotbar().every((slot) => slot === undefined)).toBe(true);
+    });
+
+    it('挖树叶什么都拿不到', () => {
+      const core = lookingDownAt(BlockType.OakLeaves);
+      core.setMining(true);
+      core.tick(miningTicks(BlockType.OakLeaves));
+      core.setMining(false);
+
+      expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Air);
+      expect(core.drops.count).toBe(0);
+    });
+
+    it('掉落物是实体，不进「变过的方块」那本账', () => {
+      const core = lookingDown();
+      core.setMining(true);
+      core.tick(GRASS_TICKS);
+      core.setMining(false);
+      // 挖掉那一格是方块变更，取走之后账上就该是空的
+      expect(core.takeChangedBlocks()).toHaveLength(1);
+
+      // 掉落物在这几十 tick 里下落、被吸走，一次都不该让网格重建
+      core.tick(PICKUP_DELAY_TICKS + TICK_RATE);
+      expect(core.drops.count).toBe(0);
+      expect(core.takeChangedBlocks()).toEqual([]);
+    });
   });
 });
 

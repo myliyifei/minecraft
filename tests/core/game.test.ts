@@ -973,6 +973,183 @@ describe('GameCore 的放置方块', () => {
   });
 });
 
+describe('GameCore 的背包界面', () => {
+  /** 平地上出生点正下方那一格。 */
+  const UNDERFOOT: [number, number, number] = [0, FLAT_GROUND_Y, 0];
+
+  /** 挖穿之后再等这么多 tick：掉落物落定，并被吸进背包。 */
+  const PICKUP_TICKS = PICKUP_DELAY_TICKS + 2;
+
+  /** 低头对准脚下那块草的核心。 */
+  function lookingDown(): GameCore {
+    const core = coreOnFlatGround();
+    core.turn(0, -MAX_PITCH);
+    return core;
+  }
+
+  /** 挖掉脚下那块草，掉出来的泥土进背包第一格。玩家掉进一格深的坑里。 */
+  function withOneDirt(): GameCore {
+    const core = lookingDown();
+    core.setMining(true);
+    core.tick(miningTicks(BlockType.Grass));
+    core.setMining(false);
+    core.tick(PICKUP_TICKS);
+    return core;
+  }
+
+  /** 打开背包界面（开合下一个 tick 生效）。 */
+  function openInventory(core: GameCore): void {
+    core.toggleInventory();
+    core.tick();
+  }
+
+  it('开合下一个 tick 生效（ADR-0004）', () => {
+    const core = coreOnFlatGround();
+    expect(core.inventoryScreen.open).toBe(false);
+
+    core.toggleInventory();
+    expect(core.inventoryScreen.open).toBe(false);
+    core.tick();
+    expect(core.inventoryScreen.open).toBe(true);
+
+    core.toggleInventory();
+    core.tick();
+    expect(core.inventoryScreen.open).toBe(false);
+  });
+
+  it('界面模式下移动指令被忽略', () => {
+    const core = coreOnFlatGround();
+    openInventory(core);
+    const standing = core.player.position;
+
+    core.setMoveIntent({ ...IDLE_INTENT, forward: true, jump: true });
+    core.tick(TICK_RATE);
+    expect(core.player.position).toEqual(standing);
+  });
+
+  it('界面模式下视角指令被忽略', () => {
+    const core = coreOnFlatGround();
+    core.turn(0.5, 0.25);
+    openInventory(core);
+
+    core.turn(1, -1);
+    expect(core.player.yaw).toBeCloseTo(0.5, 10);
+    expect(core.player.pitch).toBeCloseTo(0.25, 10);
+  });
+
+  it('进入界面模式时挖掘进度归零，按住左键也挖不动', () => {
+    const core = lookingDown();
+    core.setMining(true);
+    core.tick(miningTicks(BlockType.Grass) - 2);
+    expect(core.mining.progress).toBeGreaterThan(0);
+
+    openInventory(core);
+    expect(core.mining.progress).toBe(0);
+
+    // 挖掘键还按着，界面开着就是挖不动
+    core.tick(10 * miningTicks(BlockType.Grass));
+    expect(core.mining.progress).toBe(0);
+    expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Grass);
+  });
+
+  it('关掉界面之后挖掘重新从零开始', () => {
+    const core = lookingDown();
+    core.setMining(true);
+    openInventory(core);
+    core.toggleInventory();
+    core.tick(miningTicks(BlockType.Grass) - 1);
+    expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Grass);
+
+    core.tick(1);
+    expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Air);
+  });
+
+  it('界面模式下放置指令被忽略', () => {
+    const core = withOneDirt();
+    // 站在坑里低头对着坑底：手上那块泥土本来能放到坑沿外侧那一格
+    core.tick();
+    expect(core.mining.target).toBeDefined();
+    // 挖出来那一格的变更记录先取走，剩下的变更就只可能来自放置
+    core.takeChangedBlocks();
+
+    openInventory(core);
+    core.place();
+    core.tick();
+    expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
+    expect(core.takeChangedBlocks()).toEqual([]);
+  });
+
+  it('界面模式只挡输入，世界照样在跑：掉落物仍被吸进背包', () => {
+    const core = lookingDown();
+    core.setMining(true);
+    core.tick(miningTicks(BlockType.Grass));
+    core.setMining(false);
+    expect(core.drops.count).toBe(1);
+
+    openInventory(core);
+    core.tick(PICKUP_TICKS);
+    expect(core.drops.count).toBe(0);
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.Dirt, count: 1 });
+  });
+
+  it('点格子下一个 tick 生效，拿起的那一堆到光标上', () => {
+    const core = withOneDirt();
+    openInventory(core);
+
+    core.clickSlot(0);
+    expect(core.inventoryScreen.cursor).toBeUndefined();
+    core.tick();
+    expect(core.inventoryScreen.cursor).toEqual({ item: ItemType.Dirt, count: 1 });
+    expect(core.inventory.slot(0)).toBeUndefined();
+  });
+
+  it('同一个 tick 里点两格，按点的顺序一格一格来', () => {
+    const core = withOneDirt();
+    openInventory(core);
+
+    core.clickSlot(0);
+    core.clickSlot(20);
+    core.tick();
+    expect(core.inventoryScreen.cursor).toBeUndefined();
+    expect(core.inventory.slot(20)).toEqual({ item: ItemType.Dirt, count: 1 });
+  });
+
+  it('界面关着时点格子不动任何东西', () => {
+    const core = withOneDirt();
+    core.clickSlot(0);
+    core.tick();
+    expect(core.inventoryScreen.cursor).toBeUndefined();
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.Dirt, count: 1 });
+  });
+
+  it('关掉界面时光标上的东西回到原来那一格', () => {
+    const core = withOneDirt();
+    openInventory(core);
+    core.clickSlot(0);
+    core.tick();
+    expect(core.inventory.slot(0)).toBeUndefined();
+
+    core.toggleInventory();
+    core.tick();
+    expect(core.inventoryScreen.open).toBe(false);
+    expect(core.inventoryScreen.cursor).toBeUndefined();
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.Dirt, count: 1 });
+  });
+
+  it('关掉界面那一 tick 里点的格子照样算数', () => {
+    const core = withOneDirt();
+    openInventory(core);
+    // 拿起来，再在同一个 tick 里放到第 20 格并按下 E
+    core.clickSlot(0);
+    core.tick();
+    core.clickSlot(20);
+    core.toggleInventory();
+    core.tick();
+    expect(core.inventory.slot(20)).toEqual({ item: ItemType.Dirt, count: 1 });
+    expect(core.inventoryScreen.open).toBe(false);
+  });
+});
+
 describe('GameCore 的初始区块加载', () => {
   it('构造后已加载区块数大于 0', () => {
     expect(new GameCore().loadedChunkCount).toBeGreaterThan(0);

@@ -4,7 +4,8 @@ import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS } from './constants';
 import { Drops, type DropsView } from './drop';
 import { Experience, type ExperienceView } from './experience';
 import { Inventory, wrapHotbarSlot, type InventoryView } from './inventory';
-import { Mining, type MiningView } from './mining';
+import { InventoryScreen, type InventoryScreenView } from './inventory-screen';
+import { IDLE_MINING, Mining, type MiningView } from './mining';
 import { placeBlock } from './placement';
 import { IDLE_INTENT, Player, type MoveIntent, type PlayerView } from './player';
 import { streamChunks } from './streaming';
@@ -36,8 +37,8 @@ export interface GameCoreOptions {
  * 这是主测试接缝——渲染与输入适配器只通过这里的指令和查询与游戏交互。
  *
  * 本切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」「空手挖掘」
- * 「掉落物与背包」「经验球与等级」「放置方块」八件事。合成、生物等系统由后续切片挂进
- * step()。
+ * 「掉落物与背包」「经验球与等级」「放置方块」「背包界面」九件事。合成、生物等系统由后续
+ * 切片挂进 step()。
  */
 export class GameCore implements BlockEdit {
   private readonly world: World;
@@ -48,6 +49,7 @@ export class GameCore implements BlockEdit {
   private readonly xpOrbsState: XpOrbs;
   private readonly experienceState: Experience;
   private readonly inventoryState: Inventory;
+  private readonly screenState: InventoryScreen;
   private readonly miningState: Mining;
   private ticks = 0;
   private intent: MoveIntent = IDLE_INTENT;
@@ -60,6 +62,10 @@ export class GameCore implements BlockEdit {
   private nextSlot = 0;
   /** 这一 tick 里按过放置键没有。 */
   private placeQueued = false;
+  /** 这一 tick 里按过背包键没有。按两次相互抵消——一开一关，界面状态没变。 */
+  private toggleQueued = false;
+  /** 这一 tick 里点过背包界面的哪几格，按点击顺序。 */
+  private readonly slotClicks: number[] = [];
 
   constructor(options: GameCoreOptions = {}) {
     this.worldSeed = options.seed ?? DEFAULT_SEED;
@@ -74,6 +80,7 @@ export class GameCore implements BlockEdit {
     this.xpOrbsState = new XpOrbs();
     this.experienceState = new Experience();
     this.inventoryState = new Inventory();
+    this.screenState = new InventoryScreen(this.inventoryState);
     this.miningState = new Mining(
       this.world,
       this.playerState,
@@ -113,6 +120,16 @@ export class GameCore implements BlockEdit {
   }
 
   /**
+   * 背包界面的只读视图：开着没有、光标上拿着什么。界面层读它画那层覆盖层。
+   *
+   * 「界面开着没有」是核心状态而不是界面层自己的一个布尔：它一开，移动、视角、挖掘、
+   * 放置就都不算数了（见 `step`），这是游戏规则。
+   */
+  get inventoryScreen(): InventoryScreenView {
+    return this.screenState;
+  }
+
+  /**
    * 设定当前的移动意图，下一个 tick 生效。
    * 输入适配器每次按键状态变化时调一次，核心因此不知道任何键位。
    */
@@ -138,8 +155,12 @@ export class GameCore implements BlockEdit {
     this.chainHeld = held;
   }
 
-  /** 转动视角（弧度增量）。不等 tick，鼠标一动就生效——见 ADR-0004。 */
+  /**
+   * 转动视角（弧度增量）。不等 tick，鼠标一动就生效——见 ADR-0004。
+   * 界面模式下不转：那时鼠标已经交还给页面，它在点格子，不是在转头。
+   */
   turn(yawDelta: number, pitchDelta: number): void {
+    if (this.screenState.open) return;
     this.playerState.turn(yawDelta, pitchDelta);
   }
 
@@ -170,6 +191,26 @@ export class GameCore implements BlockEdit {
    */
   place(): void {
     this.placeQueued = true;
+  }
+
+  /**
+   * 开合背包界面，下一个 tick 生效（ADR-0004）。按一次背包键调一次。
+   *
+   * 同一个 tick 里按两次相互抵消：一开一关，界面状态没有净变化。关闭时光标上还拿着
+   * 东西的话，它回背包，一格都放不下的那些掉在玩家脚下（`InventoryScreen.toggle`）。
+   */
+  toggleInventory(): void {
+    this.toggleQueued = !this.toggleQueued;
+  }
+
+  /**
+   * 点背包界面的第 index 格，下一个 tick 生效（ADR-0004）。
+   *
+   * 同一个 tick 里点几下就按点的顺序处理几下，一下都不丢——「拿起再放到别处」本来
+   * 就是两下点击，合成一下就丢了一半的意思。界面关着时点了没有反应。
+   */
+  clickSlot(index: number): void {
+    this.slotClicks.push(index);
   }
 
   /** 本世界的种子。地形完全由它决定，端到端测试用它断言「同一种子同一个世界」。 */
@@ -257,22 +298,51 @@ export class GameCore implements BlockEdit {
     // 先让区块跟上玩家再算物理：玩家脚下的地形必须已经在世界里，否则他会踩进
     // 「未加载即空气」的虚空里往下掉。
     streamChunks(this.world, this.playerChunk, this.radius);
-    this.playerState.step(this.intent);
+    // 背包界面的输入排在最前：这一 tick 是不是界面模式，下面几步都要看它。
+    this.stepInventoryScreen();
+    // 界面模式下移动、挖掘、放置一律不算数（见 CONTEXT.md 的「界面模式」）：玩家在
+    // 摆物品，不是在操作世界。挡的是输入而不是世界——重力、掉落物、经验球照旧。
+    const uiMode = this.screenState.open;
+    this.playerState.step(uiMode ? IDLE_INTENT : this.intent);
     // 选中格先生效，再瞄准与放置：同一 tick 里切了格又按右键，放下的是新格里的东西。
     this.inventoryState.select(this.nextSlot);
-    // 挖掘必须排在移动之后，理由见 Mining.step。
-    this.miningState.step({ held: this.miningHeld, chain: this.chainHeld });
+    // 挖掘必须排在移动之后，理由见 Mining.step。界面一开就换成「什么键都没按」，
+    // 进度因此当场归零，回头得重挖。
+    this.miningState.step(uiMode ? IDLE_MINING : { held: this.miningHeld, chain: this.chainHeld });
     // 放置排在挖掘之后：目标方块是挖掘那一步按走完之后的眼睛位置重投出来的（ADR-0006），
     // 与玩家碰撞箱的判定用的也是这一 tick 走完之后的位置。
     if (this.placeQueued) {
+      // 界面模式下这一下作废，不留到关掉界面之后补放一块。
       this.placeQueued = false;
       // 目标由挖掘那一步算出来，放置直接用它（ADR-0006）。
-      placeBlock(this.world, this.miningState, this.playerState, this.inventoryState);
+      if (!uiMode) {
+        placeBlock(this.world, this.miningState, this.playerState, this.inventoryState);
+      }
     }
     // 掉落物与经验球都排在挖掘之后：这一 tick 刚挖出来的东西同一 tick 就开始动，而
     // 掉落物的拾取延迟（PICKUP_DELAY_TICKS）也从这里起算。拾取与吸收判的都是玩家走完
     // 之后的碰撞箱。两者互不影响，谁先谁后都一样。
     this.dropsState.step(this.playerState.hitbox, this.inventoryState);
     this.xpOrbsState.step(this.playerState.hitbox, this.experienceState);
+  }
+
+  /**
+   * 背包界面这一 tick 的输入：先处理点击，再处理开合。
+   *
+   * 点击排在开合之前，按下背包键那一 tick 里点的格子才算数——两件事都在这一 tick 里
+   * 到达，而玩家先点了格子才去按键。
+   */
+  private stepInventoryScreen(): void {
+    for (const index of this.slotClicks) this.screenState.clickSlot(index);
+    this.slotClicks.length = 0;
+
+    if (!this.toggleQueued) return;
+    this.toggleQueued = false;
+    const leftover = this.screenState.toggle();
+    if (!leftover) return;
+    // 背包一格不剩、光标上还拿着东西时把它扔在玩家脚下那一格，与原版一样：界面一关
+    // 就看不见的东西不能凭空消失。玩家挪出一格来就能捡回去。
+    const { x, y, z } = this.playerState.position;
+    this.dropsState.spawnInBlock(leftover, Math.floor(x), Math.floor(y), Math.floor(z));
   }
 }

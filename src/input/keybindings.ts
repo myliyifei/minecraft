@@ -10,6 +10,9 @@ export type MoveAction = keyof MoveIntent;
 /** 不属于移动意图、但同样按住才生效的动作。目前只有连锁挖掘。 */
 export type HoldAction = 'chainMining';
 
+/** 按一下切换一次的动作。目前只有开合背包界面。 */
+export type ToggleAction = 'inventory';
+
 /**
  * 键位表：动作到 `KeyboardEvent.code` 的唯一来源。别处不许再写按键名。
  *
@@ -29,7 +32,19 @@ export const KEY_BINDINGS = {
   jump: 'Space',
   // 连锁挖掘（见 CONTEXT.md 的「连锁键」）：按住它再开始挖掘才连锁。
   chainMining: 'AltLeft',
-} as const satisfies Readonly<Record<MoveAction | HoldAction, string>>;
+  // 背包界面（见 CONTEXT.md）：按一下开，再按一下关。
+  inventory: 'KeyE',
+} as const satisfies Readonly<Record<MoveAction | HoldAction | ToggleAction, string>>;
+
+/**
+ * 关掉界面的那颗键：Esc。
+ *
+ * 与 `KEY_BINDINGS` 分开列，因为它改不动——「Esc 关掉当前界面」是浏览器与操作系统一路
+ * 沿用下来的约定，把它摆进设置界面里只会让人以为换得掉。指针锁定期间它由浏览器消费
+ * （规范要求 UA 退出锁定，页面既拦不住也收不到），所以它只在界面开着、锁定已经交还的
+ * 时候才轮得到我们处理。
+ */
+export const INVENTORY_CLOSE_KEY = 'Escape';
 
 /**
  * 所有可绑键的移动动作。

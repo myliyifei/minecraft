@@ -1,10 +1,27 @@
-import { stackLimit, type Hand, type ItemSink, type ItemStack, type ItemType } from './item';
+import {
+  stackLimit,
+  type Hand,
+  type ItemSink,
+  type ItemStack,
+  type ItemType,
+  type SlotStore,
+} from './item';
 
 /** 快捷栏（见 CONTEXT.md）的格数。 */
 export const HOTBAR_SIZE = 9;
 
 /** 背包总格数，含快捷栏。与原版一致。 */
 export const INVENTORY_SIZE = 36;
+
+/**
+ * 这个下标指得到 `size` 格里的一格吗。
+ *
+ * 小数与 NaN 都不算：界面层是把 DOM 的 data 属性读成数字交进来的，读出 NaN 时若不挡，
+ * 物品会写到一个 36 格之外的位置上——那之后谁都找不到它，等于凭空消失。
+ */
+export function isSlotIndex(index: number, size: number): boolean {
+  return Number.isInteger(index) && index >= 0 && index < size;
+}
 
 /**
  * 把下标折回快捷栏的范围内：第 9 格回到第 0 格，−1 格回到最后一格。
@@ -37,7 +54,7 @@ export interface InventoryView {
  * 选中格也放在这里：快捷栏是背包的一排（见 CONTEXT.md），「手上拿着什么」就是
  * 「选中格里是什么」，两者分到两个模块里只会让它们不一致。
  */
-export class Inventory implements InventoryView, ItemSink, Hand {
+export class Inventory implements InventoryView, ItemSink, Hand, SlotStore {
   private readonly slots = Array<ItemStack | undefined>(INVENTORY_SIZE).fill(undefined);
   private selected = 0;
 
@@ -47,6 +64,18 @@ export class Inventory implements InventoryView, ItemSink, Hand {
 
   slot(index: number): ItemStack | undefined {
     return this.slots[index];
+  }
+
+  /**
+   * 把某一格换成一堆物品（undefined 表示清空）。指不到格子的下标什么都不写
+   * （`isSlotIndex`）——写进去会让这个数组多长出一个位置，「背包有 36 格」就不成立了。
+   *
+   * 背包界面（`InventoryScreen`）的拿起放下走这条路：那套操作要的是「整堆搬来搬去」，
+   * 与 `add` 的「先并进未满堆再占空格」不是一件事。
+   */
+  setSlot(index: number, stack: ItemStack | undefined): void {
+    if (!isSlotIndex(index, this.slots.length)) return;
+    this.slots[index] = stack;
   }
 
   hotbar(): ReadonlyArray<ItemStack | undefined> {

@@ -3,6 +3,7 @@ import { IDLE_INTENT, type MoveIntent } from '../core/player';
 import {
   ACTION_BY_CODE,
   HOTBAR_SLOT_BY_CODE,
+  INVENTORY_CLOSE_KEY,
   KEY_BINDINGS,
   MOUSE_BINDINGS,
   MOVE_ACTIONS,
@@ -16,7 +17,10 @@ import { isPointerSpike } from './pointer-spike';
  */
 export const MOUSE_SENSITIVITY = 0.0022;
 
-/** 输入适配器要用到的核心指令。写成窄接口，接线接错了编译期就报。 */
+/**
+ * 输入适配器要用到的核心指令，加一样查询：界面模式开着没有。
+ * 写成窄接口，接线接错了编译期就报。
+ */
 export type PlayerInputTarget = Pick<
   GameCore,
   | 'setMoveIntent'
@@ -26,6 +30,8 @@ export type PlayerInputTarget = Pick<
   | 'place'
   | 'selectHotbarSlot'
   | 'scrollHotbar'
+  | 'toggleInventory'
+  | 'inventoryScreen'
 >;
 
 /**
@@ -35,9 +41,15 @@ export type PlayerInputTarget = Pick<
  * 全在 `src/core/`。未锁定时按键与鼠标按钮都不生效，因此 Esc 之后玩家不会继续走、
  * 也不会继续挖。
  *
- * **Esc 不在键位表里**：退出指针锁定是浏览器按规范必须做的事，页面既拦不住也换不掉，
- * 所以把 `Escape` 写进可自定义的键位表只会让人误以为它改得动。设置界面（后续切片）
- * 改不到它。
+ * 背包键是唯一在未锁定时也认的键，条件是界面正开着（界面模式，见 CONTEXT.md）：那时
+ * 鼠标已经交还给页面，玩家得有办法把界面关掉。界面开着时其余按键一概不算数——「哪些
+ * 输入在界面模式下作废」这条规则本身在核心里（`GameCore.step`），这里只是不再把它们
+ * 递过去。
+ *
+ * **Esc 不在可自定义的键位表里**：指针锁定期间它由浏览器消费（规范要求 UA 退出锁定，
+ * 页面既拦不住也收不到）；界面模式下锁定已经交还，它才轮得到页面处理。两种情形下它都
+ * 换不掉，所以它是 `INVENTORY_CLOSE_KEY` 这个单独的常量，不在 `KEY_BINDINGS` 里——
+ * 设置界面（后续切片）改不到它。
  *
  * 返回卸载函数。
  */
@@ -47,6 +59,8 @@ export function installPlayerControls(
 ): () => void {
   const pressed = new Set<MoveAction>();
   const locked = (): boolean => document.pointerLockElement === canvas;
+  // 界面模式（见 CONTEXT.md）：这时鼠标已经交还给页面，键盘只认关掉界面那两颗键。
+  const uiOpen = (): boolean => target.inventoryScreen.open;
   const sendIntent = (): void => target.setMoveIntent(intentOf(pressed));
 
   // 锁定生效后浏览器会补投一发 mousemove，带的是光标从点击位置归位到画面中心的位移
@@ -60,6 +74,8 @@ export function installPlayerControls(
   const onClick = (): void => {
     // 指针锁定只能由用户手势触发，所以挂在 click 上。
     if (locked()) return;
+    // 界面开着时鼠标是用来点格子的，不能把它抓回第一人称。
+    if (uiOpen()) return;
     // 标记要在这里而不是在 pointerlockchange 里立：那发归位事件比锁定变更事件先到。
     dropWarpMove = true;
     void canvas.requestPointerLock();
@@ -119,6 +135,23 @@ export function installPlayerControls(
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
+    // 背包键两头都要认：锁定着的时候按它开界面，界面开着的时候按它关界面。
+    if (event.code === KEY_BINDINGS.inventory && (locked() || uiOpen())) {
+      event.preventDefault();
+      target.toggleInventory();
+      // 打开界面就把鼠标交还给页面，玩家拿它点格子。释放锁定顺带清掉按住的键与挖掘
+      // 状态（见 onLockChange），所以这里不必再清一遍。
+      if (locked()) document.exitPointerLock();
+      return;
+    }
+
+    // 界面开着时 Esc 关掉它。指针锁定期间这颗键收不到——那时浏览器自己用它退出锁定。
+    if (uiOpen() && event.code === INVENTORY_CLOSE_KEY) {
+      target.toggleInventory();
+      return;
+    }
+
+    // 界面开着时其余按键一概不算数：玩家在摆物品，不是在操作世界。
     if (!locked()) return;
 
     // 数字键选快捷栏的一格。按住不放没有额外含义，所以不进 pressed 那套按下/松开的账。

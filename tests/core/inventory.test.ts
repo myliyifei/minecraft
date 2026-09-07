@@ -52,6 +52,39 @@ describe('背包的格局', () => {
   });
 });
 
+describe('背包的单格写入', () => {
+  it('写进一格能读回，写 undefined 清空那一格', () => {
+    const inventory = new Inventory();
+    inventory.setSlot(20, dirt(10));
+    expect(inventory.slot(20)).toEqual(dirt(10));
+
+    inventory.setSlot(20, undefined);
+    expect(inventory.slot(20)).toBeUndefined();
+    expect(filledSlots(inventory)).toEqual([]);
+  });
+
+  it('越界的下标不写入，格数不变', () => {
+    const inventory = new Inventory();
+    inventory.setSlot(-1, dirt(1));
+    inventory.setSlot(INVENTORY_SIZE, dirt(1));
+    expect(filledSlots(inventory)).toEqual([]);
+    expect(inventory.size).toBe(INVENTORY_SIZE);
+  });
+
+  it('下标不是整数时不写入', () => {
+    // 界面层是把 data 属性读成数字交过来的，读出 NaN 或小数时不能让物品掉进
+    // 一个不存在的格子里——那样 36 格里找不到它，物品就凭空消失了
+    const inventory = new Inventory();
+    inventory.setSlot(Number.NaN, dirt(1));
+    inventory.setSlot(1.5, dirt(1));
+    expect(filledSlots(inventory)).toEqual([]);
+    expect(inventory.size).toBe(INVENTORY_SIZE);
+    // 36 格之外确实没多出一格来：读回那两个下标什么都没有
+    expect(inventory.slot(Number.NaN)).toBeUndefined();
+    expect(inventory.slot(1.5)).toBeUndefined();
+  });
+});
+
 describe('物品进背包', () => {
   it('65 个泥土装成一堆 64 加一堆 1', () => {
     const inventory = new Inventory();

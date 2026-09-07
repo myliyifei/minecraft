@@ -14,6 +14,10 @@ export const STRINGS = {
   hotbar: '快捷栏',
   levelBar: '等级',
   levelProgress: '到下一级的经验',
+  inventory: '背包',
+  // 背包界面里除快捷栏之外的那 27 格。读屏软件靠它把两片格子分开报。
+  inventoryStorage: '储物格',
+  cursorItem: '光标物品',
 } as const;
 
 /**

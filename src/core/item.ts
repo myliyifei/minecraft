@@ -48,6 +48,21 @@ export interface ItemSink {
 }
 
 /**
+ * 一批可以逐格读写的物品格子，还能按入包规则整堆收物品（`add`）。
+ *
+ * 背包界面依赖它而不是 `Inventory` 本身：那套拿起放下只搬格子里的东西，与选中格、
+ * 快捷栏无关。将来箱子的 27 格也是这么一批格子。
+ */
+export interface SlotStore extends ItemSink {
+  /** 格子总数。 */
+  readonly size: number;
+  /** 某一格里的一堆物品，空格与指不到格子的下标都是 undefined。 */
+  slot(index: number): ItemStack | undefined;
+  /** 把某一格换成一堆物品（undefined 表示清空）。指不到格子的下标什么都不写。 */
+  setSlot(index: number, stack: ItemStack | undefined): void;
+}
+
+/**
  * 手上拿着的那一堆物品，以及从它里面用掉一个。
  *
  * 放置依赖它而不是 `Inventory` 本身：放置只要「手上是什么」和「用掉一个」两件事，

@@ -33,6 +33,12 @@ export interface MiningInput {
   readonly chain: boolean;
 }
 
+/**
+ * 挖掘键与连锁键都没按。
+ * 界面模式（见 CONTEXT.md）下核心拿它替掉真实的按键状态，进度因此归零。
+ */
+export const IDLE_MINING: MiningInput = Object.freeze({ held: false, chain: false });
+
 /** 挖掘状态的只读视图。渲染层读它画选框、裂纹与连锁预览。 */
 export interface MiningView {
   /** 目标方块（见 CONTEXT.md），触及距离内没有方块时 undefined。 */

@@ -8,7 +8,7 @@ import {
   TICK_RATE,
 } from '../src/core/constants';
 import { PICKUP_DELAY_TICKS } from '../src/core/drop';
-import { HOTBAR_SIZE } from '../src/core/inventory';
+import { HOTBAR_SIZE, INVENTORY_SIZE } from '../src/core/inventory';
 import { ItemType, type ItemStack } from '../src/core/item';
 import {
   MAX_PITCH,
@@ -20,7 +20,12 @@ import {
 import { plainsTreePlacement } from '../src/core/terrain';
 import { OAK_CANOPY_RADIUS, oakTreesTouching, type OakTree } from '../src/core/tree';
 import type { Vec3 } from '../src/core/vec3';
-import { HOTBAR_KEY_CODES, KEY_BINDINGS, MOUSE_BINDINGS } from '../src/input/keybindings';
+import {
+  HOTBAR_KEY_CODES,
+  INVENTORY_CLOSE_KEY,
+  KEY_BINDINGS,
+  MOUSE_BINDINGS,
+} from '../src/input/keybindings';
 import {
   ATLAS_COLS,
   ATLAS_ROWS,
@@ -1469,6 +1474,95 @@ test('贴着墙站着，手上那块方块不会被墙切穿', async ({ page }) 
   expect(Math.abs(wall.wallRgb[0] - wall.wallRgb[2])).toBeLessThan(12);
   // 手持那一点仍是泥土的褐：手持是单独一遍渲染，不参与世界的深度测试
   expect(wall.heldRgb[0] - wall.heldRgb[2]).toBeGreaterThan(20);
+  expect(errors).toEqual([]);
+});
+
+test('按 E 打开背包界面，36 格与快捷栏对应，再按 E 关闭', async ({ page }) => {
+  const screen = page.locator('#inventory-screen');
+  // 开局关着
+  await expect(screen).toBeHidden();
+
+  await grabPointer(page);
+  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await expect(screen).toBeVisible();
+
+  // 打开时鼠标交还给页面：玩家要用它点格子
+  await expect.poll(() => readLockedElementId(page)).toBe(null);
+
+  // 文字来自简体中文字符串表
+  await expect(screen).toHaveAttribute('aria-label', STRINGS.inventory);
+  await expect(page.locator('#inventory-screen .invscreen__title')).toHaveText(STRINGS.inventory);
+
+  // 36 格，其中一行 9 格就是快捷栏
+  await expect(page.locator('#inventory-screen .invscreen__slot')).toHaveCount(INVENTORY_SIZE);
+  await expect(
+    page.locator('#inventory-screen .invscreen__hotbar .invscreen__slot'),
+  ).toHaveCount(HOTBAR_SIZE);
+  // 底部那一栏收起来：屏幕上不会同时出现两排快捷栏
+  await expect(page.locator('#hud')).toBeHidden();
+
+  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await expect(screen).toBeHidden();
+  await expect(page.locator('#hud')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('背包界面开着时按 Esc 关掉它', async ({ page }) => {
+  await grabPointer(page);
+  const screen = page.locator('#inventory-screen');
+  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await expect(screen).toBeVisible();
+
+  // 界面开着时指针锁定已经交还，Esc 不再被浏览器吃掉，由输入适配器关掉界面
+  await page.keyboard.press(INVENTORY_CLOSE_KEY);
+  await expect(screen).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('背包界面里点一格拿起泥土，再点空格放下', async ({ page }) => {
+  // 先挖一块草拿到泥土，再打开界面。挖掘与开合都直接给核心：这条测的是界面里的鼠标
+  // 点击，而指针锁定期间 headless Chromium 会把页面的任务调度降到约 1/10。
+  await page.evaluate(
+    ({ pitch, grassTicks, pickupTicks }) => {
+      const core = window.__VOXEL__!.core;
+      core.turn(0, -pitch);
+      core.setMining(true);
+      core.tick(grassTicks);
+      core.setMining(false);
+      core.tick(pickupTicks);
+      core.toggleInventory();
+      core.tick();
+    },
+    {
+      pitch: MAX_PITCH,
+      grassTicks: miningTicks(BlockType.Grass),
+      pickupTicks: PICKUP_DELAY_TICKS + 2,
+    },
+  );
+
+  const screen = page.locator('#inventory-screen');
+  await expect(screen).toBeVisible();
+
+  // 界面里的第一格就是快捷栏的第一格，挖来的泥土在这里
+  const first = page.locator('#inventory-screen .invscreen__slot[data-slot="0"]');
+  await expect(first).toHaveAttribute('data-item', String(ItemType.Dirt));
+  await expect(first).toHaveAttribute('title', ITEM_NAMES[ItemType.Dirt]);
+
+  // 点它：整堆到光标上，那一格空了（点击下一个 tick 生效，界面由游戏循环刷新）
+  const cursor = page.locator('#inventory-screen .invscreen__cursor');
+  await expect(cursor).toBeHidden();
+  await first.click();
+  await expect(cursor).toBeVisible();
+  await expect(cursor).toHaveAttribute('data-item', String(ItemType.Dirt));
+  await expect(first).not.toHaveAttribute('data-item', /./);
+
+  // 再点储物格那一侧的空格：放下去，光标空了
+  const storage = page.locator('#inventory-screen .invscreen__slot[data-slot="20"]');
+  await storage.click();
+  await expect(storage).toHaveAttribute('data-item', String(ItemType.Dirt));
+  await expect(cursor).toBeHidden();
+  // HUD 的快捷栏跟着空了：界面里那一格与 HUD 那一格是同一格
+  await expect(page.locator('#hotbar .hotbar__slot[data-slot="0"][data-item]')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 

@@ -137,6 +137,11 @@ body {
   pointer-events: none;
 }
 
+/* display: grid 会盖掉 hidden 属性自带的 display: none，所以显式写一遍。 */
+.hud[hidden] {
+  display: none;
+}
+
 /*
  * 等级条：等级数字在上、进度条在下，进度条撑满整栏。
  * 数字与进度条同色，玩家一眼就看出这两样说的是一件事。
@@ -174,8 +179,8 @@ body {
 
 /* 快捷栏：一排格子，格子边长与间距都是 --tile 的倍数，与加载屏同一套节奏。 */
 .hotbar {
-  --hotbar-cell: calc(var(--tile) * 2.5);
-  --hotbar-icon: calc(var(--tile) * 2);
+  --slot-cell: calc(var(--tile) * 2.5);
+  --slot-icon: calc(var(--tile) * 2);
 
   display: flex;
   gap: 2px;
@@ -183,12 +188,22 @@ body {
   background: rgb(0 0 0 / 35%);
 }
 
-.hotbar__slot {
+/*
+ * 一格物品：快捷栏与背包界面共用同一套。格子多大由用它的那一处给（--slot-cell），
+ * 里面怎么摆在这里写一遍就够——两处画的本来就是背包的同一批格子。
+ */
+.hotbar__slot,
+.invscreen__slot,
+.invscreen__cursor {
   position: relative;
   display: grid;
   place-items: center;
-  width: var(--hotbar-cell);
-  height: var(--hotbar-cell);
+  width: var(--slot-cell);
+  height: var(--slot-cell);
+}
+
+.hotbar__slot,
+.invscreen__slot {
   background: rgb(255 255 255 / 14%);
   /* 一圈内描边而不是 border：格子的外尺寸因此还是整数倍的 --tile。 */
   box-shadow: inset 0 0 0 1px rgb(0 0 0 / 35%);
@@ -204,24 +219,26 @@ body {
 }
 
 /*
- * 图标是方块图集的一张精灵图。格数由 hotbar.ts 写成 --atlas-cols / --atlas-rows，
+ * 图标是方块图集的一张精灵图。格数由 item-slot.ts 写成 --atlas-cols / --atlas-rows，
  * 取哪一格是 --tile-col / --tile-row，算式留在这里：JS 只管下标，不管像素。
  */
-.hotbar__icon {
-  width: var(--hotbar-icon);
-  height: var(--hotbar-icon);
+.hotbar__icon,
+.invscreen__icon {
+  width: var(--slot-icon);
+  height: var(--slot-icon);
   background-repeat: no-repeat;
   background-size:
-    calc(var(--hotbar-icon) * var(--atlas-cols))
-    calc(var(--hotbar-icon) * var(--atlas-rows));
+    calc(var(--slot-icon) * var(--atlas-cols))
+    calc(var(--slot-icon) * var(--atlas-rows));
   background-position:
-    calc(var(--tile-col) * var(--hotbar-icon) * -1)
-    calc(var(--tile-row) * var(--hotbar-icon) * -1);
+    calc(var(--tile-col) * var(--slot-icon) * -1)
+    calc(var(--tile-row) * var(--slot-icon) * -1);
   /* 像素风贴图放大不许插值，否则 16×16 的图标会糊成一团。 */
   image-rendering: pixelated;
 }
 
-.hotbar__count {
+.hotbar__count,
+.invscreen__count {
   position: absolute;
   right: 2px;
   bottom: 0;
@@ -231,4 +248,83 @@ body {
   color: #fff;
   /* 一格硬阴影，没有模糊：与标题同一套做法，数字压在任何贴图上都读得出来。 */
   text-shadow: 1px 1px 0 var(--ink);
+}
+
+/*
+ * 背包界面：按 E 打开的一层覆盖层，铺满屏幕、压暗世界，正中一块面板。
+ *
+ * 铺满屏幕是有用的：界面开着时点哪儿都落在这一层上，不会点到画布上把鼠标又抓回
+ * 第一人称去（那条判定在 src/input/controls.ts）。压暗则让「现在不是在操作世界」
+ * 一眼看得出。
+ */
+.invscreen {
+  --slot-cell: calc(var(--tile) * 2.5);
+  --slot-icon: calc(var(--tile) * 2);
+
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 55%);
+  font-family: var(--font-ui);
+}
+
+/* display: grid 会盖掉 hidden 属性自带的 display: none，所以显式写一遍。 */
+.invscreen[hidden] {
+  display: none;
+}
+
+/* 面板：标题在上，储物格与快捷栏两片格子在下，间距仍是 --tile 的倍数。 */
+.invscreen__panel {
+  display: grid;
+  gap: var(--tile);
+  justify-items: center;
+  padding: var(--tile);
+  background: rgb(0 0 0 / 55%);
+  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 20%);
+}
+
+.invscreen__title {
+  font-size: calc(var(--tile) * 1.25);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.1em;
+  color: #fff;
+  /* 一格硬阴影，没有模糊：与加载屏标题同一套做法。 */
+  text-shadow: 1px 1px 0 var(--ink);
+}
+
+/*
+ * 两片格子：一行几格由 inventory-screen.ts 写成 --invscreen-cols（唯一来源是快捷栏的
+ * 格数），所以储物格那 27 格自己排成三行，CSS 里不出现 9 也不出现 3。
+ */
+.invscreen__storage,
+.invscreen__hotbar {
+  display: grid;
+  grid-template-columns: repeat(var(--invscreen-cols), var(--slot-cell));
+  gap: 2px;
+  padding: 2px;
+  background: rgb(0 0 0 / 35%);
+}
+
+/* 鼠标停在哪一格上就亮一档：点下去动的是这一格。与快捷栏的选中格同一套加亮。 */
+.invscreen__slot:hover {
+  background: rgb(255 255 255 / 30%);
+}
+
+/*
+ * 光标物品：跟着鼠标走的一小块，位置由 inventory-screen.ts 写成 --cursor-x / --cursor-y。
+ * pointer-events: none 是必须的——它正压在鼠标底下，接收点击的话下一下点到的就是它
+ * 而不是格子。
+ */
+.invscreen__cursor {
+  position: fixed;
+  left: var(--cursor-x, 50vw);
+  top: var(--cursor-y, 50vh);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.invscreen__cursor[hidden] {
+  display: none;
 }

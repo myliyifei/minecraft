@@ -30,9 +30,21 @@ export type ChunkSourceFactory = (seed: number) => ChunkSource;
  *
  * 未加载的区块视为边界：读到空气，写入被丢弃。这与连锁挖掘「未加载区块视为边界」
  * 的规则一致，也让区块流式加载不必给读写路径加特例。
+ *
+ * 玩家改过的区块卸载之后仍由世界持有（见 `editedChunks` 与 ADR-0008）。
  */
 export class World implements BlockEdit {
   private readonly chunks = new Map<number, Chunk>();
+  /**
+   * 玩家改过的区块，卸载之后仍留在这里。这条规则本身见 CONTEXT.md 的「已改区块」。
+   *
+   * 里面的区块与 `chunks` 里的是同一个对象：`loadChunk` 把留着的那一份放回 `chunks`，
+   * 因此后来的写入改的仍是这一份。
+   *
+   * 一个区块 96KB，这张表只增不减：丢掉哪一个都等于丢掉玩家的修改。为什么留整块而不是
+   * 只留那几处改动、为什么不给它设上限，见 ADR-0008。
+   */
+  private readonly editedChunks = new Map<number, Chunk>();
   /**
    * 自上次取走以来内容变过的方块，按坐标去重。
    *
@@ -79,13 +91,19 @@ export class World implements BlockEdit {
   /**
    * 加载区块。
    *
-   * 已加载则原样返回，不向来源重新要一份，玩家的修改因此不会被覆盖。
-   * 来源说「还没准备好」时返回 undefined，世界保持不变。
+   * 已加载则原样返回，不向来源重新要一份，玩家的修改因此不会被覆盖。改过又卸载了的区块
+   * 复用留着的那一份，同样不问来源——浏览器里因此连 Worker 都不必跑一趟，玩家走回来
+   * 那一格当场就在。来源说「还没准备好」时返回 undefined，世界保持不变。
    */
   loadChunk(cx: number, cz: number): Chunk | undefined {
     const key = chunkKey(cx, cz);
     const loaded = this.chunks.get(key);
     if (loaded) return loaded;
+    const edited = this.editedChunks.get(key);
+    if (edited) {
+      this.chunks.set(key, edited);
+      return edited;
+    }
     const chunk = this.source(cx, cz);
     if (!chunk) return undefined;
     this.chunks.set(key, chunk);
@@ -94,8 +112,8 @@ export class World implements BlockEdit {
 
   /**
    * 卸载区块。
-   * 本切片直接丢弃区块数据；把修改过的区块留在内存里以便走远再回来仍是改过的样子，
-   * 是 issue #13 的事。
+   * 改过的区块只是不再算「已加载」，数据仍留在 `editedChunks` 里；没改过的到这里就
+   * 没人引用了，交给垃圾回收。
    */
   unloadChunk(cx: number, cz: number): void {
     this.chunks.delete(chunkKey(cx, cz));
@@ -129,13 +147,16 @@ export class World implements BlockEdit {
     const by = Math.floor(y);
     const bz = Math.floor(z);
     if (by < WORLD_MIN_Y || by > WORLD_MAX_Y) return false;
-    const chunk = this.chunks.get(chunkKey(chunkOf(bx), chunkOf(bz)));
+    const key = chunkKey(chunkOf(bx), chunkOf(bz));
+    const chunk = this.chunks.get(key);
     if (!chunk) return false;
     const lx = localOf(bx);
     const lz = localOf(bz);
     // 写成同样的方块不算变过：网格没必要为一次空写重建。
     if (chunk.get(lx, by, lz) === block) return true;
     chunk.set(lx, by, lz, block);
+    // 这一下让它成了已改区块，卸载后不再丢弃。
+    this.editedChunks.set(key, chunk);
     this.changed.set(`${bx},${by},${bz}`, { x: bx, y: by, z: bz });
     return true;
   }

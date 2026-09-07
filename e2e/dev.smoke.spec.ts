@@ -87,9 +87,12 @@ async function waitForFullViewDistance(page: Page): Promise<void> {
     .toBeGreaterThanOrEqual(CHUNKS_IN_VIEW);
 }
 
+/** 走路的方向。视角始终朝 −Z，所以往前是 −Z、往回退是 +Z。 */
+type WalkDirection = 'forward' | 'back';
+
 /**
- * 一直往前走 n 个 tick，绕开挡路的东西，中途把主线程让出去，好让 Worker 送回来的区块
- * 能被收下。
+ * 一直走 n 个 tick，绕开挡路的东西，中途把主线程让出去，好让 Worker 送回来的区块
+ * 能被收下。视角不动：`forward` 是朝视线方向走，`back` 是往回退。
  *
  * 逐个 tick 走而不是一次 `core.tick(n)`：区块是异步回填的，一整段跑在同一个任务里
  * 就一个区块也等不到，玩家会走进还没生成的地方。边走边跳是因为真实地形上相邻两列可能
@@ -97,25 +100,32 @@ async function waitForFullViewDistance(page: Page): Promise<void> {
  * 平原上散布着橡树，树干与低垂的树冠都是实心的。挡路的规避与 tests/core/game.test.ts
  * 的 `walkForwardPastTrees` 是同一套。
  */
-async function walkForwardTicks(page: Page, ticks: number): Promise<void> {
+async function walkTicks(
+  page: Page,
+  ticks: number,
+  direction: WalkDirection = 'forward',
+): Promise<void> {
   await page.evaluate(
-    async ({ total, sidestepProgress }) => {
+    async ({ total, sidestepProgress, backward }) => {
       const core = window.__VOXEL__!.core;
       /** 每这么多 tick 把主线程让出去一次。 */
       const yieldEvery = 10;
+      /** 视角朝 −Z，所以往前走 z 变小，往回退 z 变大。 */
+      const advanced = (now: number, before: number): boolean =>
+        backward ? now > before : now < before;
       let sidestep: 'none' | 'right' | 'left' = 'none';
       let previous = core.player.position;
       for (let done = 0; done < total; done++) {
         core.setMoveIntent({
-          forward: true,
-          back: false,
+          forward: !backward,
+          back: backward,
           left: sidestep === 'left',
           right: sidestep === 'right',
           jump: true,
         });
         core.tick();
         const now = core.player.position;
-        if (now.z < previous.z) sidestep = 'none';
+        if (advanced(now.z, previous.z)) sidestep = 'none';
         else if (sidestep === 'none') sidestep = 'right';
         else if (Math.abs(now.x - previous.x) < sidestepProgress) {
           sidestep = sidestep === 'right' ? 'left' : 'right';
@@ -127,8 +137,35 @@ async function walkForwardTicks(page: Page, ticks: number): Promise<void> {
       }
       core.setMoveIntent({ forward: false, back: false, left: false, right: false, jump: false });
     },
-    { total: ticks, sidestepProgress: WALK_STEP / 2 },
+    { total: ticks, sidestepProgress: WALK_STEP / 2, backward: direction === 'back' },
   );
+}
+
+/** 原点区块此刻在世界里、在场景里的状态。走远再回来那一趟全靠它判断。 */
+async function readOriginChunkState(page: Page): Promise<{ loaded: boolean; hasMesh: boolean }> {
+  return page.evaluate(() => ({
+    loaded: window.__VOXEL__!.core.isChunkLoaded(0, 0),
+    hasMesh: window.__VOXEL__!.renderer.hasChunkMesh(0, 0),
+  }));
+}
+
+/**
+ * 一直走到 `done()` 成立，最多走 maxTicks 个 tick。
+ * 分批走，每批之间问一次——走多少格才跨过加载线取决于路上有多少树要绕。
+ */
+async function walkUntil(
+  page: Page,
+  direction: WalkDirection,
+  done: () => Promise<boolean>,
+  maxTicks: number,
+): Promise<void> {
+  /** 每批走这么多 tick（5 秒游戏时间，约 20 格）。 */
+  const batch = 100;
+  for (let walked = 0; walked < maxTicks; walked += batch) {
+    if (await done()) return;
+    await walkTicks(page, batch, direction);
+  }
+  if (!(await done())) throw new Error(`走了 ${maxTicks} tick 还没走到`);
 }
 
 /**
@@ -324,7 +361,7 @@ test('走远之后前方区块生成、身后区块与它的网格一起卸载',
   expect(before.hasOriginMesh).toBe(true);
 
   // 朝 −Z 走一分钟：视距 8 的加载范围是 ±128 格，这一趟远远走出去
-  await walkForwardTicks(page, 60 * TICK_RATE);
+  await walkTicks(page, 60 * TICK_RATE);
 
   const after = await page.evaluate((radius) => {
     const { core, renderer } = window.__VOXEL__!;
@@ -357,6 +394,67 @@ test('走远之后前方区块生成、身后区块与它的网格一起卸载',
   // 已加载区块数稳定在视距那一圈上下，不会一路涨
   expect(after.loaded).toBeGreaterThanOrEqual(CHUNKS_IN_VIEW);
   expect(after.loaded).toBeLessThanOrEqual((2 * (DEFAULT_VIEW_RADIUS + 1) + 1) ** 2);
+  expect(errors).toEqual([]);
+});
+
+test('走远到区块卸载再走回来，挖过的洞还在，网格也还带着它', async ({ page }) => {
+  // 一来一回一千多个 tick，中间还要等 Worker 把周围的区块重新送来
+  test.setTimeout(90_000);
+  await waitForFullViewDistance(page);
+
+  // 低头把脚下那块草挖穿，记下带洞的网格。整段跑在一次同步的 evaluate 里，
+  // 网格要自己调 syncChunkMeshes——那一步平时是游戏循环发起的。
+  const dug = await page.evaluate(
+    ({ pitch, ticksToBreak }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      core.turn(0, -pitch);
+      const x = Math.floor(core.player.position.x);
+      const z = Math.floor(core.player.position.z);
+      const y = Math.floor(core.player.position.y) - 1;
+      core.tick();
+      const intact = renderer.chunkMeshVertexCount(0, 0);
+
+      core.setMining(true);
+      core.tick(ticksToBreak);
+      core.setMining(false);
+      renderer.syncChunkMeshes();
+
+      return {
+        at: { x, y, z },
+        block: core.getBlock(x, y, z),
+        intact,
+        withHole: renderer.chunkMeshVertexCount(0, 0),
+      };
+    },
+    { pitch: MAX_PITCH, ticksToBreak: miningTicks(BlockType.Grass) },
+  );
+
+  expect(dug.block).toBe(BlockType.Air);
+  // 洞进了网格：坑壁那几个面原来是贴着的，现在暴露出来了
+  expect(dug.withHole).toBeGreaterThan(dug.intact);
+
+  // 朝 −Z 走到原点区块被卸载：视距 8、卸载线 9，要走出去 144 格开外
+  await walkUntil(page, 'forward', async () => !(await readOriginChunkState(page)).loaded, 2000);
+  expect(await readOriginChunkState(page)).toEqual({ loaded: false, hasMesh: false });
+
+  // 再往回退，走到原点区块重新进入视距
+  await walkUntil(page, 'back', async () => (await readOriginChunkState(page)).loaded, 1000);
+
+  // 网格还要再往回走几格才有：刚跨过加载线时原点区块朝外那一侧的邻居仍在视距之外，
+  // 而网格要四邻齐全才建（见 planChunkMeshes）。补网格由游戏循环逐帧发起，一帧两个。
+  await walkUntil(page, 'back', async () => (await readOriginChunkState(page)).hasMesh, 1000);
+
+  const back = await page.evaluate(({ x, y, z }) => {
+    const { core, renderer } = window.__VOXEL__!;
+    return {
+      block: core.getBlock(x, y, z),
+      meshVertices: renderer.chunkMeshVertexCount(0, 0),
+    };
+  }, dug.at);
+
+  // 那一格还是空气，重建出来的网格与挖穿时一模一样——洞不是重新生成的地形填回去了
+  expect(back.block).toBe(BlockType.Air);
+  expect(back.meshVertices).toBe(dug.withHole);
   expect(errors).toEqual([]);
 });
 

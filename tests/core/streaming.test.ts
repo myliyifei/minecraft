@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { BlockType } from '../../src/core/block';
 import { Chunk } from '../../src/core/chunk';
 import { DEFAULT_VIEW_RADIUS, UNLOAD_MARGIN } from '../../src/core/constants';
 import { streamChunks } from '../../src/core/streaming';
-import { World, type ChunkCoord, type ChunkSource } from '../../src/core/world';
-import { flatTestTerrain } from '../helpers/flat-terrain';
+import { ORIGIN_CHUNK, World, type ChunkCoord, type ChunkSource } from '../../src/core/world';
+import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 
 /** 半径 r 的方形范围内的区块数。 */
 function chunksInSquare(radius: number): number {
@@ -147,6 +148,48 @@ describe('还没准备好的区块来源', () => {
     for (let i = 1; i < distances.length; i++) {
       expect(distances[i]!).toBeGreaterThanOrEqual(distances[i - 1]!);
     }
+  });
+});
+
+describe('已改区块随中心走远再回来', () => {
+  /** 这一节的视距。区块少一点，生成快一点；卸载靠的是中心走远，不是视距大小。 */
+  const RADIUS = 1;
+
+  /** 中心走开 20 个区块又走回来，原点区块中途一定卸载过。 */
+  function roundTrip(world: World): void {
+    streamChunks(world, { cx: 20, cz: 0 }, RADIUS);
+    expect(world.isChunkLoaded(0, 0)).toBe(false);
+    streamChunks(world, ORIGIN_CHUNK, RADIUS);
+  }
+
+  it('挖掉一块，走远到那个区块卸载，再回来那一格仍是空气', () => {
+    const world = new World(flatTestTerrain);
+    streamChunks(world, ORIGIN_CHUNK, RADIUS);
+    world.setBlock(1, FLAT_GROUND_Y, 1, BlockType.Air);
+
+    roundTrip(world);
+
+    expect(world.getBlock(1, FLAT_GROUND_Y, 1)).toBe(BlockType.Air);
+  });
+
+  it('放下一块，走远再回来那一格仍是放下的方块', () => {
+    const world = new World(flatTestTerrain);
+    streamChunks(world, ORIGIN_CHUNK, RADIUS);
+    world.setBlock(1, FLAT_GROUND_Y + 1, 1, BlockType.Dirt);
+
+    roundTrip(world);
+
+    expect(world.getBlock(1, FLAT_GROUND_Y + 1, 1)).toBe(BlockType.Dirt);
+  });
+
+  it('挖过的区块往返多趟也不会被重新生成盖掉', () => {
+    const world = new World(flatTestTerrain);
+    streamChunks(world, ORIGIN_CHUNK, RADIUS);
+    world.setBlock(1, FLAT_GROUND_Y, 1, BlockType.Air);
+
+    for (let i = 0; i < 3; i++) roundTrip(world);
+
+    expect(world.getBlock(1, FLAT_GROUND_Y, 1)).toBe(BlockType.Air);
   });
 });
 

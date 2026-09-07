@@ -59,6 +59,59 @@ function toVec([x, y, z]: [number, number, number]): Vec3 {
   return { x, y, z };
 }
 
+/** 平地上出生点正下方那一格。挖掘、放置、背包界面几节都从挖穿它开始。 */
+const UNDERFOOT: [number, number, number] = [0, FLAT_GROUND_Y, 0];
+
+/** 挖穿之后再等这么多 tick：掉落物落定，并被吸进背包。 */
+const PICKUP_TICKS = PICKUP_DELAY_TICKS + 2;
+
+/** 朝 +X 看的偏航。 */
+const EAST_YAW = -Math.PI / 2;
+
+/**
+ * 站在一格深的坑里斜着往下看的俯仰：−30°。
+ * 视线越过坑沿，落在旁边那块草的顶面上——所以放置的落点在坑外，不与玩家相交。
+ */
+const ASIDE_PITCH = -Math.PI / 6;
+
+/** 站在坑里斜着往下看时对准的那一格，以及它的顶面外侧那一格（放置的落点）。 */
+const ASIDE: [number, number, number] = [1, FLAT_GROUND_Y, 0];
+const ABOVE_ASIDE: [number, number, number] = [1, FLAT_GROUND_Y + 1, 0];
+
+/** 把视角转到绝对的偏航与俯仰上。核心只收增量，这里换算一次。 */
+function look(core: GameCore, yaw: number, pitch: number): void {
+  core.turn(yaw - core.player.yaw, pitch - core.player.pitch);
+}
+
+/** 低头对准脚下那块草的核心。俯仰到底，视线几乎竖直向下。 */
+function lookingDown(): GameCore {
+  const core = coreOnFlatGround();
+  core.turn(0, -MAX_PITCH);
+  return core;
+}
+
+/** 低头挖穿脚下那一格，掉出来的东西进背包，玩家掉进坑里。 */
+function digUnderfoot(core: GameCore, block: BlockType): void {
+  look(core, 0, -MAX_PITCH);
+  core.setMining(true);
+  core.tick(miningTicks(block));
+  core.setMining(false);
+  core.tick(PICKUP_TICKS);
+}
+
+/**
+ * 手上有一个泥土、站在一格深的坑里斜着看着旁边那块草的核心。
+ *
+ * 东西只能挖来——核心没有「往背包里塞物品」的入口，也不该为测试开一个。
+ * 传进来的核心决定视距那类设定，默认是采样视距的平地核心。
+ */
+function holdingDirt(core: GameCore = coreOnFlatGround()): GameCore {
+  digUnderfoot(core, BlockType.Grass);
+  look(core, EAST_YAW, ASIDE_PITCH);
+  core.tick();
+  return core;
+}
+
 describe('GameCore 的 tick 推进', () => {
   it('新建的核心 tick 计数为 0', () => {
     expect(sampleCore().tickCount).toBe(0);
@@ -342,22 +395,12 @@ describe('GameCore 的玩家', () => {
 });
 
 describe('GameCore 的空手挖掘', () => {
-  /** 脚下那块草：平地上出生点正下方的一格。 */
-  const UNDERFOOT: [number, number, number] = [0, FLAT_GROUND_Y, 0];
-
   /**
    * 挖掉一块草要多少 tick。
    * 从耗时表里取而不是写 18：这一节测的是「按键 → tick → 方块消失」这条线接上了没有，
    * 耗时表本身由 tests/core/block.test.ts 与 tests/core/mining.test.ts 断言。
    */
   const GRASS_TICKS = miningTicks(BlockType.Grass);
-
-  /** 低头看脚下那块草的核心。俯仰到底，视线几乎竖直向下。 */
-  function lookingDown(): GameCore {
-    const core = coreOnFlatGround();
-    core.turn(0, -MAX_PITCH);
-    return core;
-  }
 
   it('瞄着脚下那块草，目标坐标与命中面都对', () => {
     const core = lookingDown();
@@ -770,52 +813,6 @@ describe('GameCore 的快捷栏选中格', () => {
 });
 
 describe('GameCore 的放置方块', () => {
-  /** 平地上出生点正下方那一格。 */
-  const UNDERFOOT: [number, number, number] = [0, FLAT_GROUND_Y, 0];
-
-  /** 挖穿之后再等这么多 tick：掉落物落定，并被吸进背包。 */
-  const PICKUP_TICKS = PICKUP_DELAY_TICKS + 2;
-
-  /** 朝 +X 看的偏航。 */
-  const EAST_YAW = -Math.PI / 2;
-
-  /**
-   * 站在一格深的坑里斜着往下看的俯仰：−30°。
-   * 视线越过坑沿，落在旁边那块草的顶面上——所以放置的落点在坑外，不与玩家相交。
-   */
-  const ASIDE_PITCH = -Math.PI / 6;
-
-  /** 站在坑里斜着往下看时对准的那一格，以及它的顶面外侧那一格。 */
-  const ASIDE: [number, number, number] = [1, FLAT_GROUND_Y, 0];
-  const ABOVE_ASIDE: [number, number, number] = [1, FLAT_GROUND_Y + 1, 0];
-
-  /** 把视角转到绝对的偏航与俯仰上。核心只收增量，这里换算一次。 */
-  function look(core: GameCore, yaw: number, pitch: number): void {
-    core.turn(yaw - core.player.yaw, pitch - core.player.pitch);
-  }
-
-  /** 低头挖穿脚下那一格，掉出来的东西进背包，玩家掉进坑里。 */
-  function digUnderfoot(core: GameCore, block: BlockType): void {
-    look(core, 0, -MAX_PITCH);
-    core.setMining(true);
-    core.tick(miningTicks(block));
-    core.setMining(false);
-    core.tick(PICKUP_TICKS);
-  }
-
-  /**
-   * 手上有一个泥土、站在一格深的坑里斜着看着旁边那块草的核心。
-   *
-   * 东西只能挖来——核心没有「往背包里塞物品」的入口，也不该为测试开一个。
-   */
-  function holdingDirt(): GameCore {
-    const core = coreOnFlatGround();
-    digUnderfoot(core, BlockType.Grass);
-    look(core, EAST_YAW, ASIDE_PITCH);
-    core.tick();
-    return core;
-  }
-
   /** 按一次右键并推进一个 tick。 */
   function placeOnce(core: GameCore): void {
     core.place();
@@ -974,26 +971,10 @@ describe('GameCore 的放置方块', () => {
 });
 
 describe('GameCore 的背包界面', () => {
-  /** 平地上出生点正下方那一格。 */
-  const UNDERFOOT: [number, number, number] = [0, FLAT_GROUND_Y, 0];
-
-  /** 挖穿之后再等这么多 tick：掉落物落定，并被吸进背包。 */
-  const PICKUP_TICKS = PICKUP_DELAY_TICKS + 2;
-
-  /** 低头对准脚下那块草的核心。 */
-  function lookingDown(): GameCore {
-    const core = coreOnFlatGround();
-    core.turn(0, -MAX_PITCH);
-    return core;
-  }
-
   /** 挖掉脚下那块草，掉出来的泥土进背包第一格。玩家掉进一格深的坑里。 */
   function withOneDirt(): GameCore {
-    const core = lookingDown();
-    core.setMining(true);
-    core.tick(miningTicks(BlockType.Grass));
-    core.setMining(false);
-    core.tick(PICKUP_TICKS);
+    const core = coreOnFlatGround();
+    digUnderfoot(core, BlockType.Grass);
     return core;
   }
 
@@ -1289,5 +1270,78 @@ describe('GameCore 的区块随玩家流式加载', () => {
     expect(falls).toEqual([]);
     // 一分钟走出去二百多格，跨过十几个区块边界
     expect(core.player.position.z).toBeLessThan(-200);
+  });
+});
+
+describe('GameCore 的已改区块在玩家走远再回来之后', () => {
+  /**
+   * 这一节的视距（区块数）。
+   * 收到 1 是为了让区块生成便宜些：这一节要走的是 20 个区块的往返，视距本身与卸载线的
+   * 断言在上一节里。
+   */
+  const RETURN_RADIUS = 1;
+
+  /** 走出去多少个区块才折返。 */
+  const CHUNKS_TO_CROSS = 20;
+
+  /**
+   * 走一趟不该超过这么多 tick。
+   * 20 个区块 = 320 格，按步行速度 74 秒；平地上没有要绕的东西，两倍是宽松的上界。
+   */
+  const MAX_WALK_TICKS = 150 * TICK_RATE;
+
+  /** 视距收到 1 的平地核心。 */
+  function coreForRoundTrip(): GameCore {
+    return new GameCore({ viewRadius: RETURN_RADIUS, chunkSource: () => flatTestTerrain });
+  }
+
+  /**
+   * 朝一个方向一直走，直到 done() 成立。
+   *
+   * 边走边跳：挖穿脚下之后玩家在一格深的坑里，不跳出不来。走满上界还不成立就报错，
+   * 免得「没走到」被当成「走到了但断言恰好通过」。
+   */
+  function walkUntil(core: GameCore, direction: 'away' | 'back', done: () => boolean): void {
+    const back = direction === 'back';
+    for (let i = 0; i < MAX_WALK_TICKS && !done(); i++) {
+      core.setMoveIntent({ ...IDLE_INTENT, forward: !back, back, jump: true });
+      core.tick();
+    }
+    core.setMoveIntent(IDLE_INTENT);
+    if (!done()) throw new Error(`走了 ${MAX_WALK_TICKS} tick 还没走到 ${direction}`);
+  }
+
+  /** 自己走出 20 个区块（原点那个因此早已卸载），再走回来到它重新加载。 */
+  function roundTripFromOrigin(core: GameCore): void {
+    expect(core.isChunkLoaded(0, 0)).toBe(true);
+    // 走的方向由视角决定：先转回正北，这一路才是没动过的平地——刚放下的那块方块
+    // 就在东边一格，朝它走会被自己放的东西挡住（坑里跳 1.25 格上不去两格高）。
+    look(core, 0, 0);
+    walkUntil(core, 'away', () => core.playerChunk.cz <= -CHUNKS_TO_CROSS);
+    expect(core.isChunkLoaded(0, 0)).toBe(false);
+    walkUntil(core, 'back', () => core.isChunkLoaded(0, 0));
+  }
+
+  it('挖掉脚下那块草，走远到那个区块卸载，再走回来那一格还是空气', () => {
+    const core = coreForRoundTrip();
+    digUnderfoot(core, BlockType.Grass);
+    expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Air);
+
+    roundTripFromOrigin(core);
+
+    // 复用留着的那一份，而不是按种子重新生成——重新生成的话这里又是草
+    expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Air);
+  });
+
+  it('把捡到的泥土放在旁边，走远再走回来那一块还在', () => {
+    const core = holdingDirt(coreForRoundTrip());
+    core.place();
+    core.tick();
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Dirt);
+
+    roundTripFromOrigin(core);
+
+    // 重新生成的话这里是空气：平地的地表只到 FLAT_GROUND_Y
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Dirt);
   });
 });

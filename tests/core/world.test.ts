@@ -2,8 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { plainsSurfaceHeight, plainsTerrain } from '../../src/core/terrain';
-import { World } from '../../src/core/world';
+import { World, type ChunkSource } from '../../src/core/world';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
+
+/** 一个区块的全部方块。用它比较两次得到的区块是否逐格一致。 */
+function sampleChunk(world: World, cx: number, cz: number): string {
+  const parts: string[] = [];
+  for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+      const x = cx * CHUNK_SIZE + lx;
+      const z = cz * CHUNK_SIZE + lz;
+      for (let y = WORLD_MIN_Y; y <= WORLD_MAX_Y; y++) {
+        parts.push(String(world.getBlock(x, y, z)));
+      }
+    }
+  }
+  return parts.join(',');
+}
 
 describe('World 的区块加载', () => {
   it('新建的世界没有已加载区块，任何坐标都是空气', () => {
@@ -71,6 +86,110 @@ describe('World 的写入结果', () => {
     // 边界上仍然可写
     expect(world.setBlock(0, WORLD_MAX_Y, 0, BlockType.Stone)).toBe(true);
     expect(world.getBlock(0, WORLD_MAX_Y, 0)).toBe(BlockType.Stone);
+  });
+});
+
+describe('已改区块在卸载后保留', () => {
+  /** 数一数向来源要过几次区块的地形。 */
+  function countingTerrain(): { source: ChunkSource; generated: () => number } {
+    let generated = 0;
+    return {
+      generated: () => generated,
+      source: (cx, cz) => {
+        generated++;
+        return flatTestTerrain(cx, cz);
+      },
+    };
+  }
+
+  it('挖掉一块的区块卸载后重新加载，那一格仍是空气', () => {
+    const world = new World(flatTestTerrain);
+    world.loadChunk(0, 0);
+    world.setBlock(1, FLAT_GROUND_Y, 1, BlockType.Air);
+
+    world.unloadChunk(0, 0);
+    world.loadChunk(0, 0);
+
+    expect(world.getBlock(1, FLAT_GROUND_Y, 1)).toBe(BlockType.Air);
+  });
+
+  it('放下一块的区块卸载后重新加载，那一格仍是放下的方块', () => {
+    const world = new World(flatTestTerrain);
+    world.loadChunk(0, 0);
+    world.setBlock(1, FLAT_GROUND_Y + 1, 1, BlockType.Dirt);
+
+    world.unloadChunk(0, 0);
+    world.loadChunk(0, 0);
+
+    expect(world.getBlock(1, FLAT_GROUND_Y + 1, 1)).toBe(BlockType.Dirt);
+  });
+
+  it('已改区块重新加载时复用留着的那一份，不向来源要新的', () => {
+    const { source, generated } = countingTerrain();
+    const world = new World(source);
+    world.loadChunk(0, 0);
+    world.setBlock(1, FLAT_GROUND_Y, 1, BlockType.Air);
+
+    world.unloadChunk(0, 0);
+    world.loadChunk(0, 0);
+
+    expect(generated()).toBe(1);
+  });
+
+  it('没改过的区块卸载即丢弃，重新生成的那一份与首次一模一样', () => {
+    const { source, generated } = countingTerrain();
+    const world = new World(source);
+    world.loadChunk(0, 0);
+    const before = sampleChunk(world, 0, 0);
+
+    world.unloadChunk(0, 0);
+    world.loadChunk(0, 0);
+
+    // 又向来源要了一份，而不是复用——没改过的区块不必留着
+    expect(generated()).toBe(2);
+    expect(sampleChunk(world, 0, 0)).toBe(before);
+  });
+
+  it('写成原本就是的方块不算改过，那个区块照旧丢弃', () => {
+    const { source, generated } = countingTerrain();
+    const world = new World(source);
+    world.loadChunk(0, 0);
+    world.setBlock(1, FLAT_GROUND_Y, 1, BlockType.Grass);
+
+    world.unloadChunk(0, 0);
+    world.loadChunk(0, 0);
+
+    expect(generated()).toBe(2);
+  });
+
+  it('改了一格的区块往返一趟，别的格子也没跑偏', () => {
+    const world = new World(flatTestTerrain);
+    world.loadChunk(0, 0);
+    world.setBlock(1, FLAT_GROUND_Y, 1, BlockType.Air);
+    const before = sampleChunk(world, 0, 0);
+
+    world.unloadChunk(0, 0);
+    world.loadChunk(0, 0);
+
+    expect(sampleChunk(world, 0, 0)).toBe(before);
+  });
+
+  it('一个区块改过不影响相邻区块，它照旧丢弃后重新生成', () => {
+    const { source, generated } = countingTerrain();
+    const world = new World(source);
+    world.loadChunk(0, 0);
+    world.loadChunk(1, 0);
+    world.setBlock(1, FLAT_GROUND_Y, 1, BlockType.Air);
+
+    world.unloadChunk(0, 0);
+    world.unloadChunk(1, 0);
+    world.loadChunk(0, 0);
+    world.loadChunk(1, 0);
+
+    // 改过的那个复用，没改的那个重新生成：两次加载一共问了 3 次
+    expect(generated()).toBe(3);
+    expect(world.getBlock(1, FLAT_GROUND_Y, 1)).toBe(BlockType.Air);
+    expect(world.getBlock(17, FLAT_GROUND_Y, 1)).toBe(BlockType.Grass);
   });
 });
 
@@ -150,21 +269,6 @@ describe('区块索引', () => {
 
 describe('地形生成的确定性', () => {
   const SEED = 8_675_309;
-
-  /** 一个区块的全部方块。用它比较两次生成的结果是否逐格一致。 */
-  function sampleChunk(world: World, cx: number, cz: number): string {
-    const parts: string[] = [];
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-      for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-        const x = cx * CHUNK_SIZE + lx;
-        const z = cz * CHUNK_SIZE + lz;
-        for (let y = WORLD_MIN_Y; y <= WORLD_MAX_Y; y++) {
-          parts.push(String(world.getBlock(x, y, z)));
-        }
-      }
-    }
-    return parts.join(',');
-  }
 
   it('加载顺序不影响结果：先 A 后 B 与先 B 后 A 得到相同的两个区块', () => {
     const a = new World(plainsTerrain(SEED));

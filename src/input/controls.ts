@@ -138,6 +138,10 @@ export function installPlayerControls(
     // 背包键两头都要认：锁定着的时候按它开界面，界面开着的时候按它关界面。
     if (event.code === KEY_BINDINGS.inventory && (locked() || uiOpen())) {
       event.preventDefault();
+      // 按住不放时浏览器每几十毫秒补发一次 keydown。开合是切换型动作，连发会让界面
+      // 每个 tick 开一次关一次；移动、连锁键那些「按下就设成同一个值」的动作幂等，
+      // 所以只有切换型的这两处要挡。
+      if (event.repeat) return;
       target.toggleInventory();
       // 打开界面就把鼠标交还给页面，玩家拿它点格子。释放锁定顺带清掉按住的键与挖掘
       // 状态（见 onLockChange），所以这里不必再清一遍。
@@ -147,11 +151,15 @@ export function installPlayerControls(
 
     // 界面开着时 Esc 关掉它。指针锁定期间这颗键收不到——那时浏览器自己用它退出锁定。
     if (uiOpen() && event.code === INVENTORY_CLOSE_KEY) {
+      // 同样要挡连发，理由见上。
+      if (event.repeat) return;
       target.toggleInventory();
       return;
     }
 
-    // 界面开着时其余按键一概不算数：玩家在摆物品，不是在操作世界。
+    // 未锁定时其余按键一概不算数。界面开着的时候锁定已经交还，所以摆物品期间按 W
+    // 不会走路——不过让它作废的是这一条，而「界面模式下哪些输入作废」那条规则在核心里
+    // （`GameCore.step`）：即便这里漏过去了，核心那一侧也不会照着走。
     if (!locked()) return;
 
     // 数字键选快捷栏的一格。按住不放没有额外含义，所以不进 pressed 那套按下/松开的账。

@@ -1,6 +1,23 @@
 import { isSlotIndex } from './inventory';
 import { stackLimit, type ItemStack, type SlotStore } from './item';
 
+/**
+ * 光标上拿着的那一堆，以及它是从哪一格拿起来的。
+ *
+ * 两样合成一个而不是两个字段：光标空着的时候「从哪儿拿的」没有意义，合起来类型上就
+ * 没有「有东西却不知道从哪儿来」这种状态，也就不必写一段永远走不到的兜底。
+ */
+interface CursorHold {
+  readonly stack: ItemStack;
+  /**
+   * 拿起它的那一格。关闭界面时光标物品先回这一格。
+   *
+   * 记着它而不是一律走入包规则：玩家把第 20 格那一堆拿在手上按了背包键，东西回到第 20 格
+   * 才是他预期的结果，而入包规则会把它塞进下标最小的空格里。
+   */
+  readonly from: number;
+}
+
 /** 背包界面的只读视图。界面层读它画覆盖层。 */
 export interface InventoryScreenView {
   /** 界面开着没有。开着时核心处于界面模式（见 CONTEXT.md）。 */
@@ -18,14 +35,7 @@ export interface InventoryScreenView {
 export class InventoryScreen implements InventoryScreenView {
   private readonly slots: SlotStore;
   private isOpen = false;
-  private cursorStack: ItemStack | undefined;
-  /**
-   * 光标上这一堆是从哪一格拿起来的。关闭界面时它先回这一格。
-   *
-   * 记着它而不是一律走入包规则：玩家把第 20 格那一堆拿在手上按了 E，东西回到第 20 格
-   * 才是他预期的结果，而入包规则会把它塞进下标最小的空格里。
-   */
-  private pickedFrom: number | undefined;
+  private holding: CursorHold | undefined;
 
   constructor(slots: SlotStore) {
     this.slots = slots;
@@ -36,7 +46,7 @@ export class InventoryScreen implements InventoryScreenView {
   }
 
   get cursor(): ItemStack | undefined {
-    return this.cursorStack;
+    return this.holding?.stack;
   }
 
   /**
@@ -65,30 +75,31 @@ export class InventoryScreen implements InventoryScreenView {
     if (!isSlotIndex(index, this.slots.size)) return;
 
     const inSlot = this.slots.slot(index);
-    const cursor = this.cursorStack;
+    const holding = this.holding;
 
-    if (!cursor) {
+    if (!holding) {
       if (!inSlot) return;
-      this.cursorStack = inSlot;
-      this.pickedFrom = index;
+      this.holding = { stack: inSlot, from: index };
       this.slots.setSlot(index, undefined);
       return;
     }
 
-    // 异种要换手，`mergeInto` 表达不了这一种，单独一条。
+    const cursor = holding.stack;
+
+    // 异种要换手，`mergeInto` 表达不了这一种，单独一条。换来的那一堆是从这一格拿的，
+    // 所以「从哪儿拿的」跟着换。
     if (inSlot && inSlot.item !== cursor.item) {
       this.slots.setSlot(index, cursor);
-      this.cursorStack = inSlot;
-      this.pickedFrom = index;
+      this.holding = { stack: inSlot, from: index };
       return;
     }
 
     // 空格接下整堆，同种并到堆叠上限；那一格已经满了就一个都不动。
     const left = this.mergeInto(index, cursor);
     if (left === cursor.count) return;
-    this.cursorStack = left > 0 ? { item: cursor.item, count: left } : undefined;
-    // 光标空了，「从哪儿拿的」跟着失效；还有余量则仍要记着原来那一格。
-    if (left === 0) this.pickedFrom = undefined;
+    // 还有余量的话仍记着原来那一格：并了一部分不改变「这一堆是从哪儿拿的」。
+    this.holding =
+      left > 0 ? { stack: { item: cursor.item, count: left }, from: holding.from } : undefined;
   }
 
   /**
@@ -96,13 +107,12 @@ export class InventoryScreen implements InventoryScreenView {
    * 返回一格都放不下的那些，并把光标清空。
    */
   private putCursorBack(): ItemStack | undefined {
-    const stack = this.cursorStack;
-    const origin = this.pickedFrom;
-    this.cursorStack = undefined;
-    this.pickedFrom = undefined;
-    if (!stack) return undefined;
+    const holding = this.holding;
+    this.holding = undefined;
+    if (!holding) return undefined;
 
-    const left = origin === undefined ? stack.count : this.mergeInto(origin, stack);
+    const { stack, from } = holding;
+    const left = this.mergeInto(from, stack);
     if (left === 0) return undefined;
     const spare = this.slots.add({ item: stack.item, count: left });
     return spare > 0 ? { item: stack.item, count: spare } : undefined;

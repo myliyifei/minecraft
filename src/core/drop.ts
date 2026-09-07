@@ -116,6 +116,22 @@ export class Drops implements DropsView, DropSink {
     return this.list;
   }
 
+  /**
+   * 在某个位置所在的那一格里生成一个掉落物。
+   *
+   * 与 `spawnInBlock` 分开一个入口，因为实体的位置是小数（玩家脚底中心），而掉落物按格
+   * 生成——取整放在这里，调用方就不必替它算一遍。关掉背包时光标上一格都放不下的那些
+   * 东西走的是这条路。
+   */
+  spawnAt(stack: ItemStack, position: Vec3): void {
+    this.spawnInBlock(
+      stack,
+      Math.floor(position.x),
+      Math.floor(position.y),
+      Math.floor(position.z),
+    );
+  }
+
   spawnInBlock(stack: ItemStack, x: number, y: number, z: number): void {
     const id = this.nextId++;
     // 碰撞箱的中心对准那一格的中心，所以底面比格底高半个箱高。

@@ -63,6 +63,21 @@ describe('掉落物的生成', () => {
     expect(drop!.position.y).toBeCloseTo(FLAT_STAND_Y + 0.5 - DROP_SIZE / 2, 10);
   });
 
+  it('在某个位置生成的掉落物落在那个位置所在的一格里', () => {
+    // 玩家的位置是小数（脚底中心），掉落物却按格生成：取整这一步归掉落物，
+    // 调用方（关掉背包时把光标上放不下的东西扔出去）交的就是玩家位置
+    const { drops } = dropsOnFlatGround();
+    drops.spawnAt(ONE_DIRT, { x: -3.25, y: FLAT_STAND_Y + 0.8, z: 2.75 });
+
+    expect(drops.count).toBe(1);
+    const [drop] = drops.all();
+    expect(drop!.item).toBe(ItemType.Dirt);
+    // 落在 (−4, FLAT_STAND_Y, 2) 那一格的中心：负坐标也向下取整
+    expect(drop!.position.x).toBeCloseTo(-3.5, 10);
+    expect(drop!.position.z).toBeCloseTo(2.5, 10);
+    expect(drop!.position.y).toBeCloseTo(FLAT_STAND_Y + 0.5 - DROP_SIZE / 2, 10);
+  });
+
   it('每个掉落物有自己的编号，渲染层据此认得出哪个是哪个', () => {
     const { drops } = dropsOnFlatGround();
     drops.spawnInBlock(ONE_DIRT, 0, FLAT_STAND_Y, 0);

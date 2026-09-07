@@ -60,9 +60,17 @@ export class GameCore implements BlockEdit {
    * 状态的输入折成意图，等 tick 边界生效）。
    */
   private nextSlot = 0;
+  /*
+   * 下面三样是同一个 tick 里到达的一次性输入。折法各不相同，取决于「同一 tick 里来两下
+   * 是什么意思」——三者都在 tick 边界消费（ADR-0004）：
+   *
+   * - 放置折成一个布尔：一次点击放一块，两下也只放一块，与原版一致。
+   * - 背包开合异或抵消：一开一关，界面状态没有净变化。
+   * - 点格子排队重放：「拿起再放到别处」本来就是两下，合成一下就丢了一半意思。
+   */
   /** 这一 tick 里按过放置键没有。 */
   private placeQueued = false;
-  /** 这一 tick 里按过背包键没有。按两次相互抵消——一开一关，界面状态没变。 */
+  /** 这一 tick 里按过背包键没有。 */
   private toggleQueued = false;
   /** 这一 tick 里点过背包界面的哪几格，按点击顺序。 */
   private readonly slotClicks: number[] = [];
@@ -342,7 +350,6 @@ export class GameCore implements BlockEdit {
     if (!leftover) return;
     // 背包一格不剩、光标上还拿着东西时把它扔在玩家脚下那一格，与原版一样：界面一关
     // 就看不见的东西不能凭空消失。玩家挪出一格来就能捡回去。
-    const { x, y, z } = this.playerState.position;
-    this.dropsState.spawnInBlock(leftover, Math.floor(x), Math.floor(y), Math.floor(z));
+    this.dropsState.spawnAt(leftover, this.playerState.position);
   }
 }

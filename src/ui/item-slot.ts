@@ -3,12 +3,16 @@ import { ATLAS_COLS, ATLAS_PATH, ATLAS_ROWS, ITEM_TILES, tileCell } from '../ren
 import { ITEM_NAMES } from './strings';
 
 /**
- * 一格物品的 DOM，加上上次画上去的内容。
+ * 用这套格子的是谁：快捷栏，还是背包界面。也就是 class 名的 BEM 块名。
  *
- * 快捷栏与背包界面共用这一套格子：两处画的是同一批 36 格里的东西，图标怎么取、数量
- * 什么时候写数字这些规则没道理各写一遍。class 名各自成套（`hotbar__` / `invscreen__`），
- * 尺寸与排布因此仍由各自的样式说了算。
+ * 两处共用同一套格子：画的是同一批 36 格里的东西，图标怎么取、数量什么时候写数字这些
+ * 规则没道理各写一遍。class 名各自成套（`hotbar__` / `invscreen__`），尺寸与排布因此仍
+ * 由各自的样式说了算。写成联合类型而不是 `string`：拼错一个块名，样式表里一条都对不上，
+ * 而那种错查起来只能靠肉眼。
  */
+export type SlotBlock = 'hotbar' | 'invscreen';
+
+/** 一格物品的 DOM，加上上次画上去的内容。 */
 export interface SlotCell {
   readonly slot: HTMLElement;
   readonly icon: HTMLElement;
@@ -31,7 +35,11 @@ export function applyAtlasGrid(root: HTMLElement): void {
  * 造一格：格子 + 图标 + 数量，追加进 `parent`。
  * `block` 是 BEM 的块名（`hotbar` 或 `invscreen`），`index` 是背包里的格号。
  */
-export function buildSlotCell(parent: HTMLElement, block: string, index: number): SlotCell {
+export function buildSlotCell(
+  parent: HTMLElement,
+  block: SlotBlock,
+  index: number,
+): SlotCell {
   const cell = buildItemBox(parent, block, `${block}__slot`);
   cell.slot.setAttribute('role', 'listitem');
   // 格号进 data 属性：端到端测试与点击处理都据此认出这是第几格。
@@ -45,7 +53,11 @@ export function buildSlotCell(parent: HTMLElement, block: string, index: number)
  * 与 `buildSlotCell` 分开一层，因为不是每一块都是背包里的一格——光标物品也是这么一块，
  * 但它没有格号，也不该被读屏软件当成列表项报出来。
  */
-export function buildItemBox(parent: HTMLElement, block: string, className: string): SlotCell {
+export function buildItemBox(
+  parent: HTMLElement,
+  block: SlotBlock,
+  className: string,
+): SlotCell {
   const slot = document.createElement('div');
   slot.className = className;
 
@@ -71,7 +83,7 @@ export function refreshSlot(cell: SlotCell, stack: ItemStack | undefined): void 
 }
 
 /** 把一格画成某一堆物品的样子；`undefined` 就画成空格。 */
-export function paintSlot(cell: SlotCell, stack: ItemStack | undefined): void {
+function paintSlot(cell: SlotCell, stack: ItemStack | undefined): void {
   if (!stack) {
     delete cell.slot.dataset.item;
     cell.slot.removeAttribute('title');
@@ -92,7 +104,7 @@ export function paintSlot(cell: SlotCell, stack: ItemStack | undefined): void {
 }
 
 /** 两堆物品的种类与数量都一样吗。 */
-export function sameStack(a: ItemStack | undefined, b: ItemStack | undefined): boolean {
+function sameStack(a: ItemStack | undefined, b: ItemStack | undefined): boolean {
   if (!a || !b) return a === b;
   return a.item === b.item && a.count === b.count;
 }

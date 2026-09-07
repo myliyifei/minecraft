@@ -1507,6 +1507,27 @@ test('按 E 打开背包界面，36 格与快捷栏对应，再按 E 关闭', as
   expect(errors).toEqual([]);
 });
 
+test('按住背包键不放，界面不会反复开关', async ({ page }) => {
+  await grabPointer(page);
+  const screen = page.locator('#inventory-screen');
+  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await expect(screen).toBeVisible();
+
+  // 按住不放，浏览器每几十毫秒补发一次 keydown，带的是 repeat: true。切换型的键必须把
+  // 这些挡掉，否则界面每个 tick 开一次关一次。Playwright 的 keyboard.down 不模拟连发，
+  // 所以这里合成事件——投的是同一个监听器。每发之间等过一个 tick（50ms），
+  // 挡不住的话第一发就把界面关了。
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate(
+      (code) => window.dispatchEvent(new KeyboardEvent('keydown', { code, repeat: true })),
+      KEY_BINDINGS.inventory,
+    );
+    await page.waitForTimeout(60);
+  }
+  await expect(screen).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('背包界面开着时按 Esc 关掉它', async ({ page }) => {
   await grabPointer(page);
   const screen = page.locator('#inventory-screen');

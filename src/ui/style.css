@@ -20,6 +20,10 @@
   --tile: 16px;
   --ground: calc(var(--tile) * 8);
 
+  /* 一格物品的边长与其中图标的边长。快捷栏与背包界面同一档尺寸，某处要不一样在那处覆盖。 */
+  --slot-cell: calc(var(--tile) * 2.5);
+  --slot-icon: calc(var(--tile) * 2);
+
   --font-ui: system-ui, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
@@ -137,8 +141,13 @@ body {
   pointer-events: none;
 }
 
-/* display: grid 会盖掉 hidden 属性自带的 display: none，所以显式写一遍。 */
-.hud[hidden] {
+/*
+ * 藏起来的那几处：JS 切的是 hidden 属性，而这些元素都显式设了 display（grid/flex），
+ * 那会盖掉 hidden 自带的 display: none，所以在这里一并写回来。
+ */
+.hud[hidden],
+.invscreen[hidden],
+.invscreen__cursor[hidden] {
   display: none;
 }
 
@@ -179,9 +188,6 @@ body {
 
 /* 快捷栏：一排格子，格子边长与间距都是 --tile 的倍数，与加载屏同一套节奏。 */
 .hotbar {
-  --slot-cell: calc(var(--tile) * 2.5);
-  --slot-icon: calc(var(--tile) * 2);
-
   display: flex;
   gap: 2px;
   padding: 2px;
@@ -258,20 +264,12 @@ body {
  * 一眼看得出。
  */
 .invscreen {
-  --slot-cell: calc(var(--tile) * 2.5);
-  --slot-icon: calc(var(--tile) * 2);
-
   position: fixed;
   inset: 0;
   display: grid;
   place-items: center;
   background: rgb(0 0 0 / 55%);
   font-family: var(--font-ui);
-}
-
-/* display: grid 会盖掉 hidden 属性自带的 display: none，所以显式写一遍。 */
-.invscreen[hidden] {
-  display: none;
 }
 
 /* 面板：标题在上，储物格与快捷栏两片格子在下，间距仍是 --tile 的倍数。 */
@@ -323,8 +321,4 @@ body {
   top: var(--cursor-y, 50vh);
   transform: translate(-50%, -50%);
   pointer-events: none;
-}
-
-.invscreen__cursor[hidden] {
-  display: none;
 }

@@ -599,6 +599,82 @@ test('锁定鼠标后按住左键才挖，松开就停', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+/** 端到端测试自己砌的那根树干有几格：多到预览一眼看得出不止一格，又不必等太久。 */
+const CHAIN_TRUNK_HEIGHT = 5;
+
+test('按住连锁键对准树干，画面上出现一圈连锁预览轮廓', async ({ page }) => {
+  await waitForFullViewDistance(page);
+  await grabPointer(page);
+  // 连锁键与左键都走真实事件：验的就是「按住 AltLeft 再按左键」这条线接上了没有
+  await page.keyboard.down(KEY_BINDINGS.chainMining);
+  await page.mouse.down();
+
+  // **对准要在按下之后**：指针锁定下 Playwright 的 mouse.down 会连带投一发大位移的
+  // mousemove，视角当场被甩到别处。整段跑在一次同步的 evaluate 里，游戏循环插不进来。
+  const chained = await page.evaluate(
+    ({ pitch, log, trunkHeight }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      /** 偏航归零，俯仰转到绝对角度上。 */
+      const look = (to: number): void => core.turn(-core.player.yaw, to - core.player.pitch);
+
+      // 先抬头看天让挖掘状态归零：按下左键与这一句之间游戏循环仍在推进 tick，不清掉的话
+      // 下面那一 tick 就不是「开始挖掘」的那一 tick，而连锁只在那一 tick 判定。
+      look(pitch);
+      core.tick();
+
+      // 出生点那一带不长树（OAK_SPAWN_CLEARANCE），自己往脚下砌一根原木树干
+      const x = Math.floor(core.player.position.x);
+      const z = Math.floor(core.player.position.z);
+      const topY = Math.floor(core.player.position.y) - 1;
+      const cells: Array<{ x: number; y: number; z: number }> = [];
+      for (let i = 0; i < trunkHeight; i++) {
+        cells.push({ x, y: topY - i, z });
+        core.setBlock(x, topY - i, z, log);
+      }
+
+      // 低头对准树干最上面那块：这一 tick 开始挖，连锁在这里判定
+      look(-pitch);
+      core.tick();
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+
+      return {
+        cells,
+        corePreview: [...core.mining.chainPreview],
+        preview: renderer.chainPreview,
+        selection: renderer.selection,
+      };
+    },
+    { pitch: MAX_PITCH, log: BlockType.OakLog, trunkHeight: CHAIN_TRUNK_HEIGHT },
+  );
+
+  // 松开连锁键（真实 keyup）：预览随即从画面上消失，接着挖的是单块
+  await page.keyboard.up(KEY_BINDINGS.chainMining);
+  const released = await page.evaluate(() => {
+    const { core, renderer } = window.__VOXEL__!;
+    core.tick();
+    renderer.render(1);
+    return {
+      corePreview: core.mining.chainPreview.length,
+      preview: renderer.chainPreview.blocks,
+    };
+  });
+  await page.mouse.up();
+
+  // 整根树干都进了连锁，画面上一格一个轮廓，顺序与核心报的一致
+  expect(chained.cells).toHaveLength(CHAIN_TRUNK_HEIGHT);
+  expect(chained.corePreview).toEqual(chained.cells);
+  expect(chained.preview.blocks).toEqual(chained.cells);
+  // 选框只套着对准的那一块，预览比它多出下面那几块
+  expect(chained.selection.target).toEqual(chained.cells[0]);
+  // 两圈线颜色不同：「这一下挖哪块」与「这一下会碎哪些」在画面上分得开
+  expect(chained.preview.color).not.toBe(chained.selection.color);
+
+  expect(released.corePreview).toBe(0);
+  expect(released.preview).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test('屏幕底部有 9 格快捷栏，开局全是空的', async ({ page }) => {
   const hotbar = page.locator('#hotbar');
   await expect(hotbar).toBeVisible();

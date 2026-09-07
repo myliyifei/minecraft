@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
+import { CHAIN_MINING_LIMIT } from '../../src/core/chain-mining';
 import type { DropSink } from '../../src/core/drop';
 import { ItemType, type ItemStack } from '../../src/core/item';
-import { Mining, type AimView } from '../../src/core/mining';
+import { Mining, type AimView, type MiningInput } from '../../src/core/mining';
 import { PLAYER_REACH } from '../../src/core/player';
 import type { Vec3 } from '../../src/core/vec3';
 import type { XpOrbSink } from '../../src/core/xp-orb';
@@ -96,10 +97,28 @@ function miningTowards(block: BlockType): {
   };
 }
 
-/** 按住挖掘键推进 n 个 tick。 */
-function hold(mining: Mining, ticks: number): void {
-  for (let i = 0; i < ticks; i++) mining.step(true);
+/** 只按挖掘键。 */
+const SINGLE: MiningInput = { held: true, chain: false };
+
+/** 挖掘键与连锁键都按着。 */
+const CHAINED: MiningInput = { held: true, chain: true };
+
+/** 两个键都松开。 */
+const RELEASED: MiningInput = { held: false, chain: false };
+
+/** 按住这套输入推进 n 个 tick，默认只按挖掘键。 */
+function hold(mining: Mining, ticks: number, input: MiningInput = SINGLE): void {
+  for (let i = 0; i < ticks; i++) mining.step(input);
 }
+
+/**
+ * 原木挖满要多少 tick。连锁的耗时与它相同。
+ *
+ * 写死 60 而不是调 `miningTicks`：这个文件就是耗时的断言处（见上面的 `TIMINGS`），
+ * 拿被测函数算出期望值等于什么都没验。别处（tests/core/game.test.ts）测的是接线，
+ * 那里从耗时表取才对。
+ */
+const LOG_TICKS = 60;
 
 describe('挖掘耗时按硬度表', () => {
   /** 空手挖掉一块要多少 tick，来自 issue #7 的验收条件。 */
@@ -176,7 +195,7 @@ describe('挖掘进度绑定目标方块', () => {
     hold(mining, 14);
     expect(mining.progress).toBeCloseTo(14 / 15, 10);
 
-    mining.step(false);
+    mining.step(RELEASED);
     expect(mining.progress).toBe(0);
 
     hold(mining, 14);
@@ -187,7 +206,7 @@ describe('挖掘进度绑定目标方块', () => {
 
   it('只是瞄着不按键，进度一直是 0', () => {
     const { world, mining } = miningTowards(BlockType.Dirt);
-    for (let i = 0; i < 100; i++) mining.step(false);
+    for (let i = 0; i < 100; i++) mining.step(RELEASED);
     expect(mining.progress).toBe(0);
     expect(world.getBlock(...TARGET)).toBe(BlockType.Dirt);
   });
@@ -342,7 +361,7 @@ describe('挖掘的目标查询', () => {
     // 还没 tick 过，什么都没瞄
     expect(mining.target).toBeUndefined();
 
-    mining.step(false);
+    mining.step(RELEASED);
     expect(mining.target).toEqual({
       x: 3,
       y: LAYER_Y,
@@ -364,5 +383,213 @@ describe('挖掘的目标查询', () => {
 
     hold(mining, 15);
     expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+  });
+});
+
+/** 一格的三元坐标换成 Vec3，好跟预览报出来的坐标对照。 */
+function toVec([x, y, z]: BlockCoord): Vec3 {
+  return { x, y, z };
+}
+
+/** 从目标那一格往上数 height 格，自下而上。连锁挖掘那一节拿它当树干。 */
+function trunkCells(height: number): BlockCoord[] {
+  return Array.from({ length: height }, (_, i) => [TARGET[0], TARGET[1] + i, TARGET[2]]);
+}
+
+/** 盯着一根 height 格高的原木树干最下面那块的挖掘状态机。 */
+function miningTrunk(height: number): {
+  world: World;
+  cells: BlockCoord[];
+  mining: Mining;
+  spawned: SpawnedDrop[];
+  experience: SpawnedXp[];
+} {
+  const cells = trunkCells(height);
+  const logs = cells.map((cell) => [cell, BlockType.OakLog] as [BlockCoord, BlockType]);
+  const world = worldWith(...logs);
+  const drops = dropLog();
+  const xp = xpLog();
+  return {
+    world,
+    cells,
+    mining: new Mining(world, turntable().aim, drops.sink, xp.sink),
+    spawned: drops.spawned,
+    experience: xp.spawned,
+  };
+}
+
+/** 树干上还剩下的那些格。 */
+function remaining(world: World, cells: BlockCoord[]): BlockCoord[] {
+  return cells.filter((cell) => world.getBlock(...cell) !== BlockType.Air);
+}
+
+describe('连锁挖掘一次挖掉一整根树干', () => {
+  it('按住连锁键挖底部一块，5 块全空、掉出 5 个掉落物与 5 个经验球', () => {
+    const { world, cells, mining, spawned, experience } = miningTrunk(5);
+
+    hold(mining, LOG_TICKS, CHAINED);
+
+    expect(remaining(world, cells)).toEqual([]);
+    // 每块各掉一个、各给一份经验，落点是它自己那一格
+    expect(spawned).toEqual(
+      cells.map((at) => ({ stack: { item: ItemType.OakLog, count: 1 }, at })),
+    );
+    expect(experience).toEqual(cells.map((at) => ({ amount: 6, at })));
+  });
+
+  it('连锁耗时等于挖单块：第 59 tick 一块没少，第 60 tick 全没了', () => {
+    const { world, cells, mining } = miningTrunk(5);
+
+    hold(mining, LOG_TICKS - 1, CHAINED);
+    expect(remaining(world, cells)).toEqual(cells);
+    expect(mining.progress).toBeCloseTo((LOG_TICKS - 1) / LOG_TICKS, 10);
+
+    hold(mining, 1, CHAINED);
+    expect(remaining(world, cells)).toEqual([]);
+  });
+
+  it('不按连锁键就只挖对准的那一块', () => {
+    const { world, cells, mining, spawned } = miningTrunk(5);
+
+    hold(mining, LOG_TICKS);
+
+    expect(remaining(world, cells)).toEqual(cells.slice(1));
+    expect(spawned).toHaveLength(1);
+    expect(mining.chainPreview).toEqual([]);
+  });
+
+  it('仅在角上碰着的同种方块跟着碎，紧挨着的异种方块不受影响', () => {
+    const corner: BlockCoord = [TARGET[0] + 1, TARGET[1] + 1, TARGET[2] + 1];
+    const neighbour: BlockCoord = [TARGET[0] + 1, TARGET[1], TARGET[2]];
+    const world = worldWith(
+      [TARGET, BlockType.OakLog],
+      [corner, BlockType.OakLog],
+      [neighbour, BlockType.Dirt],
+    );
+    const mining = new Mining(world, turntable().aim, IGNORED_DROPS, IGNORED_XP);
+
+    hold(mining, LOG_TICKS, CHAINED);
+
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(world.getBlock(...corner)).toBe(BlockType.Air);
+    expect(world.getBlock(...neighbour)).toBe(BlockType.Dirt);
+  });
+
+  it('挖不动的基岩进不了连锁，预览是空的', () => {
+    const { world, mining } = miningTowards(BlockType.Bedrock);
+    hold(mining, 1000, CHAINED);
+    expect(mining.chainPreview).toEqual([]);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Bedrock);
+  });
+});
+
+describe('连锁挖掘的上限', () => {
+  it('70 块连通的原木只挖掉 64 块，剩下的是离起点最远的那 6 块', () => {
+    const { world, cells, mining, spawned, experience } = miningTrunk(70);
+
+    hold(mining, LOG_TICKS, CHAINED);
+
+    expect(remaining(world, cells)).toEqual(cells.slice(CHAIN_MINING_LIMIT));
+    expect(spawned).toHaveLength(CHAIN_MINING_LIMIT);
+    expect(experience).toHaveLength(CHAIN_MINING_LIMIT);
+  });
+});
+
+describe('连锁状态在开始挖掘那一 tick 判定', () => {
+  it('中途松开连锁键：只挖单块，已积累的进度不丢', () => {
+    const { world, cells, mining, spawned } = miningTrunk(5);
+
+    hold(mining, 30, CHAINED);
+    expect(mining.chainPreview).toHaveLength(5);
+
+    // 松开连锁键，预览随即消失
+    hold(mining, 1);
+    expect(mining.chainPreview).toEqual([]);
+
+    // 进度留着：这一块一共只挖了 60 tick 就碎，而且只碎它自己
+    hold(mining, LOG_TICKS - 32);
+    expect(remaining(world, cells)).toEqual(cells);
+    hold(mining, 1);
+    expect(remaining(world, cells)).toEqual(cells.slice(1));
+    expect(spawned).toHaveLength(1);
+  });
+
+  it('松开连锁键之后再按回来也不算数', () => {
+    const { world, cells, mining } = miningTrunk(5);
+
+    hold(mining, 30, CHAINED);
+    // 松开一 tick 又按回来
+    hold(mining, 1);
+    hold(mining, LOG_TICKS - 32, CHAINED);
+    expect(mining.chainPreview).toEqual([]);
+
+    hold(mining, 1, CHAINED);
+    expect(remaining(world, cells)).toEqual(cells.slice(1));
+  });
+
+  it('开始挖掘之后再按连锁键不进入连锁', () => {
+    const { world, cells, mining } = miningTrunk(5);
+
+    // 第一 tick 没按连锁键
+    hold(mining, 1);
+    hold(mining, LOG_TICKS - 1, CHAINED);
+
+    expect(mining.chainPreview).toEqual([]);
+    expect(remaining(world, cells)).toEqual(cells.slice(1));
+  });
+
+  it('松开挖掘键再按下时重新判定：这次按着连锁键，整根树干一起碎', () => {
+    const { world, cells, mining } = miningTrunk(5);
+
+    hold(mining, 30);
+    mining.step(RELEASED);
+    hold(mining, LOG_TICKS, CHAINED);
+
+    expect(remaining(world, cells)).toEqual([]);
+  });
+});
+
+describe('连锁预览', () => {
+  it('每一 tick 都查得到，而且与最终挖掉的那批方块一致', () => {
+    const { world, cells, mining } = miningTrunk(5);
+    const expected = cells.map(toVec);
+
+    const previews: Vec3[][] = [];
+    for (let i = 0; i < LOG_TICKS; i++) {
+      mining.step(CHAINED);
+      previews.push(mining.chainPreview.map(({ x, y, z }) => ({ x, y, z })));
+    }
+
+    // 碎之前的每一 tick 都报同一批方块，起点也在里面
+    for (const preview of previews.slice(0, -1)) expect(preview).toEqual(expected);
+    // 挖穿那一 tick 之后没有预览了：那些方块已经不在世界里
+    expect(previews.at(-1)).toEqual([]);
+    expect(remaining(world, cells)).toEqual([]);
+  });
+
+  it('目标一换就重新算：转向另一根树干，预览跟着换', () => {
+    const other: BlockCoord = [0, LAYER_Y, 3];
+    const world = worldWith(
+      ...trunkCells(3).map((cell) => [cell, BlockType.OakLog] as [BlockCoord, BlockType]),
+      [other, BlockType.OakLog],
+    );
+    const table = turntable();
+    const mining = new Mining(world, table.aim, IGNORED_DROPS, IGNORED_XP);
+
+    hold(mining, 1, CHAINED);
+    expect(mining.chainPreview).toEqual(trunkCells(3).map(toVec));
+
+    table.look(LOOK_Z);
+    hold(mining, 1, CHAINED);
+    expect(mining.chainPreview).toEqual([toVec(other)]);
+  });
+
+  it('松开挖掘键预览就没了', () => {
+    const { mining } = miningTrunk(5);
+    hold(mining, 10, CHAINED);
+    expect(mining.chainPreview).toHaveLength(5);
+
+    mining.step(RELEASED);
+    expect(mining.chainPreview).toEqual([]);
   });
 });

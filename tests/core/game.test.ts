@@ -625,6 +625,103 @@ describe('GameCore 的空手挖掘', () => {
   });
 });
 
+describe('GameCore 的连锁挖掘', () => {
+  /** 脚下那一列往下摆几格原木。整根一起碎，玩家跟着掉进坑里。 */
+  const TRUNK_HEIGHT = 5;
+
+  /** 原木挖满要多少 tick。连锁的耗时与它相同，耗时表本身由别处断言。 */
+  const LOG_TICKS = miningTicks(BlockType.OakLog);
+
+  /** 掉落物落定并被吸走、经验球飞完全程要的 tick 数：玩家就掉在这堆东西里。 */
+  const SETTLE_TICKS = PICKUP_DELAY_TICKS + 3 * TICK_RATE;
+
+  /** 脚下那一列换成一根原木树干，再低头对准最上面那块。返回自上而下的那些格。 */
+  function trunkUnderfoot(): { core: GameCore; cells: Vec3[] } {
+    const core = coreOnFlatGround();
+    const cells = Array.from({ length: TRUNK_HEIGHT }, (_, i) => ({
+      x: 0,
+      y: FLAT_GROUND_Y - i,
+      z: 0,
+    }));
+    for (const { x, y, z } of cells) core.setBlock(x, y, z, BlockType.OakLog);
+    core.turn(0, -MAX_PITCH);
+    return { core, cells };
+  }
+
+  /** 树干上还剩下的那些格。 */
+  function remaining(core: GameCore, cells: Vec3[]): Vec3[] {
+    return cells.filter(({ x, y, z }) => core.getBlock(x, y, z) !== BlockType.Air);
+  }
+
+  it('按住连锁键开始挖，一整根树干一起碎，每块各掉一份、各给一份经验', () => {
+    const { core, cells } = trunkUnderfoot();
+    core.setMining(true);
+    core.setChainMining(true);
+
+    core.tick(LOG_TICKS - 1);
+    expect(remaining(core, cells)).toEqual(cells);
+
+    core.tick(1);
+    expect(remaining(core, cells)).toEqual([]);
+    expect(core.drops.count).toBe(TRUNK_HEIGHT);
+    expect(core.xpOrbs.count).toBe(TRUNK_HEIGHT);
+
+    // 掉落物被吸进背包并成一堆，经验球的经验全并进累计经验值
+    core.setMining(false);
+    core.tick(SETTLE_TICKS);
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.OakLog, count: TRUNK_HEIGHT });
+    expect(core.experience.total).toBe(TRUNK_HEIGHT * 6);
+  });
+
+  it('不按连锁键只挖对准的那一块', () => {
+    const { core, cells } = trunkUnderfoot();
+    core.setMining(true);
+    core.tick(LOG_TICKS);
+
+    expect(remaining(core, cells)).toEqual(cells.slice(1));
+    expect(core.drops.count).toBe(1);
+  });
+
+  it('连锁键下一个 tick 才生效（ADR-0004），预览随即查得到', () => {
+    const { core, cells } = trunkUnderfoot();
+    core.setMining(true);
+    core.setChainMining(true);
+    // 还没 tick，什么都没瞄
+    expect(core.mining.chainPreview).toEqual([]);
+
+    core.tick();
+    expect(core.mining.chainPreview).toEqual(cells);
+  });
+
+  it('松开连锁键预览就没了，进度留着接着挖单块', () => {
+    const { core, cells } = trunkUnderfoot();
+    core.setMining(true);
+    core.setChainMining(true);
+    core.tick(LOG_TICKS - 2);
+
+    core.setChainMining(false);
+    core.tick(1);
+    expect(core.mining.chainPreview).toEqual([]);
+    expect(remaining(core, cells)).toEqual(cells);
+
+    core.tick(1);
+    expect(remaining(core, cells)).toEqual(cells.slice(1));
+  });
+
+  it('挖掉的每一格都出现在「变过的方块」里', () => {
+    const { core, cells } = trunkUnderfoot();
+    core.setMining(true);
+    core.setChainMining(true);
+    core.tick(LOG_TICKS);
+
+    // 顺序是连锁的发现顺序，这里只关心「一格都没漏、也没多」
+    const changed = core.takeChangedBlocks();
+    expect(changed).toHaveLength(TRUNK_HEIGHT);
+    expect(changed).toEqual(expect.arrayContaining(cells));
+    expect(core.takeChangedBlocks()).toEqual([]);
+  });
+});
+
 describe('GameCore 的快捷栏选中格', () => {
   it('新世界选中第一格', () => {
     const core = coreOnFlatGround();

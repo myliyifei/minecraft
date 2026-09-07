@@ -3,6 +3,7 @@ import { IDLE_INTENT, type MoveIntent } from '../core/player';
 import {
   ACTION_BY_CODE,
   HOTBAR_SLOT_BY_CODE,
+  KEY_BINDINGS,
   MOUSE_BINDINGS,
   MOVE_ACTIONS,
   type MoveAction,
@@ -18,7 +19,13 @@ export const MOUSE_SENSITIVITY = 0.0022;
 /** 输入适配器要用到的核心指令。写成窄接口，接线接错了编译期就报。 */
 export type PlayerInputTarget = Pick<
   GameCore,
-  'setMoveIntent' | 'turn' | 'setMining' | 'place' | 'selectHotbarSlot' | 'scrollHotbar'
+  | 'setMoveIntent'
+  | 'turn'
+  | 'setMining'
+  | 'setChainMining'
+  | 'place'
+  | 'selectHotbarSlot'
+  | 'scrollHotbar'
 >;
 
 /**
@@ -64,6 +71,9 @@ export function installPlayerControls(
     pressed.clear();
     sendIntent();
     target.setMining(false);
+    // 连锁键也要放掉：Esc 之后它的 keyup 未必还投得到页面上，卡住的话下一次开始挖掘
+    // 会莫名其妙地连锁。
+    target.setChainMining(false);
   };
 
   const onMouseDown = (event: MouseEvent): void => {
@@ -119,6 +129,15 @@ export function installPlayerControls(
       return;
     }
 
+    // 连锁键不进 pressed 那套账：它不是移动意图的一部分，核心那边是独立的一个开关。
+    // 按住不放连发的 keydown 反复设同一个值，没有副作用。
+    if (event.code === KEY_BINDINGS.chainMining) {
+      // Alt 默认会点亮浏览器的菜单栏并抢走后面的按键，绑过的键一律拦下。
+      event.preventDefault();
+      target.setChainMining(true);
+      return;
+    }
+
     const action = ACTION_BY_CODE.get(event.code);
     if (action === undefined) return;
     // 空格默认滚动页面，绑过的键一律拦下。
@@ -130,8 +149,12 @@ export function installPlayerControls(
   };
 
   const onKeyUp = (event: KeyboardEvent): void => {
-    const action = ACTION_BY_CODE.get(event.code);
     // 松键一律处理，哪怕这期间锁定丢了，否则按键会卡住。
+    if (event.code === KEY_BINDINGS.chainMining) {
+      target.setChainMining(false);
+      return;
+    }
+    const action = ACTION_BY_CODE.get(event.code);
     if (action === undefined || !pressed.delete(action)) return;
     sendIntent();
   };

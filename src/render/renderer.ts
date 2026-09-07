@@ -60,6 +60,23 @@ function addFixedLights(scene: THREE.Scene): void {
 const BLOCK_SHELL = 1.004;
 
 /**
+ * 连锁预览轮廓的外壳（方块）：比选框那一层再往外一点。
+ *
+ * 连锁集合含目标本身，所以目标那一格上两个线框都在。差开这一点，它们就不共面，
+ * 既不互相闪烁，画面上也看得出是套了两层——外面那圈亮线说的是「这一下会碎掉哪些」。
+ */
+const CHAIN_PREVIEW_SHELL = 1.03;
+
+/** 选框线的颜色：黑。它回答的是「这一下挖的是哪一块」。 */
+const SELECTION_COLOR = 0x000000;
+
+/**
+ * 连锁预览轮廓线的颜色：亮黄。
+ * 与选框的黑线分得开——两者回答的是两件事，长得一样玩家就分不出这一下会碎掉多少。
+ */
+const CHAIN_PREVIEW_COLOR = 0xffd83b;
+
+/**
  * 加载像素风贴图。必须用 Nearest 过滤且不生成 mipmap，否则贴图会被糊掉、
  * 相邻格之间还会互相渗色。
  */
@@ -103,6 +120,19 @@ export interface SelectionView {
   readonly target?: Vec3;
   /** 裂纹阶（0 到 CRACK_STAGES−1），没画裂纹时 undefined。 */
   readonly crackStage?: number;
+  /** 选框线的颜色。端到端测试拿它与连锁预览的颜色比，验两者在画面上分得开。 */
+  readonly color: number;
+}
+
+/**
+ * 场景里那圈连锁预览轮廓现在是什么样（见 CONTEXT.md 的「连锁预览」）。
+ * 与 `SelectionView` 一样直接从场景对象上读，端到端测试验的是真摆进场景的东西。
+ */
+export interface ChainPreviewView {
+  /** 轮廓套在哪些方块上（方块坐标），顺序与核心报的连锁集合一致。不在连锁时是空数组。 */
+  readonly blocks: Vec3[];
+  /** 轮廓线的颜色。端到端测试拿它与选框的颜色比，验两者在画面上分得开。 */
+  readonly color: number;
 }
 
 /**
@@ -157,16 +187,28 @@ export class WorldRenderer {
   private readonly meshes = new Map<number, ChunkMesh>();
   /** 套在目标方块外的线框。 */
   private readonly selectionBox: THREE.LineSegments;
+  private readonly selectionMaterial: THREE.LineBasicMaterial;
   /** 贴在目标方块表面的裂纹。 */
   private readonly crackBox: THREE.Mesh;
   private readonly crackTexture: THREE.Texture;
   /**
+   * 连锁预览的那些线框，一格一个。
+   *
+   * 一个池子，只增不减：上限是 `CHAIN_MINING_LIMIT`（64）个线框，全建出来也就那么多，
+   * 用不上的置为不可见。每次进出连锁都新建又销毁的话，玩家一按一松就是一轮几何体分配。
+   */
+  private readonly chainPreviewBoxes: THREE.LineSegments[] = [];
+  /** 连锁预览的轮廓共用的几何体与材质：64 圈长得一样，各建一份就够。 */
+  private readonly chainPreviewGeometry: THREE.BufferGeometry;
+  private readonly chainPreviewMaterial: THREE.LineBasicMaterial;
+  /**
    * 场景里的掉落物小方块，按核心给的编号索引。
    *
    * 一个掉落物一个 `Mesh`，没有合并成 InstancedMesh：视距内同时存在的掉落物是几个到
-   * 几十个的量级（挖出来就被捡走），而每个还要各自转、各自漂浮，为省下那点绘制调用
-   * 去写按物品分组、逐实例更新矩阵那一套不值得。真到了几百个（比如连锁挖掘一次挖 64 块，
-   * 见 #11）再改——这条与整套实体同步的取舍都记在 ADR-0007 里。
+   * 几十个的量级，而每个还要各自转、各自漂浮，为省下那点绘制调用去写按物品分组、
+   * 逐实例更新矩阵那一套不值得。连锁挖掘一次最多挖 64 块（`CHAIN_MINING_LIMIT`），
+   * 那也就是 64 个小方块，而且几十 tick 内就被捡光。真到了几百个再改——这条与整套
+   * 实体同步的取舍都记在 ADR-0007 里。
    */
   private readonly dropMeshes = new Map<number, THREE.Mesh>();
   /** 每种物品的小方块几何体：边长 1，用的人各自缩放。建一次就一直共用。 */
@@ -230,12 +272,23 @@ export class WorldRenderer {
     this.renderer.autoClear = false;
 
     const shell = new THREE.BoxGeometry(BLOCK_SHELL, BLOCK_SHELL, BLOCK_SHELL);
+    this.selectionMaterial = new THREE.LineBasicMaterial({
+      color: SELECTION_COLOR,
+      transparent: true,
+      opacity: 0.55,
+    });
     this.selectionBox = new THREE.LineSegments(
       new THREE.EdgesGeometry(shell),
-      new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.55 }),
+      this.selectionMaterial,
     );
     this.selectionBox.visible = false;
     this.scene.add(this.selectionBox);
+
+    // 预览轮廓是不透明的亮黄线，选框是半透明的黑线：两圈套在同一格上时也分得出。
+    this.chainPreviewGeometry = new THREE.EdgesGeometry(
+      new THREE.BoxGeometry(CHAIN_PREVIEW_SHELL, CHAIN_PREVIEW_SHELL, CHAIN_PREVIEW_SHELL),
+    );
+    this.chainPreviewMaterial = new THREE.LineBasicMaterial({ color: CHAIN_PREVIEW_COLOR });
 
     // 裂纹条横排了 CRACK_STAGES 张图，取哪一张靠 uv 偏移；这里先把采样窗口收成一格宽。
     this.crackTexture = crackTexture;
@@ -274,14 +327,24 @@ export class WorldRenderer {
 
   /** 上一帧画出来的选框与裂纹。 */
   get selection(): SelectionView {
-    if (!this.selectionBox.visible) return {};
-    const { x, y, z } = this.selectionBox.position;
+    const color = this.selectionMaterial.color.getHex();
+    if (!this.selectionBox.visible) return { color };
     return {
-      // 两个外壳都摆在方块中心，方块坐标是它的最小角。
-      target: { x: x - 0.5, y: y - 0.5, z: z - 0.5 },
+      target: blockOf(this.selectionBox.position),
       crackStage: this.crackBox.visible
         ? Math.round(this.crackTexture.offset.x * CRACK_STAGES)
         : undefined,
+      color,
+    };
+  }
+
+  /** 上一帧画出来的连锁预览轮廓。 */
+  get chainPreview(): ChainPreviewView {
+    return {
+      blocks: this.chainPreviewBoxes
+        .filter((box) => box.visible)
+        .map((box) => blockOf(box.position)),
+      color: this.chainPreviewMaterial.color.getHex(),
     };
   }
 
@@ -394,6 +457,7 @@ export class WorldRenderer {
   render(alpha = 1): void {
     this.updateCamera(alpha);
     this.updateSelection();
+    this.updateChainPreview();
     this.updateDrops(alpha);
     this.updateXpOrbs(alpha);
     this.updateHeldItem();
@@ -562,6 +626,27 @@ export class WorldRenderer {
   }
 
   /**
+   * 把连锁预览的轮廓摆到那些会一起碎掉的方块上（见 CONTEXT.md 的「连锁预览」）。
+   *
+   * 哪些方块由核心每 tick 给出（`MiningView.chainPreview`），渲染层不自己走一遍连通
+   * 搜索——与选框同一条理由（ADR-0006）：预览与真碎掉的那批必须是同一个答案。
+   */
+  private updateChainPreview(): void {
+    const preview = this.core.mining.chainPreview;
+    while (this.chainPreviewBoxes.length < preview.length) {
+      const box = new THREE.LineSegments(this.chainPreviewGeometry, this.chainPreviewMaterial);
+      this.scene.add(box);
+      this.chainPreviewBoxes.push(box);
+    }
+    for (const [index, box] of this.chainPreviewBoxes.entries()) {
+      const cell = preview[index];
+      box.visible = cell !== undefined;
+      // 方块坐标是它的最小角，轮廓以自己的中心为原点。
+      if (cell) box.position.set(cell.x + 0.5, cell.y + 0.5, cell.z + 0.5);
+    }
+  }
+
+  /**
    * 把相机摆到玩家眼睛的位置。
    *
    * 核心按 20 tick/s 走，直接读当前位置画面就会以 20Hz 一格格地抖，所以位置在上一个
@@ -602,6 +687,14 @@ interface ChunkMesh extends ChunkCoord {
 
 function lerp(from: number, to: number, alpha: number): number {
   return from + (to - from) * alpha;
+}
+
+/**
+ * 一个方块外壳摆在哪一格：外壳以方块中心为原点，而方块坐标是它的最小角。
+ * 选框与连锁预览共用这一步换算，两边不会各减一次 0.5。
+ */
+function blockOf(position: THREE.Vector3): Vec3 {
+  return { x: position.x - 0.5, y: position.y - 0.5, z: position.z - 0.5 };
 }
 
 /**

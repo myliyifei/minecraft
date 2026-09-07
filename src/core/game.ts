@@ -52,6 +52,7 @@ export class GameCore implements BlockEdit {
   private ticks = 0;
   private intent: MoveIntent = IDLE_INTENT;
   private miningHeld = false;
+  private chainHeld = false;
   /**
    * 下一个 tick 生效的选中格。数字键写绝对值，滚轮在它上面加减（ADR-0004：改变持续
    * 状态的输入折成意图，等 tick 边界生效）。
@@ -125,6 +126,16 @@ export class GameCore implements BlockEdit {
    */
   setMining(held: boolean): void {
     this.miningHeld = held;
+  }
+
+  /**
+   * 设定连锁键按着没有，下一个 tick 生效。与 `setMining` 同一条路（ADR-0004）。
+   *
+   * 它只在开始挖掘那一 tick 起作用：那一 tick 按着就进连锁，之后按下去不算数，
+   * 中途松开则退出连锁接着挖单块。规则在 `Mining.step` 里。
+   */
+  setChainMining(held: boolean): void {
+    this.chainHeld = held;
   }
 
   /** 转动视角（弧度增量）。不等 tick，鼠标一动就生效——见 ADR-0004。 */
@@ -250,7 +261,7 @@ export class GameCore implements BlockEdit {
     // 选中格先生效，再瞄准与放置：同一 tick 里切了格又按右键，放下的是新格里的东西。
     this.inventoryState.select(this.nextSlot);
     // 挖掘必须排在移动之后，理由见 Mining.step。
-    this.miningState.step(this.miningHeld);
+    this.miningState.step({ held: this.miningHeld, chain: this.chainHeld });
     // 放置排在挖掘之后：目标方块是挖掘那一步按走完之后的眼睛位置重投出来的（ADR-0006），
     // 与玩家碰撞箱的判定用的也是这一 tick 走完之后的位置。
     if (this.placeQueued) {

@@ -17,6 +17,41 @@ import { chunkKey, type ChunkCoord } from '../core/world';
 const FIELD_OF_VIEW = 70;
 
 /**
+ * 手持方块画在画面的哪儿（归一化设备坐标：x 右为正、y 上为正）。
+ *
+ * 写成屏幕上的位置而不是相机坐标里的一个固定偏移：窗口变宽变窄时「右下角」这件事得保持
+ * 不变，而相机坐标里的同一个 x 在不同宽高比下落在画面的不同位置（见 `placeHeldItem`）。
+ * 方块比这个中心点大，所以下半截会被画面底边切掉——与原版一样，手是「伸进」画面的。
+ */
+const HELD_ITEM_SCREEN = { x: 0.52, y: -0.75 } as const;
+
+/** 手持方块到相机的距离（方块）。远大于近裁剪面，又近得让它明显压在世界前面。 */
+const HELD_ITEM_DISTANCE = 0.72;
+
+/** 手持方块的边长（方块）。 */
+const HELD_ITEM_SIZE = 0.36;
+
+/**
+ * 手持方块的姿态（弧度）。
+ * 转一点，玩家看到的是三个面而不是正对的一面——正对的一面读起来是一张平贴图。
+ */
+const HELD_ITEM_TILT = { x: 0.32, y: -0.72, z: 0.12 } as const;
+
+/**
+ * 固定光照：环境光打底，方向光让方块的六个面有明暗区分（本切片不做天光）。
+ * 两者的比例决定体积感——环境光太强，六个面的明暗差别就没了，方块看上去是平的。
+ *
+ * 世界与手持各挂一份（两遍渲染，见 `render`）。手持那一份让它的明暗不随玩家转头变化，
+ * 与原版一致：手上那块方块不该因为背对太阳就黑下去。
+ */
+function addFixedLights(scene: THREE.Scene): void {
+  scene.add(new THREE.AmbientLight(0xffffff, 1.05));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.45);
+  sun.position.set(0.5, 1, 0.28);
+  scene.add(sun);
+}
+
+/**
  * 选框与裂纹这两个方块外壳比方块本身大一点（方块）。
  *
  * 正好等于 1 会与方块表面共面，深度测试分不出前后，画面上就是一片闪烁的斑点。
@@ -95,6 +130,17 @@ export interface XpOrbRenderView {
 }
 
 /**
+ * 手持方块现在的样子。与上面几个一样直接从场景对象上读。
+ * 空手时没有这个视图（`WorldRenderer.heldItem` 返回 undefined）。
+ */
+export interface HeldItemRenderView {
+  /** 手上那种物品。 */
+  readonly item: ItemType;
+  /** 小方块中心投在画布上的位置（归一化设备坐标，x 右为正、y 上为正）。 */
+  readonly screen: { readonly x: number; readonly y: number };
+}
+
+/**
  * 渲染适配器：把核心的方块数据画成 Three.js 场景。
  *
  * 相机是第一人称的：跟着核心里的玩家走，位置在两次 tick 之间插值（ADR-0002）。
@@ -123,8 +169,23 @@ export class WorldRenderer {
    * 见 #11）再改——这条与整套实体同步的取舍都记在 ADR-0007 里。
    */
   private readonly dropMeshes = new Map<number, THREE.Mesh>();
-  /** 每种物品的小方块几何体，建一次就一直共用。 */
-  private readonly dropGeometries = new Map<ItemType, THREE.BufferGeometry>();
+  /** 每种物品的小方块几何体：边长 1，用的人各自缩放。建一次就一直共用。 */
+  private readonly itemGeometries = new Map<ItemType, THREE.BufferGeometry>();
+  /**
+   * 手持方块单独一个场景、单独一个相机，在世界之后再画一遍（见 `render`）。
+   *
+   * 不把它挂到主相机下面：那样它就参与世界那一遍的深度测试，而它离眼睛只有 0.72 格，
+   * 比玩家能贴到的墙（半宽 0.3 格）还远——贴着墙站着时手上那块方块会被墙切穿。
+   * 单独一遍就不会。相机永远在原点朝 −Z，所以摆位置只按画面算，不必跟着玩家的视角转。
+   */
+  private readonly handScene = new THREE.Scene();
+  private readonly handCamera: THREE.PerspectiveCamera;
+  /** 手持方块这一层只管摆位置（`placeHeldItem`），方块本身是它的子节点。 */
+  private readonly handAnchor = new THREE.Group();
+  /** 手上那块方块。空手时还在场景里，只是 `visible` 为 false。 */
+  private heldItemMesh: THREE.Mesh | undefined;
+  /** 现在画的是哪种物品。与核心的手持不同就换几何体。 */
+  private heldItemType: ItemType | undefined;
   /** 场景里的经验球小方块，按核心给的编号索引。与掉落物同一套做法，见 ADR-0007。 */
   private readonly xpOrbMeshes = new Map<number, THREE.Mesh>();
   /** 经验球的几何体与材质：所有经验球长得一样，各建一份共用就够。 */
@@ -159,12 +220,14 @@ export class WorldRenderer {
     this.camera.rotation.order = 'YXZ';
     this.updateCamera(1);
 
-    // 固定光照：环境光打底，方向光让方块的六个面有明暗区分（本切片不做天光）。
-    // 两者的比例决定体积感——环境光太强，六个面的明暗差别就没了，方块看上去是平的。
-    this.scene.add(new THREE.AmbientLight(0xffffff, 1.05));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.45);
-    sun.position.set(0.5, 1, 0.28);
-    this.scene.add(sun);
+    // 手持那一遍：相机与主相机同一个视场，但不动——手持方块是按画面位置摆的。
+    // 远裁剪面只要够装下它自己。
+    this.handCamera = new THREE.PerspectiveCamera(FIELD_OF_VIEW, 1, 0.1, 10);
+    this.handScene.add(this.handAnchor);
+    addFixedLights(this.scene);
+    addFixedLights(this.handScene);
+    // 两遍渲染各自决定清什么，所以关掉自动清屏，见 render()。
+    this.renderer.autoClear = false;
 
     const shell = new THREE.BoxGeometry(BLOCK_SHELL, BLOCK_SHELL, BLOCK_SHELL);
     this.selectionBox = new THREE.LineSegments(
@@ -237,6 +300,20 @@ export class WorldRenderer {
       id,
       position: { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z },
     }));
+  }
+
+  /**
+   * 上一帧画出来的手持方块，空手时 undefined。
+   *
+   * 投影用的是相机自己的矩阵，所以报出来的位置就是它在画面上的位置——端到端测试据此
+   * 断言它真在右下角，而不是相信一个写在别处的常量。
+   */
+  get heldItem(): HeldItemRenderView | undefined {
+    const mesh = this.heldItemMesh;
+    const item = this.heldItemType;
+    if (!mesh?.visible || item === undefined) return undefined;
+    const { x, y } = mesh.getWorldPosition(new THREE.Vector3()).project(this.handCamera);
+    return { item, screen: { x, y } };
   }
 
   /** 这个区块的网格有多少个顶点。没建过网格、或者一个面都没有时是 0。 */
@@ -319,7 +396,56 @@ export class WorldRenderer {
     this.updateSelection();
     this.updateDrops(alpha);
     this.updateXpOrbs(alpha);
+    this.updateHeldItem();
+
+    // 两遍：先画世界，再把深度清掉画手上那块方块。深度一清，手持就永远在世界前面，
+    // 贴着墙站着也不会被墙切穿（`handScene` 的注释里记了为什么不能挂在主相机下）。
+    this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
+    this.renderer.clearDepth();
+    this.renderer.render(this.handScene, this.handCamera);
+  }
+
+  /**
+   * 让右下角那块手持方块跟上核心里的手持物品（`InventoryView.held`）。
+   *
+   * 手持是核心的状态，第一人称里的那块方块纯粹是它的表现——摆在哪儿、转多少度都在
+   * 这个文件里，核心不知道画面上有这么一块东西（与掉落物同一套分工，见 ADR-0007）。
+   * 只在物品换了的时候动几何体，其余帧一个属性都不碰。
+   */
+  private updateHeldItem(): void {
+    const item = this.core.inventory.held?.item;
+    if (item === this.heldItemType) return;
+    this.heldItemType = item;
+
+    if (item === undefined) {
+      if (this.heldItemMesh) this.heldItemMesh.visible = false;
+      return;
+    }
+
+    if (!this.heldItemMesh) {
+      const mesh = this.itemMesh(item, HELD_ITEM_SIZE);
+      mesh.rotation.set(HELD_ITEM_TILT.x, HELD_ITEM_TILT.y, HELD_ITEM_TILT.z);
+      this.handAnchor.add(mesh);
+      this.heldItemMesh = mesh;
+    }
+    this.heldItemMesh.geometry = this.itemGeometry(item);
+    this.heldItemMesh.visible = true;
+  }
+
+  /**
+   * 把手持方块摆到画面右下角。
+   *
+   * 相机坐标里的横向偏移得按宽高比换算：同一个 x 在宽窗口里靠中间、在窄窗口里就出了画面。
+   * 所以每次改变画布尺寸都要重算一次。
+   */
+  private placeHeldItem(): void {
+    const halfHeight = Math.tan((FIELD_OF_VIEW / 2) * (Math.PI / 180)) * HELD_ITEM_DISTANCE;
+    this.handAnchor.position.set(
+      HELD_ITEM_SCREEN.x * halfHeight * this.handCamera.aspect,
+      HELD_ITEM_SCREEN.y * halfHeight,
+      -HELD_ITEM_DISTANCE,
+    );
   }
 
   /**
@@ -335,7 +461,7 @@ export class WorldRenderer {
     this.syncEntityMeshes(
       this.core.drops.all(),
       this.dropMeshes,
-      (drop) => new THREE.Mesh(this.dropGeometry(drop.item), this.material),
+      (drop) => this.itemMesh(drop.item, DROP_SIZE),
       (mesh, drop) => {
         const phase = drop.age + alpha;
         mesh.position.copy(entityCenter(drop, alpha, DROP_SIZE));
@@ -392,14 +518,24 @@ export class WorldRenderer {
     }
   }
 
-  /** 某种物品的小方块几何体。几何体不随掉落物销毁，同种物品一直共用同一份。 */
-  private dropGeometry(item: ItemType): THREE.BufferGeometry {
-    const cached = this.dropGeometries.get(item);
+  /** 一块某种物品的小方块，边长 `size`。 */
+  private itemMesh(item: ItemType, size: number): THREE.Mesh {
+    const mesh = new THREE.Mesh(this.itemGeometry(item), this.material);
+    mesh.scale.setScalar(size);
+    return mesh;
+  }
+
+  /**
+   * 某种物品的小方块几何体：边长 1，用的人各自缩放。
+   * 掉落物与手持方块因此共用同一份——两者只差大小与姿态。几何体不随掉落物销毁。
+   */
+  private itemGeometry(item: ItemType): THREE.BufferGeometry {
+    const cached = this.itemGeometries.get(item);
     if (cached) return cached;
-    const geometry = new THREE.BoxGeometry(DROP_SIZE, DROP_SIZE, DROP_SIZE);
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
     // BoxGeometry 默认每个面都铺满整张贴图，得换成图集里那一格，见 itemCubeUvs。
     geometry.setAttribute('uv', new THREE.BufferAttribute(itemCubeUvs(item), 2));
-    this.dropGeometries.set(item, geometry);
+    this.itemGeometries.set(item, geometry);
     return geometry;
   }
 
@@ -449,6 +585,10 @@ export class WorldRenderer {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.handCamera.aspect = this.camera.aspect;
+    this.handCamera.updateProjectionMatrix();
+    // 手持方块的横向偏移跟着宽高比走，尺寸一变就得重算。
+    this.placeHeldItem();
   }
 }
 

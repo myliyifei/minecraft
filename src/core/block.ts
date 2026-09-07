@@ -194,6 +194,31 @@ export function blockExperience(block: BlockType): number {
 }
 
 /**
+ * 放置表：一种物品放下去变成哪种方块，`null` 表示放不下去（工具、食物那些）。
+ *
+ * 与 `BLOCKS` 的 `drop` 一列正好反着来，但两者不是一张表的两面：草方块掉的是泥土，
+ * 泥土放下去是泥土方块，草方块因此没有对应的物品；工具与食物则一头都没有。
+ *
+ * 表放在这个文件里而不是 `item.ts` 里，是因为 `block.ts` 已经 import 了 `item.ts`
+ * （掉落表要写 `ItemStack`）。反过来再 import 一次就成了循环依赖，而两个模块顶层都有
+ * 常量表要初始化，那种循环会在模块求值顺序上出问题。
+ */
+export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
+  [ItemType.Dirt]: BlockType.Dirt,
+  [ItemType.OakLog]: BlockType.OakLog,
+};
+
+/**
+ * 这种物品放下去是哪种方块，放不下去的返回 `null`。
+ *
+ * 表里没有的物品编号（存档来自更新的版本，或者测试里的假物品）也当成放不下去，
+ * 而不是让调用方拿到 undefined。
+ */
+export function placedBlock(item: ItemType): BlockType | null {
+  return PLACED_BLOCKS[item] ?? null;
+}
+
+/**
  * 按世界坐标读方块的最小接口。
  * 网格生成、射线检测这些只读消费者依赖它而不是 World 本身，便于用假数据测试。
  */

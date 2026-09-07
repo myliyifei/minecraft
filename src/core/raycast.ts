@@ -19,6 +19,20 @@ export interface BlockHit {
 const AXES: readonly Axis[] = ['x', 'y', 'z'];
 
 /**
+ * 命中面外侧那一格的方块坐标：射线在撞上目标之前正好经过的那一格。
+ *
+ * 放置就放在这里（见 CONTEXT.md 的「放置」）。走法只有这一处，射线报出命中面的地方与
+ * 用它的地方因此不会各算一遍。
+ */
+export function blockOutsideFace(hit: BlockHit): Vec3 {
+  return {
+    x: hit.x + hit.normal.x,
+    y: hit.y + hit.normal.y,
+    z: hit.z + hit.normal.z,
+  };
+}
+
+/**
  * 体素射线检测：从 `origin` 沿 `direction` 走最远 `maxDistance` 格，返回第一个非空气方块。
  *
  * 走的是 Amanatides–Woo：只在三个轴的格边界上推进，逐格命中。按固定小步长采样的做法

@@ -13,7 +13,7 @@ import {
   WORLD_MIN_Y,
 } from '../../src/core/constants';
 import { PICKUP_DELAY_TICKS } from '../../src/core/drop';
-import { INVENTORY_SIZE } from '../../src/core/inventory';
+import { HOTBAR_SIZE, INVENTORY_SIZE } from '../../src/core/inventory';
 import { ItemType } from '../../src/core/item';
 import { IDLE_INTENT, MAX_PITCH, WALK_SPEED, WALK_STEP } from '../../src/core/player';
 import {
@@ -23,6 +23,7 @@ import {
   plainsTreePlacement,
 } from '../../src/core/terrain';
 import { oakTreesTouching } from '../../src/core/tree';
+import type { Vec3 } from '../../src/core/vec3';
 import { ABOVE_SURFACE } from '../helpers/above-surface';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 
@@ -51,6 +52,11 @@ const LOADED_MAX = (SAMPLE_RADIUS + 1) * CHUNK_SIZE - 1;
 /** 默认种子下某一列的地表高度。 */
 function surfaceAt(x: number, z: number): number {
   return plainsSurfaceHeight(DEFAULT_SEED, x, z);
+}
+
+/** 一格的三元坐标换成 Vec3，好跟核心报出来的坐标对照。 */
+function toVec([x, y, z]: [number, number, number]): Vec3 {
+  return { x, y, z };
 }
 
 describe('GameCore 的 tick 推进', () => {
@@ -616,6 +622,257 @@ describe('GameCore 的空手挖掘', () => {
       expect(core.xpOrbs.count).toBe(0);
       expect(core.takeChangedBlocks()).toEqual([]);
     });
+  });
+});
+
+describe('GameCore 的快捷栏选中格', () => {
+  it('新世界选中第一格', () => {
+    const core = coreOnFlatGround();
+    expect(core.inventory.selectedSlot).toBe(0);
+    expect(core.inventory.held).toBeUndefined();
+  });
+
+  it('选中格下一个 tick 生效（ADR-0004）', () => {
+    const core = coreOnFlatGround();
+    core.selectHotbarSlot(3);
+    expect(core.inventory.selectedSlot).toBe(0);
+    core.tick();
+    expect(core.inventory.selectedSlot).toBe(3);
+  });
+
+  it('滚轮沿快捷栏挪格，正是往右', () => {
+    const core = coreOnFlatGround();
+    core.scrollHotbar(1);
+    core.tick();
+    expect(core.inventory.selectedSlot).toBe(1);
+
+    core.scrollHotbar(-1);
+    core.tick();
+    expect(core.inventory.selectedSlot).toBe(0);
+  });
+
+  it('滚到头从另一端接着来', () => {
+    const core = coreOnFlatGround();
+    core.scrollHotbar(-1);
+    core.tick();
+    expect(core.inventory.selectedSlot).toBe(HOTBAR_SIZE - 1);
+
+    core.scrollHotbar(1);
+    core.tick();
+    expect(core.inventory.selectedSlot).toBe(0);
+  });
+
+  it('同一个 tick 里滚三下就挪三格', () => {
+    const core = coreOnFlatGround();
+    core.scrollHotbar(1);
+    core.scrollHotbar(1);
+    core.scrollHotbar(1);
+    core.tick();
+    expect(core.inventory.selectedSlot).toBe(3);
+  });
+});
+
+describe('GameCore 的放置方块', () => {
+  /** 平地上出生点正下方那一格。 */
+  const UNDERFOOT: [number, number, number] = [0, FLAT_GROUND_Y, 0];
+
+  /** 挖穿之后再等这么多 tick：掉落物落定，并被吸进背包。 */
+  const PICKUP_TICKS = PICKUP_DELAY_TICKS + 2;
+
+  /** 朝 +X 看的偏航。 */
+  const EAST_YAW = -Math.PI / 2;
+
+  /**
+   * 站在一格深的坑里斜着往下看的俯仰：−30°。
+   * 视线越过坑沿，落在旁边那块草的顶面上——所以放置的落点在坑外，不与玩家相交。
+   */
+  const ASIDE_PITCH = -Math.PI / 6;
+
+  /** 站在坑里斜着往下看时对准的那一格，以及它的顶面外侧那一格。 */
+  const ASIDE: [number, number, number] = [1, FLAT_GROUND_Y, 0];
+  const ABOVE_ASIDE: [number, number, number] = [1, FLAT_GROUND_Y + 1, 0];
+
+  /** 把视角转到绝对的偏航与俯仰上。核心只收增量，这里换算一次。 */
+  function look(core: GameCore, yaw: number, pitch: number): void {
+    core.turn(yaw - core.player.yaw, pitch - core.player.pitch);
+  }
+
+  /** 低头挖穿脚下那一格，掉出来的东西进背包，玩家掉进坑里。 */
+  function digUnderfoot(core: GameCore, block: BlockType): void {
+    look(core, 0, -MAX_PITCH);
+    core.setMining(true);
+    core.tick(miningTicks(block));
+    core.setMining(false);
+    core.tick(PICKUP_TICKS);
+  }
+
+  /**
+   * 手上有一个泥土、站在一格深的坑里斜着看着旁边那块草的核心。
+   *
+   * 东西只能挖来——核心没有「往背包里塞物品」的入口，也不该为测试开一个。
+   */
+  function holdingDirt(): GameCore {
+    const core = coreOnFlatGround();
+    digUnderfoot(core, BlockType.Grass);
+    look(core, EAST_YAW, ASIDE_PITCH);
+    core.tick();
+    return core;
+  }
+
+  /** 按一次右键并推进一个 tick。 */
+  function placeOnce(core: GameCore): void {
+    core.place();
+    core.tick();
+  }
+
+  it('对准的那一格没变，新方块落在命中面外侧那一格', () => {
+    const core = holdingDirt();
+    // 看着旁边那块草的顶面
+    expect(core.mining.target).toMatchObject({
+      x: ASIDE[0],
+      y: ASIDE[1],
+      z: ASIDE[2],
+      normal: { x: 0, y: 1, z: 0 },
+    });
+    expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
+
+    placeOnce(core);
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Dirt);
+    expect(core.getBlock(...ASIDE)).toBe(BlockType.Grass);
+  });
+
+  it('放一块，选中格数量减 1；减到 0 时那一格清空', () => {
+    const core = holdingDirt();
+    // 再挖掉对准的那块草，两个泥土并进同一堆
+    core.setMining(true);
+    core.tick(miningTicks(BlockType.Grass));
+    core.setMining(false);
+    core.tick(PICKUP_TICKS);
+    expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 2 });
+
+    // 挖穿之后视线落到后面那块草的 −X 面上，放置把刚挖掉的那一格填回去
+    expect(core.mining.target).toMatchObject({ x: 2, y: ASIDE[1], normal: { x: -1, y: 0, z: 0 } });
+    placeOnce(core);
+    expect(core.getBlock(...ASIDE)).toBe(BlockType.Dirt);
+    expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
+
+    placeOnce(core);
+    expect(core.inventory.held).toBeUndefined();
+    expect(core.inventory.slot(0)).toBeUndefined();
+  });
+
+  it('朝自己脚下放置被拒绝', () => {
+    const core = holdingDirt();
+    // 站在坑里低头：对准的是坑底，命中面外侧那一格正是脚所在的位置
+    look(core, 0, -MAX_PITCH);
+    core.tick();
+    expect(core.mining.target).toMatchObject({ y: FLAT_GROUND_Y - 1, normal: { y: 1 } });
+
+    placeOnce(core);
+    expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Air);
+    expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
+  });
+
+  it('朝身体所在的位置放置被拒绝', () => {
+    const core = holdingDirt();
+    // 坑沿上摆一块，平视正对着它的 −X 面：外侧那一格是玩家上半身所在的那一格
+    const atEyeLevel: [number, number, number] = [1, FLAT_GROUND_Y + 1, 0];
+    core.setBlock(...atEyeLevel, BlockType.Stone);
+    look(core, EAST_YAW, 0);
+    core.tick();
+    expect(core.mining.target).toMatchObject({ ...toVec(atEyeLevel), normal: { x: -1 } });
+
+    placeOnce(core);
+    expect(core.getBlock(0, FLAT_GROUND_Y + 1, 0)).toBe(BlockType.Air);
+    expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
+  });
+
+  it('超过 4.5 格就不是目标，右键什么都不发生', () => {
+    const core = holdingDirt();
+    // 6 格外立一块，平视对着它：触及距离之外，没有目标
+    core.setBlock(6, FLAT_GROUND_Y + 1, 0, BlockType.Stone);
+    look(core, EAST_YAW, 0);
+    core.tick();
+    expect(core.mining.target).toBeUndefined();
+
+    placeOnce(core);
+    expect(core.getBlock(5, FLAT_GROUND_Y + 1, 0)).toBe(BlockType.Air);
+    expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
+  });
+
+  it('同一块挪到 4 格远就够得着，放得下', () => {
+    // 与上一条成对：挡住放置的确实是距离，而不是这个摆法本身有问题
+    const core = holdingDirt();
+    core.setBlock(4, FLAT_GROUND_Y + 1, 0, BlockType.Stone);
+    look(core, EAST_YAW, 0);
+    core.tick();
+    expect(core.mining.target).toMatchObject({ x: 4, normal: { x: -1 } });
+
+    placeOnce(core);
+    expect(core.getBlock(3, FLAT_GROUND_Y + 1, 0)).toBe(BlockType.Dirt);
+    expect(core.inventory.held).toBeUndefined();
+  });
+
+  it('选中格是空的时候右键无效', () => {
+    // 空手站在地面上，斜着看 3 格外那块草的顶面：手上有东西的话这一下放得下
+    const core = coreOnFlatGround();
+    look(core, EAST_YAW, ASIDE_PITCH);
+    core.tick();
+    const target = core.mining.target;
+    expect(target).toMatchObject({ normal: { x: 0, y: 1, z: 0 } });
+    core.takeChangedBlocks();
+
+    placeOnce(core);
+    expect(core.getBlock(target!.x, target!.y + 1, target!.z)).toBe(BlockType.Air);
+    expect(core.takeChangedBlocks()).toEqual([]);
+  });
+
+  it('切换选中格后放置的是新格里的方块', () => {
+    const core = holdingDirt();
+    // 把对准的那块草换成原木再挖掉：原木物品另占一格，手上因此有两种东西
+    core.setBlock(...ASIDE, BlockType.OakLog);
+    core.setMining(true);
+    core.tick(miningTicks(BlockType.OakLog));
+    core.setMining(false);
+    core.tick(PICKUP_TICKS);
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.Dirt, count: 1 });
+    expect(core.inventory.slot(1)).toEqual({ item: ItemType.OakLog, count: 1 });
+
+    // 选第二格：放下去是原木方块
+    core.selectHotbarSlot(1);
+    placeOnce(core);
+    expect(core.inventory.held).toBeUndefined();
+    expect(core.getBlock(...ASIDE)).toBe(BlockType.OakLog);
+
+    // 回到第一格：同一条视线放下去是泥土
+    core.selectHotbarSlot(0);
+    core.tick();
+    expect(core.mining.target).toMatchObject({ ...toVec(ASIDE), normal: { y: 1 } });
+    placeOnce(core);
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Dirt);
+  });
+
+  it('放下的那一格进「变过的方块」，渲染层据此重建网格', () => {
+    const core = holdingDirt();
+    core.takeChangedBlocks();
+
+    placeOnce(core);
+    expect(core.takeChangedBlocks()).toEqual([toVec(ABOVE_ASIDE)]);
+    expect(core.takeChangedBlocks()).toEqual([]);
+  });
+
+  it('同一个 tick 里按两次右键只放一块', () => {
+    const core = holdingDirt();
+    core.setMining(true);
+    core.tick(miningTicks(BlockType.Grass));
+    core.setMining(false);
+    core.tick(PICKUP_TICKS);
+    expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 2 });
+
+    core.place();
+    core.place();
+    core.tick();
+    expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
   });
 });
 

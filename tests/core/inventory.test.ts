@@ -3,6 +3,7 @@ import {
   HOTBAR_SIZE,
   INVENTORY_SIZE,
   Inventory,
+  wrapHotbarSlot,
   type InventoryView,
 } from '../../src/core/inventory';
 import { ItemType, stackLimit } from '../../src/core/item';
@@ -126,5 +127,83 @@ describe('物品进背包', () => {
     for (let i = 0; i < HOTBAR_SIZE; i++) {
       expect(hotbar[i], `第 ${i} 格`).toEqual(inventory.slot(i));
     }
+  });
+});
+
+describe('快捷栏的选中格', () => {
+  it('新背包选中第一格，手上是空的', () => {
+    const inventory = new Inventory();
+    expect(inventory.selectedSlot).toBe(0);
+    expect(inventory.held).toBeUndefined();
+  });
+
+  it('手持就是选中格里的那一堆', () => {
+    const inventory = new Inventory();
+    inventory.add(dirt(3));
+    inventory.add(logs(5));
+    expect(inventory.held).toEqual(dirt(3));
+
+    inventory.select(1);
+    expect(inventory.selectedSlot).toBe(1);
+    expect(inventory.held).toEqual(logs(5));
+
+    // 空格也能选中，手上就是空的
+    inventory.select(2);
+    expect(inventory.held).toBeUndefined();
+  });
+
+  it('下标折回快捷栏范围内，滚到头从另一端接着来', () => {
+    expect(wrapHotbarSlot(0)).toBe(0);
+    expect(wrapHotbarSlot(HOTBAR_SIZE - 1)).toBe(HOTBAR_SIZE - 1);
+    expect(wrapHotbarSlot(HOTBAR_SIZE)).toBe(0);
+    expect(wrapHotbarSlot(-1)).toBe(HOTBAR_SIZE - 1);
+    expect(wrapHotbarSlot(-HOTBAR_SIZE - 1)).toBe(HOTBAR_SIZE - 1);
+
+    const inventory = new Inventory();
+    inventory.select(HOTBAR_SIZE);
+    expect(inventory.selectedSlot).toBe(0);
+    inventory.select(-1);
+    expect(inventory.selectedSlot).toBe(HOTBAR_SIZE - 1);
+  });
+
+  it('选中格只在快捷栏里，选不到背包那一侧', () => {
+    const inventory = new Inventory();
+    inventory.add(dirt(10 * 64));
+    // 第 9 格（背包的第一格）折回快捷栏的第一格
+    inventory.select(HOTBAR_SIZE);
+    expect(inventory.selectedSlot).toBe(0);
+  });
+
+  it('用掉手上的一个，数量减 1', () => {
+    const inventory = new Inventory();
+    inventory.add(dirt(3));
+    inventory.takeOne();
+    expect(inventory.held).toEqual(dirt(2));
+    expect(inventory.slot(0)).toEqual(dirt(2));
+  });
+
+  it('用掉最后一个之后那一格清空', () => {
+    const inventory = new Inventory();
+    inventory.add(dirt(1));
+    inventory.takeOne();
+    expect(inventory.held).toBeUndefined();
+    expect(inventory.slot(0)).toBeUndefined();
+    expect(filledSlots(inventory)).toEqual([]);
+  });
+
+  it('空手时用掉一个什么都不发生', () => {
+    const inventory = new Inventory();
+    inventory.takeOne();
+    expect(filledSlots(inventory)).toEqual([]);
+  });
+
+  it('用掉的是选中格里的，不是第一格里的', () => {
+    const inventory = new Inventory();
+    inventory.add(dirt(3));
+    inventory.add(logs(5));
+    inventory.select(1);
+    inventory.takeOne();
+    expect(inventory.slot(0)).toEqual(dirt(3));
+    expect(inventory.slot(1)).toEqual(logs(4));
   });
 });

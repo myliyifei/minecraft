@@ -1,10 +1,18 @@
-import { stackLimit, type ItemSink, type ItemStack, type ItemType } from './item';
+import { stackLimit, type Hand, type ItemSink, type ItemStack, type ItemType } from './item';
 
 /** 快捷栏（见 CONTEXT.md）的格数。 */
 export const HOTBAR_SIZE = 9;
 
 /** 背包总格数，含快捷栏。与原版一致。 */
 export const INVENTORY_SIZE = 36;
+
+/**
+ * 把下标折回快捷栏的范围内：第 9 格回到第 0 格，−1 格回到最后一格。
+ * 滚轮转到头从另一端接着来就是这条规则，它是游戏规则而不是输入细节，所以在核心里。
+ */
+export function wrapHotbarSlot(index: number): number {
+  return ((index % HOTBAR_SIZE) + HOTBAR_SIZE) % HOTBAR_SIZE;
+}
 
 /** 背包的只读视图。HUD 与调试句柄拿到的是这个，改内容只能经由核心。 */
 export interface InventoryView {
@@ -14,16 +22,24 @@ export interface InventoryView {
   slot(index: number): ItemStack | undefined;
   /** 快捷栏那一排。HUD 画的就是它。 */
   hotbar(): ReadonlyArray<ItemStack | undefined>;
+  /** 选中的是快捷栏的第几格。HUD 据此高亮那一格。 */
+  readonly selectedSlot: number;
+  /** 手持的那一堆（见 CONTEXT.md 的「手持物品」），选中格是空的时候 undefined。 */
+  readonly held: ItemStack | undefined;
 }
 
 /**
- * 背包：36 个格子，前 `HOTBAR_SIZE` 格就是快捷栏。
+ * 背包：36 个格子，前 `HOTBAR_SIZE` 格就是快捷栏，其中一格是选中格。
  *
  * 快捷栏排在前面不只是编号方便——入包时「快捷栏优先」因此就是「下标小的优先」，
  * 两轮扫描都按下标升序走，不需要再写一遍优先级。
+ *
+ * 选中格也放在这里：快捷栏是背包的一排（见 CONTEXT.md），「手上拿着什么」就是
+ * 「选中格里是什么」，两者分到两个模块里只会让它们不一致。
  */
-export class Inventory implements InventoryView, ItemSink {
+export class Inventory implements InventoryView, ItemSink, Hand {
   private readonly slots = Array<ItemStack | undefined>(INVENTORY_SIZE).fill(undefined);
+  private selected = 0;
 
   get size(): number {
     return this.slots.length;
@@ -35,6 +51,30 @@ export class Inventory implements InventoryView, ItemSink {
 
   hotbar(): ReadonlyArray<ItemStack | undefined> {
     return this.slots.slice(0, HOTBAR_SIZE);
+  }
+
+  get selectedSlot(): number {
+    return this.selected;
+  }
+
+  get held(): ItemStack | undefined {
+    return this.slots[this.selected];
+  }
+
+  /**
+   * 选中快捷栏的一格。下标折回范围内（`wrapHotbarSlot`），所以「往右滚过第 9 格」
+   * 与「按不存在的第 10 个数字键」都落回第一格，不必在调用方各写一遍边界。
+   */
+  select(index: number): void {
+    this.selected = wrapHotbarSlot(index);
+  }
+
+  /** 用掉手上的一个：数量减 1，减到 0 时那一格清空。空手时什么都不做。 */
+  takeOne(): void {
+    const stack = this.slots[this.selected];
+    if (!stack) return;
+    this.slots[this.selected] =
+      stack.count > 1 ? { item: stack.item, count: stack.count - 1 } : undefined;
   }
 
   /**

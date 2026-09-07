@@ -1,3 +1,4 @@
+import { HOTBAR_SIZE } from '../core/inventory';
 import type { MoveIntent } from '../core/player';
 
 /**
@@ -26,14 +27,30 @@ export const MOVE_ACTIONS = Object.keys(KEY_BINDINGS) as MoveAction[];
 /**
  * 鼠标按钮绑定：`MouseEvent.button` 的编号。别处不许再写按钮编号。
  *
- * 与 `KEY_BINDINGS` 分成两张表，因为它们查的是不同的事件字段。挖掘是左键，
- * 放置（#10）会是右键。
+ * 与 `KEY_BINDINGS` 分成两张表，因为它们查的是不同的事件字段。挖掘是左键，放置是右键。
  */
 export const MOUSE_BINDINGS = {
   mine: 0,
+  place: 2,
 } as const;
+
+/**
+ * 快捷栏选格的按键：第 n 格绑数字键 n + 1。
+ *
+ * 写成算式而不是九行字面量：格数的唯一来源是 `HOTBAR_SIZE`，两边不会对不上。
+ * 与 `KEY_BINDINGS` 分成两张表，因为这一组绑的不是动作而是格号。
+ */
+export const HOTBAR_KEY_CODES: readonly string[] = Array.from(
+  { length: HOTBAR_SIZE },
+  (_, slot) => `Digit${slot + 1}`,
+);
 
 /** 反查：按下的 `code` 对应哪个动作。没绑过的键查不到。 */
 export const ACTION_BY_CODE: ReadonlyMap<string, MoveAction> = new Map(
   MOVE_ACTIONS.map((action) => [KEY_BINDINGS[action], action]),
+);
+
+/** 反查：按下的 `code` 对应快捷栏的哪一格。没绑过的键查不到。 */
+export const HOTBAR_SLOT_BY_CODE: ReadonlyMap<string, number> = new Map(
+  HOTBAR_KEY_CODES.map((code, slot) => [code, slot]),
 );

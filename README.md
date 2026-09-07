@@ -49,9 +49,9 @@ src/
 - 游戏逻辑一律写在 `src/core/`，它必须能在 Node 里无依赖实例化——这是主测试接缝，`tests/architecture.test.ts` 会检查这条规则。
 - 面剔除与贴图映射（`src/render/mesh.ts`、`src/render/atlas.ts`）不许 import three.js，这样它们能在 Node 里测。
 - `src/worker/chunk-worker.ts` 只许 import 核心与消息协议：Worker 里没有 DOM，引入渲染层的模块后页面一打开就报错。主线程这一侧（`chunk-stream.ts`）注入端口，因此能用假 Worker 在 Node 里测。
-- 输入适配器只把事件翻译成意图（`MoveIntent`、挖掘按下与松开）与视角增量，走多快、跳多高、撞不撞墙、一块方块挖多久都在核心里。核心不认识任何按键。
+- 输入适配器只把事件翻译成意图（`MoveIntent`、挖掘按下与松开、放置、快捷栏切换）与视角增量，走多快、跳多高、撞不撞墙、一块方块挖多久、一块方块放得下放不下都在核心里。核心不认识任何按键。
 - 玩家可见的文字只写在 `src/ui/strings.ts`。
-- 硬度、掉落表、经验表、贴图映射、键位表都是数据，加内容只加数据行。按键名与鼠标按钮编号只写在 `src/input/keybindings.ts`。
+- 硬度、掉落表、经验表、放置表、贴图映射、键位表都是数据，加内容只加数据行。按键名与鼠标按钮编号只写在 `src/input/keybindings.ts`。
 
 ## 贴图
 

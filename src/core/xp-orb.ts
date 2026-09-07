@@ -1,6 +1,6 @@
 import { stepEntities } from './entity';
 import type { ExperienceSink } from './experience';
-import { boxCenter, hitboxAt, overlaps, type Hitbox } from './physics';
+import { boxCenter, hitboxAt, touches, type Hitbox } from './physics';
 import type { Vec3 } from './vec3';
 
 /** 经验球碰撞箱的边长（方块）。比掉落物再小一点，看上去是一小团光而不是一小块方块。 */
@@ -187,7 +187,7 @@ class XpOrb implements XpOrbView {
 
   /** 碰上玩家就把经验交出去。返回 true 时调用方随即把它从世界里去掉。 */
   absorbedBy(playerBox: Hitbox, into: ExperienceSink): boolean {
-    if (!overlaps(playerBox, this.hitbox)) return false;
+    if (!touches(playerBox, this.hitbox)) return false;
     into.gain(this.amount);
     return true;
   }

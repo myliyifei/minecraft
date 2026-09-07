@@ -46,6 +46,11 @@ export function hitboxAt(
   };
 }
 
+/** 一格方块占的空间。放置要拿它跟玩家的碰撞箱比。 */
+export function blockHitbox(x: number, y: number, z: number): Hitbox {
+  return { min: { x, y, z }, max: { x: x + 1, y: y + 1, z: z + 1 } };
+}
+
 /**
  * 沿一个轴移动之后实体在这个轴上的新坐标，撞上实心方块则停在接触面上。
  *
@@ -109,8 +114,29 @@ export function boxCenter(box: Hitbox): Vec3 {
   };
 }
 
-/** 两个碰撞箱有没有交叠。边界相切算交叠——差一丝就判成没碰上反而更奇怪。 */
+/**
+ * 两个碰撞箱有没有交叠出体积。边界相切不算。
+ *
+ * 放置要的是这一个：紧贴玩家侧面的那一格放得下（原版也放得下），相切也算的话贴着墙
+ * 站着就放不了脚边那一块。「碰上了没有」那种判断用下面的 `touches`。
+ */
 export function overlaps(a: Hitbox, b: Hitbox): boolean {
+  return (
+    a.min.x < b.max.x &&
+    a.max.x > b.min.x &&
+    a.min.y < b.max.y &&
+    a.max.y > b.min.y &&
+    a.min.z < b.max.z &&
+    a.max.z > b.min.z
+  );
+}
+
+/**
+ * 两个碰撞箱碰上了没有。边界相切算碰上——差一丝就判成没碰上反而更奇怪。
+ *
+ * 拾取与吸收要的是这一个：走到掉落物边上就该收得到。与 `overlaps` 只差相切这一种情形。
+ */
+export function touches(a: Hitbox, b: Hitbox): boolean {
   return (
     a.min.x <= b.max.x &&
     a.max.x >= b.min.x &&

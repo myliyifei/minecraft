@@ -195,6 +195,15 @@ body {
 }
 
 /*
+ * 选中的那一格：白色描边加亮一档底色。描边仍是内描边，格子的外尺寸不变，
+ * 一排格子因此不会因为选中哪一格而挪动位置。
+ */
+.hotbar__slot--selected {
+  background: rgb(255 255 255 / 30%);
+  box-shadow: inset 0 0 0 2px #fff;
+}
+
+/*
  * 图标是方块图集的一张精灵图。格数由 hotbar.ts 写成 --atlas-cols / --atlas-rows，
  * 取哪一格是 --tile-col / --tile-row，算式留在这里：JS 只管下标，不管像素。
  */

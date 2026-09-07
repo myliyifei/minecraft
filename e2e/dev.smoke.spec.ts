@@ -9,12 +9,18 @@ import {
 } from '../src/core/constants';
 import { PICKUP_DELAY_TICKS } from '../src/core/drop';
 import { HOTBAR_SIZE } from '../src/core/inventory';
-import { ItemType } from '../src/core/item';
-import { MAX_PITCH, PLAYER_EYE_HEIGHT, WALK_SPEED, WALK_STEP } from '../src/core/player';
+import { ItemType, type ItemStack } from '../src/core/item';
+import {
+  MAX_PITCH,
+  PLAYER_EYE_HEIGHT,
+  PLAYER_WIDTH,
+  WALK_SPEED,
+  WALK_STEP,
+} from '../src/core/player';
 import { plainsTreePlacement } from '../src/core/terrain';
 import { OAK_CANOPY_RADIUS, oakTreesTouching, type OakTree } from '../src/core/tree';
 import type { Vec3 } from '../src/core/vec3';
-import { KEY_BINDINGS } from '../src/input/keybindings';
+import { HOTBAR_KEY_CODES, KEY_BINDINGS, MOUSE_BINDINGS } from '../src/input/keybindings';
 import {
   ATLAS_COLS,
   ATLAS_ROWS,
@@ -1038,6 +1044,355 @@ test('经验球画成小方块飞向玩家，被吸收后从画面上消失', as
   expect(dug.gone).toEqual([]);
   expect(isXpColored(dug.rgbAfter)).toBe(false);
   expect(dug.total).toBe(3);
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 站在一格深的坑里斜着往下看的俯仰：−30°。
+ * 视线越过坑沿落在旁边那一格的顶面上，所以放置的落点在坑外，不与玩家相交。
+ */
+const ASIDE_PITCH = -Math.PI / 6;
+
+/** 朝 +X 看的偏航。 */
+const EAST_YAW = -Math.PI / 2;
+
+test('数字键与滚轮切换选中格，快捷栏跟着高亮', async ({ page }) => {
+  /**
+   * 滚一下（`deltaY` 给 0 表示不滚），推进一个 tick 让选中格生效，再读核心与快捷栏
+   * 各自认的是第几格。
+   *
+   * 滚轮用合成事件而不是 `page.mouse.wheel`：那个方法要等页面把滚动做完才返回，而指针
+   * 锁定期间 headless Chromium 把整页的任务调度降到约 1/10，这个等待等不回来（实测卡满
+   * 30 秒的超时）。事件仍然投给真的监听器，走的还是输入适配器那条线。
+   */
+  const step = async (
+    deltaY = 0,
+  ): Promise<{ core: number; marked: string | undefined; highlighted: number }> =>
+    page.evaluate((dy) => {
+      const { core, hud } = window.__VOXEL__!;
+      if (dy !== 0) {
+        document.dispatchEvent(new WheelEvent('wheel', { deltaY: dy, cancelable: true }));
+      }
+      // 选中格下一个 tick 生效（ADR-0004）；HUD 那一步平时由游戏循环发起
+      core.tick();
+      hud.update();
+      const marked = document.querySelectorAll('#hotbar .hotbar__slot[data-selected]');
+      const first = marked[0];
+      return {
+        core: core.inventory.selectedSlot,
+        marked: first instanceof HTMLElement ? first.dataset.slot : undefined,
+        highlighted: marked.length,
+      };
+    }, deltaY);
+
+  await grabPointer(page);
+  // 开局选中第一格，而且只有一格高亮
+  expect(await step()).toEqual({ core: 0, marked: '0', highlighted: 1 });
+
+  // 数字键 3 选中第三格（真实按键）
+  await page.keyboard.press(HOTBAR_KEY_CODES[2]!);
+  expect(await step()).toEqual({ core: 2, marked: '2', highlighted: 1 });
+
+  // 往下滚一格
+  expect(await step(120)).toEqual({ core: 3, marked: '3', highlighted: 1 });
+
+  // 往上滚回来
+  expect(await step(-120)).toEqual({ core: 2, marked: '2', highlighted: 1 });
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 挖来一块泥土，再站在坑里斜着看旁边那一格的顶面。返回放置的落点与手上那一堆。
+ *
+ * 真实地形是起伏的，所以先把东边那一条铺平——视线落在哪一格因此算得准。挖掘那条线由
+ * 别的测试验，这里直接把意图给核心。放置的两条测试共用这一段。
+ */
+async function digDirtAndAimAside(
+  page: Page,
+): Promise<{ spot: Vec3; held: ItemStack | undefined }> {
+  return page.evaluate(
+    ({ pitch, grassTicks, pickupTicks, eastYaw, asidePitch, grass, air }) => {
+      const core = window.__VOXEL__!.core;
+      /** 把视角转到绝对的偏航与俯仰上。 */
+      const look = (yaw: number, to: number): void =>
+        core.turn(yaw - core.player.yaw, to - core.player.pitch);
+
+      const x = Math.floor(core.player.position.x);
+      const z = Math.floor(core.player.position.z);
+      const groundY = Math.floor(core.player.position.y) - 1;
+      for (let dx = 0; dx <= 5; dx++) {
+        core.setBlock(x + dx, groundY, z, grass);
+        core.setBlock(x + dx, groundY + 1, z, air);
+        core.setBlock(x + dx, groundY + 2, z, air);
+      }
+
+      // 挖掉脚下那块草：泥土进快捷栏第一格，玩家掉进一格深的坑里
+      look(0, -pitch);
+      core.setMining(true);
+      core.tick(grassTicks);
+      core.setMining(false);
+      core.tick(pickupTicks);
+
+      look(eastYaw, asidePitch);
+      core.tick();
+      const target = core.mining.target;
+      if (!target) throw new Error('斜着往下看应该对准旁边那一格');
+      return {
+        // 落点是命中面外侧那一格，这里自己算一遍，不调核心那个函数
+        spot: {
+          x: target.x + target.normal.x,
+          y: target.y + target.normal.y,
+          z: target.z + target.normal.z,
+        },
+        held: core.inventory.held,
+      };
+    },
+    {
+      pitch: MAX_PITCH,
+      grassTicks: miningTicks(BlockType.Grass),
+      pickupTicks: PICKUP_DELAY_TICKS + 2,
+      eastYaw: EAST_YAW,
+      asidePitch: ASIDE_PITCH,
+      grass: BlockType.Grass,
+      air: BlockType.Air,
+    },
+  );
+}
+
+test('锁定鼠标后右键把手上的方块放回世界，网格跟着重建', async ({ page }) => {
+  await waitForFullViewDistance(page);
+  await grabPointer(page);
+  const aimed = await digDirtAndAimAside(page);
+  expect(aimed.held).toEqual({ item: ItemType.Dirt, count: 1 });
+
+  // 按键与它落地的那一个 tick 必须在同一次同步的 evaluate 里，游戏循环才插不进来。
+  const placed = await page.evaluate(
+    ({ spot, placeButton }) => {
+      const { core, renderer, hud } = window.__VOXEL__!;
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      const before = {
+        block: core.getBlock(spot.x, spot.y, spot.z),
+        vertices: renderer.chunkMeshVertexCount(0, 0),
+      };
+
+      // 右键：事件真的经过输入适配器（监听器就挂在 document 上）。
+      // 用合成事件而不是 page.mouse.down：指针锁定下 Playwright 的鼠标事件会连带甩一发
+      // 大位移的 mousemove，视线当场偏到别处，而放置在下一个 tick 才落地——那一 tick
+      // 什么时候来由游戏循环说了算，届时对准的已经不是刚才那一格。真右键的那一面由
+      // 「未锁定鼠标时右键不放置」验。
+      document.dispatchEvent(new MouseEvent('mousedown', { button: placeButton }));
+      core.tick();
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      hud.update();
+
+      return {
+        before,
+        after: {
+          block: core.getBlock(spot.x, spot.y, spot.z),
+          vertices: renderer.chunkMeshVertexCount(0, 0),
+        },
+        slot0: core.inventory.slot(0),
+        filledSlots: document.querySelectorAll('#hotbar .hotbar__slot[data-item]').length,
+      };
+    },
+    { spot: aimed.spot, placeButton: MOUSE_BINDINGS.place },
+  );
+
+  // 挖来的那一个泥土放回了世界：落点原来是空气，现在是泥土方块
+  expect(placed.before.block).toBe(BlockType.Air);
+  expect(placed.after.block).toBe(BlockType.Dirt);
+  // 快捷栏那一格空了
+  expect(placed.slot0).toBeUndefined();
+  expect(placed.filledSlots).toBe(0);
+  // 网格跟着重建：那一格所在区块的顶点数变了
+  expect(placed.after.vertices).not.toBe(placed.before.vertices);
+  expect(errors).toEqual([]);
+});
+
+test('未锁定鼠标时右键不放置', async ({ page }) => {
+  const aimed = await digDirtAndAimAside(page);
+  expect(aimed.held).toEqual({ item: ItemType.Dirt, count: 1 });
+
+  // 真按一下右键（Playwright 按名字给按钮，'right' 就是 MOUSE_BINDINGS.place 那个编号）。
+  // 没有指针锁定，输入适配器一概不理——Esc 之后不该还能改世界。
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.up({ button: 'right' });
+
+  const after = await page.evaluate((spot) => {
+    const core = window.__VOXEL__!.core;
+    core.tick(2);
+    return { block: core.getBlock(spot.x, spot.y, spot.z), held: core.inventory.held };
+  }, aimed.spot);
+
+  expect(after.block).toBe(BlockType.Air);
+  expect(after.held).toEqual({ item: ItemType.Dirt, count: 1 });
+  expect(errors).toEqual([]);
+});
+
+test('锁定鼠标后右键不弹出浏览器菜单', async ({ page }) => {
+  /** 投一发可取消的 contextmenu，返回它被拦下了没有。 */
+  const menuBlocked = async (): Promise<boolean> =>
+    page.evaluate(() => {
+      const event = new MouseEvent('contextmenu', { cancelable: true });
+      document.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+
+  // 没进第一人称时右键还是浏览器的事
+  expect(await menuBlocked()).toBe(false);
+
+  // 锁定期间右键是放置，菜单一弹就抢走了后面的按键
+  await grabPointer(page);
+  expect(await menuBlocked()).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('右下角画着手上那块方块，切换选中格时跟着换', async ({ page }) => {
+  await waitForFullViewDistance(page);
+
+  // 不锁鼠标：测的是渲染层，挖掘与选格直接给核心。整段跑在一次同步的 evaluate 里，
+  // 游戏循环插不进来，读到的就是刚断言的那一帧。
+  const hand = await page.evaluate(
+    ({ pitch, grassTicks, logTicks, pickupTicks, log }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const pixel = window.__PIXEL_RGB__!;
+      const look = (yaw: number, to: number): void =>
+        core.turn(yaw - core.player.yaw, to - core.player.pitch);
+
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      // 开局空手，右下角什么都不画
+      const emptyAtStart = renderer.heldItem;
+
+      const x = Math.floor(core.player.position.x);
+      const z = Math.floor(core.player.position.z);
+      const groundY = Math.floor(core.player.position.y) - 1;
+
+      // 挖掉脚下那块草：泥土进第一格
+      look(0, -pitch);
+      core.setMining(true);
+      core.tick(grassTicks);
+      core.setMining(false);
+      core.tick(pickupTicks);
+
+      // 把新的脚下那一格换成原木再挖掉：原木物品另占一格，手上因此有两种东西
+      core.setBlock(x, groundY - 1, z, log);
+      core.setMining(true);
+      core.tick(logTicks);
+      core.setMining(false);
+      core.tick(pickupTicks);
+
+      // 抬头看天：右下角那块方块衬在天空上，那一处是褐还是蓝分得清清楚楚
+      look(0, pitch);
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      const dirt = renderer.heldItem;
+      if (!dirt) throw new Error('手上有泥土时右下角应该画着一块方块');
+      const dirtRgb = pixel(dirt.screen.x, dirt.screen.y);
+
+      // 切到第二格：手上换成原木
+      core.selectHotbarSlot(1);
+      core.tick();
+      renderer.render(1);
+      const oak = renderer.heldItem;
+
+      // 切到空着的第三格：右下角什么都不画了，同一处露出天空
+      core.selectHotbarSlot(2);
+      core.tick();
+      renderer.render(1);
+      const empty = renderer.heldItem;
+
+      return {
+        emptyAtStart,
+        dirt,
+        dirtRgb,
+        oak,
+        empty,
+        emptyRgb: pixel(dirt.screen.x, dirt.screen.y),
+        hotbar: core.inventory.hotbar(),
+      };
+    },
+    {
+      pitch: MAX_PITCH,
+      grassTicks: miningTicks(BlockType.Grass),
+      logTicks: miningTicks(BlockType.OakLog),
+      pickupTicks: PICKUP_DELAY_TICKS + 2,
+      log: BlockType.OakLog,
+    },
+  );
+
+  /** 褐（方块贴图）而不是蓝（天空）：红色分量压过蓝色。 */
+  const isBrown = (rgb: readonly number[]): boolean => rgb[0]! > rgb[2]!;
+
+  expect(hand.hotbar[0]).toEqual({ item: ItemType.Dirt, count: 1 });
+  expect(hand.hotbar[1]).toEqual({ item: ItemType.OakLog, count: 1 });
+
+  // 开局空手不画
+  expect(hand.emptyAtStart).toBeUndefined();
+
+  // 手上有泥土：右下角有一块方块，落在画面的右半边、下半边，而且没出画面
+  expect(hand.dirt!.item).toBe(ItemType.Dirt);
+  expect(hand.dirt!.screen.x).toBeGreaterThan(0.2);
+  expect(hand.dirt!.screen.x).toBeLessThan(1);
+  expect(hand.dirt!.screen.y).toBeLessThan(-0.2);
+  expect(hand.dirt!.screen.y).toBeGreaterThan(-1);
+  // 真画进了画布：那一处是方块贴图的褐，不是天空的蓝
+  expect(isBrown(hand.dirtRgb)).toBe(true);
+
+  // 切一格就换成原木，切到空格就不画了，天空重新露出来
+  expect(hand.oak!.item).toBe(ItemType.OakLog);
+  expect(hand.empty).toBeUndefined();
+  expect(isBrown(hand.emptyRgb)).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+test('贴着墙站着，手上那块方块不会被墙切穿', async ({ page }) => {
+  await waitForFullViewDistance(page);
+  // 先挖来一块泥土（顺带把东边那一条铺平）
+  const aimed = await digDirtAndAimAside(page);
+  expect(aimed.held).toEqual({ item: ItemType.Dirt, count: 1 });
+
+  const wall = await page.evaluate(
+    ({ eastYaw, stone, walkTicks }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const pixel = window.__PIXEL_RGB__!;
+      const look = (yaw: number, to: number): void =>
+        core.turn(yaw - core.player.yaw, to - core.player.pitch);
+
+      // 东边隔一格砌一堵石墙，高度盖住眼睛，再走过去贴着它平视
+      const wallX = Math.floor(core.player.position.x) + 1;
+      const z = Math.floor(core.player.position.z);
+      const feetY = Math.floor(core.player.position.y);
+      core.setBlock(wallX, feetY + 1, z, stone);
+      core.setBlock(wallX, feetY + 2, z, stone);
+      look(eastYaw, 0);
+      core.setMoveIntent({ forward: true, back: false, left: false, right: false, jump: false });
+      core.tick(walkTicks);
+      core.setMoveIntent({ forward: false, back: false, left: false, right: false, jump: false });
+
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      const held = renderer.heldItem;
+      if (!held) throw new Error('手上有泥土时右下角应该画着一块方块');
+
+      return {
+        // 眼睛到墙面的距离：贴住了就是玩家的半宽
+        eyeToWall: wallX - core.player.position.x,
+        heldRgb: pixel(held.screen.x, held.screen.y),
+        wallRgb: pixel(0, 0),
+      };
+    },
+    { eastYaw: EAST_YAW, stone: BlockType.Stone, walkTicks: TICK_RATE },
+  );
+
+  // 真的贴住了墙：眼睛离墙面只有半个碰撞箱宽，比手上那块方块（0.72 格）近得多
+  expect(wall.eyeToWall).toBeCloseTo(PLAYER_WIDTH / 2, 5);
+  // 画面正中是石头的灰（三个分量差不多）
+  expect(Math.abs(wall.wallRgb[0] - wall.wallRgb[2])).toBeLessThan(12);
+  // 手持那一点仍是泥土的褐：手持是单独一遍渲染，不参与世界的深度测试
+  expect(wall.heldRgb[0] - wall.heldRgb[2]).toBeGreaterThan(20);
   expect(errors).toEqual([]);
 });
 

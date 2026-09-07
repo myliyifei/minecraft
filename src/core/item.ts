@@ -46,3 +46,16 @@ export function stackLimit(item: ItemType): number {
 export interface ItemSink {
   add(stack: ItemStack): number;
 }
+
+/**
+ * 手上拿着的那一堆物品，以及从它里面用掉一个。
+ *
+ * 放置依赖它而不是 `Inventory` 本身：放置只要「手上是什么」和「用掉一个」两件事，
+ * 与「手上」是快捷栏的哪一格无关。测试里因此可以塞一只拿着任意东西的手。
+ */
+export interface Hand {
+  /** 手持的那一堆（快捷栏选中格里的），空手时 undefined。 */
+  readonly held: ItemStack | undefined;
+  /** 用掉手上的一个。空手时什么都不做。 */
+  takeOne(): void;
+}

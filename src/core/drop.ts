@@ -9,7 +9,7 @@ import {
   hitboxAt,
   isOnGround,
   movedAlong,
-  overlaps,
+  touches,
   type Hitbox,
 } from './physics';
 import type { Axis, Vec3 } from './vec3';
@@ -196,7 +196,7 @@ class Drop implements DropView {
    */
   collectInto(pickupBox: Hitbox, into: ItemSink): boolean {
     if (this.ticks <= PICKUP_DELAY_TICKS) return false;
-    if (!overlaps(pickupBox, this.hitbox)) return false;
+    if (!touches(pickupBox, this.hitbox)) return false;
     const left = into.add({ item: this.item, count: this.amount });
     if (left === 0) return true;
     this.amount = left;

@@ -1507,6 +1507,29 @@ test('按 E 打开背包界面，36 格与快捷栏对应，再按 E 关闭', as
   expect(errors).toEqual([]);
 });
 
+test('关掉背包界面之后鼠标自动回到第一人称，视角不被甩一下', async ({ page }) => {
+  await grabPointer(page);
+  const screen = page.locator('#inventory-screen');
+  const look = async (): Promise<{ yaw: number; pitch: number }> =>
+    page.evaluate(() => {
+      const { yaw, pitch } = window.__VOXEL__!.core.player;
+      return { yaw, pitch };
+    });
+
+  const before = await look();
+  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await expect(screen).toBeVisible();
+  await expect.poll(() => readLockedElementId(page)).toBe(null);
+
+  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await expect(screen).toBeHidden();
+  // 不必再点一下画面：界面一关就回到指针锁定，网页鼠标随即消失
+  await expect.poll(() => readLockedElementId(page)).toBe('game');
+  // 锁定生效时浏览器补投的那发光标归位 mousemove 必须被丢掉，否则关掉背包视角就转过去了
+  expect(await look()).toEqual(before);
+  expect(errors).toEqual([]);
+});
+
 test('按住背包键不放，界面不会反复开关', async ({ page }) => {
   await grabPointer(page);
   const screen = page.locator('#inventory-screen');
@@ -1537,6 +1560,8 @@ test('背包界面开着时按 Esc 关掉它', async ({ page }) => {
   // 界面开着时指针锁定已经交还，Esc 不再被浏览器吃掉，由输入适配器关掉界面
   await page.keyboard.press(INVENTORY_CLOSE_KEY);
   await expect(screen).toBeHidden();
+  // 与按背包键关界面一样，鼠标自动回到第一人称
+  await expect.poll(() => readLockedElementId(page)).toBe('game');
   expect(errors).toEqual([]);
 });
 

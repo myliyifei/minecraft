@@ -71,14 +71,34 @@ export function installPlayerControls(
   // 否则下一发会拿一个过时的时刻算出偏小的速度。
   let lastMoveAt = 0;
 
+  /**
+   * 抓回指针锁定：进第一人称，网页鼠标随即消失。
+   *
+   * 两处入口都走这里——点画布，以及关掉背包界面。合成一个函数是因为锁定生效后浏览器会
+   * 补投一发光标归位的 mousemove（见 `dropWarpMove`），漏掉那一发视角就会被甩一下。
+   *
+   * 请求可能被浏览器拒：它只在用户手势里放行。拒了就退回「玩家点一下画面」，但那个
+   * rejection 必须接住，否则会变成控制台里一条未处理的错误。
+   */
+  const grabPointer = (): void => {
+    // 标记要在这里而不是在 pointerlockchange 里立：那发归位事件比锁定变更事件先到。
+    dropWarpMove = true;
+    // 老浏览器这个方法返回 void，新的返回 Promise，所以先收成 unknown 再认。
+    const request: unknown = canvas.requestPointerLock();
+    if (request instanceof Promise) {
+      request.catch(() => {
+        // 没锁上，那发归位事件也就不会来。
+        dropWarpMove = false;
+      });
+    }
+  };
+
   const onClick = (): void => {
     // 指针锁定只能由用户手势触发，所以挂在 click 上。
     if (locked()) return;
     // 界面开着时鼠标是用来点格子的，不能把它抓回第一人称。
     if (uiOpen()) return;
-    // 标记要在这里而不是在 pointerlockchange 里立：那发归位事件比锁定变更事件先到。
-    dropWarpMove = true;
-    void canvas.requestPointerLock();
+    grabPointer();
   };
 
   const onLockChange = (): void => {
@@ -142,10 +162,13 @@ export function installPlayerControls(
       // 每个 tick 开一次关一次；移动、连锁键那些「按下就设成同一个值」的动作幂等，
       // 所以只有切换型的这两处要挡。
       if (event.repeat) return;
+      // 现在开着就说明这一下是关它。开合下一个 tick 才生效，方向得在这里判。
+      const closing = uiOpen();
       target.toggleInventory();
-      // 打开界面就把鼠标交还给页面，玩家拿它点格子。释放锁定顺带清掉按住的键与挖掘
-      // 状态（见 onLockChange），所以这里不必再清一遍。
-      if (locked()) document.exitPointerLock();
+      // 打开就把鼠标交还给页面，玩家拿它点格子；关上就抓回来，玩家不必再点一下画面。
+      // 释放锁定顺带清掉按住的键与挖掘状态（见 onLockChange），所以这里不必再清一遍。
+      if (closing) grabPointer();
+      else document.exitPointerLock();
       return;
     }
 
@@ -154,6 +177,9 @@ export function installPlayerControls(
       // 同样要挡连发，理由见上。
       if (event.repeat) return;
       target.toggleInventory();
+      // 与按背包键关界面一样把鼠标抓回来。浏览器可能拒——Esc 是它自己的「逃脱手势」，
+      // 刚用它退出过锁定的话会有一段冷却。拒了就退回「玩家点一下画面」。
+      grabPointer();
       return;
     }
 

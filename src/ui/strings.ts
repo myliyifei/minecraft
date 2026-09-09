@@ -11,6 +11,7 @@ export const STRINGS = {
   gameTitle: '体素世界',
   // 省略号交给加载屏上那个闪动的方块光标，文案本身不带标点。
   loadingWorld: '正在生成世界',
+  crosshair: '十字准星',
   hotbar: '快捷栏',
   levelBar: '等级',
   levelProgress: '到下一级的经验',

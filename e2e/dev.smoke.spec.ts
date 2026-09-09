@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { BlockType, miningTicks } from '../src/core/block';
 import {
   CHUNK_SIZE,
@@ -35,7 +35,12 @@ import {
   tileCell,
 } from '../src/render/atlas';
 import { ITEM_NAMES, STRINGS } from '../src/ui/strings';
-import { countCanvasColors, installPixelProbe, waitForFirstFrame } from './canvas';
+import {
+  countCanvasColors,
+  installPixelProbe,
+  readElementPixels,
+  waitForFirstFrame,
+} from './canvas';
 
 /** 默认视距下已加载区块覆盖的世界坐标区间。 */
 const LOADED_MIN = -DEFAULT_VIEW_RADIUS * CHUNK_SIZE;
@@ -200,6 +205,23 @@ async function grabPointer(page: Page): Promise<void> {
   await page.locator('#game').click();
   await expect.poll(() => readLockedElementId(page)).toBe('game');
   await page.waitForTimeout(200);
+}
+
+/** 元素中心离视口正中最多差这么多像素：视口边长是奇数时 50% 会落在半像素上。 */
+const CENTER_TOLERANCE_PX = 1;
+
+/** 断言这个元素的中心落在视口正中。 */
+async function expectCenteredOnScreen(locator: Locator): Promise<void> {
+  const box = await locator.boundingBox();
+  const viewport = locator.page().viewportSize();
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(Math.abs(box!.x + box!.width / 2 - viewport!.width / 2)).toBeLessThanOrEqual(
+    CENTER_TOLERANCE_PX,
+  );
+  expect(Math.abs(box!.y + box!.height / 2 - viewport!.height / 2)).toBeLessThanOrEqual(
+    CENTER_TOLERANCE_PX,
+  );
 }
 
 /**
@@ -1707,6 +1729,48 @@ test('背包界面里点一格拿起泥土，再点空格放下', async ({ page 
   await expect(cursor).toBeHidden();
   // HUD 的快捷栏跟着空了：界面里那一格与 HUD 那一格是同一格
   await expect(page.locator('#hotbar .hotbar__slot[data-slot="0"][data-item]')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+/** 换到这个尺寸再核对一遍居中：宽高都跟默认视口不一样，两边还都是奇数。 */
+const ODD_VIEWPORT = { width: 901, height: 533 };
+
+test('屏幕正中有十字准星，改窗口尺寸后仍在正中，而且不吃鼠标事件', async ({ page }) => {
+  const crosshair = page.locator('#crosshair');
+  await expect(crosshair).toBeVisible();
+  await expect(crosshair).toHaveAttribute('aria-label', STRINGS.crosshair);
+  await expectCenteredOnScreen(crosshair);
+
+  // 换个窗口尺寸：居中靠的是 CSS 里那个 50%，不是挂上去时算的那一次像素
+  await page.setViewportSize(ODD_VIEWPORT);
+  await expectCenteredOnScreen(crosshair);
+
+  // 真画上去了：那一小块里既有白线的白，也有描边的墨色。深浅背景上都看得见靠的就是
+  // 这两样同时在——白衬在树干、坑底上，墨边衬在天空上。
+  const pixels = await readElementPixels(crosshair);
+  expect(pixels.some((rgb) => rgb.every((channel) => channel >= 250))).toBe(true);
+  expect(pixels.some((rgb) => rgb.every((channel) => channel <= 40))).toBe(true);
+
+  // 准星正压在画布正中，也正是 Playwright 点 #game 时落的那一点。它要是接收鼠标事件，
+  // 这一下就点在准星上，玩家永远进不了第一人称。
+  await grabPointer(page);
+  expect(errors).toEqual([]);
+});
+
+test('背包界面开着时不显示十字准星', async ({ page }) => {
+  const crosshair = page.locator('#crosshair');
+  const screen = page.locator('#inventory-screen');
+  await expect(crosshair).toBeVisible();
+
+  await grabPointer(page);
+  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await expect(screen).toBeVisible();
+  // 那时鼠标交还给页面，玩家在摆物品，不是在瞄准
+  await expect(crosshair).toBeHidden();
+
+  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await expect(screen).toBeHidden();
+  await expect(crosshair).toBeVisible();
   expect(errors).toEqual([]);
 });
 

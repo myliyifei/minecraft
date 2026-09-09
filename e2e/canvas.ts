@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 declare global {
   interface Window {
@@ -73,6 +73,40 @@ export async function countCanvasColors(page: Page): Promise<number> {
     }
     return colors.size;
   });
+}
+
+/**
+ * 一个 DOM 元素在屏幕上那一块的所有像素颜色。
+ *
+ * 上面那两个读的是画布，这一个读的是界面：`toBeVisible` 证不到东西真画上去了——一个
+ * 全透明的空框照样有尺寸。截图在 Node 这一侧拿到，解码要回到页面里做：Node 这边没有
+ * PNG 解码器，而浏览器本来就有一个。
+ */
+export async function readElementPixels(
+  locator: Locator,
+): Promise<Array<[number, number, number]>> {
+  const png = (await locator.screenshot()).toString('base64');
+  return locator.page().evaluate(async (base64) => {
+    const image = new Image();
+    const decoded = await new Promise<boolean>((resolve) => {
+      image.onload = () => resolve(true);
+      image.onerror = () => resolve(false);
+      image.src = `data:image/png;base64,${base64}`;
+    });
+    if (!decoded) throw new Error('截图解不开');
+    const scratch = document.createElement('canvas');
+    scratch.width = image.naturalWidth;
+    scratch.height = image.naturalHeight;
+    const context = scratch.getContext('2d');
+    if (!context) throw new Error('拿不到 2D 上下文');
+    context.drawImage(image, 0, 0);
+    const { data } = context.getImageData(0, 0, scratch.width, scratch.height);
+    const pixels: Array<[number, number, number]> = [];
+    for (let i = 0; i < data.length; i += 4) {
+      pixels.push([data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0]);
+    }
+    return pixels;
+  }, png);
 }
 
 /** 等首帧画完：加载遮罩被移除即表示核心与渲染都就绪。 */

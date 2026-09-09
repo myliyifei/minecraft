@@ -12,7 +12,7 @@ export interface DebugHandle {
   readonly core: GameCore;
   readonly renderer: WorldRenderer;
   /**
-   * 整套 HUD（快捷栏与等级条）。端到端测试要在一次同步的 evaluate 里推进 tick 再看界面，
+   * 整套 HUD（见 src/ui/hud.ts）。端到端测试要在一次同步的 evaluate 里推进 tick 再看界面，
    * 所以得自己调它的 `update()`——那一步平时是游戏循环发起的。
    */
   readonly hud: Hud;

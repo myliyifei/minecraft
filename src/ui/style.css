@@ -152,6 +152,55 @@ body {
 }
 
 /*
+ * 十字准星：屏幕正中的一个十字，白线加一圈墨色描边。
+ *
+ * 不装进 .hud 那一栏里：那一栏用 transform 摆到屏幕底部，而 transform 会让它成为
+ * 后代 position: fixed 的包含块——装进去的准星会以那一栏为基准定位，落到屏幕下边。
+ * 所以它和背包界面一样直接挂在 body 上，各自贴着视口。
+ *
+ * 居中只靠视口的 50%，窗口改尺寸时浏览器自己重排，JS 里没有一行位置计算。
+ * pointer-events: none 与 .hud 那一处同一个理由，只是这里更要紧：它正压在画布正中，
+ * 也正是玩家点进第一人称时点的那一点。
+ *
+ * 不用原版那套反色混合（mix-blend-mode: difference）：反色在中灰上等于没画，而这个
+ * 世界的石头正好是 --stone #7f7f7f，坑底与山壁一大片都是它。白线加墨边不挑背景色，
+ * 硬边不带模糊，与标题、快捷栏数量那几处同一套做法。
+ *
+ * 这里刻意不给 display：JS 切的 hidden 属性因此直接生效，不必像上面那几处一样再把
+ * display: none 写回来。往这条规则里加 display 的话，收起准星那一条会当场失效。
+ */
+.crosshair {
+  /* 白线的粗细与长度。描边在四个方向各往外让出 1px，所以整块比十字大 2px。 */
+  --crosshair-line: 2px;
+  --crosshair-span: var(--tile);
+  --crosshair-edge: 1px;
+
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--crosshair-span) + var(--crosshair-edge) * 2);
+  height: calc(var(--crosshair-span) + var(--crosshair-edge) * 2);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  /*
+   * 四层纯色，每层就是一根条：先列的画在上面，所以两根白线压在两根墨条上。
+   * 墨条比白线长 2px 也宽 2px，露在外面的正好是一圈 1px 的描边。
+   */
+  background-image:
+    linear-gradient(#fff 0 0),
+    linear-gradient(#fff 0 0),
+    linear-gradient(var(--ink) 0 0),
+    linear-gradient(var(--ink) 0 0);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size:
+    var(--crosshair-line) var(--crosshair-span),
+    var(--crosshair-span) var(--crosshair-line),
+    calc(var(--crosshair-line) + var(--crosshair-edge) * 2) 100%,
+    100% calc(var(--crosshair-line) + var(--crosshair-edge) * 2);
+}
+
+/*
  * 等级条：等级数字在上、进度条在下，进度条撑满整栏。
  * 数字与进度条同色，玩家一眼就看出这两样说的是一件事。
  */

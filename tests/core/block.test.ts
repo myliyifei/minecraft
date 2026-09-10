@@ -8,7 +8,7 @@ import {
   isBreakable,
   miningTicks,
 } from '../../src/core/block';
-import { BARE_HAND, ItemType, ToolClass, type HeldTool } from '../../src/core/item';
+import { BARE_HAND, ItemType, ToolClass, type MiningTool } from '../../src/core/item';
 
 /**
  * 木制与石制那一档的挖掘速度倍率，来自 #15 的物品属性表。
@@ -18,20 +18,20 @@ const WOODEN = 2;
 const STONE = 4;
 
 /** 手上拿着某一类、某一档的工具。 */
-function tool(toolClass: ToolClass, speed: number): HeldTool {
+function tool(toolClass: ToolClass, speed: number): MiningTool {
   return { toolClass, speed };
 }
 
 /**
  * issue #7 给的硬度与空手耗时，全部写死字面值。
  *
- * 不从 `BLOCKS` 反算耗时：右边一旦是「硬度 × 1.5 × 20」，就是拿实现的式子比它自己，
+ * 不从 `BLOCKS` 反算耗时：右边一旦是「硬度 × 30」，就是拿实现的式子比它自己，
  * 硬度写错也照样通过。这张表是需求那一侧的数字，两列必须各自对得上。
  */
 const HAND_MINING: Array<[string, BlockType, number, number]> = [
   ['草方块', BlockType.Grass, 0.6, 18],
   ['泥土', BlockType.Dirt, 0.5, 15],
-  // 石头要镐，空着手是每点硬度 5 秒而不是 1.5 秒——按 1.5 算会是 45 tick
+  // 石头要镐，空着手是每点硬度 100 tick 而不是 30——按 30 算会是 45 tick
   ['石头', BlockType.Stone, 1.5, 150],
   ['原木', BlockType.OakLog, 2, 60],
   ['树叶', BlockType.OakLeaves, 0.2, 6],
@@ -146,11 +146,11 @@ describe('空手挖掘的掉落表', () => {
 });
 
 describe('掉落看手上的工具类别', () => {
-  it('需要工具的方块，手上没有对口工具时什么都不掉', () => {
+  it('需要工具的方块，手上没有正确工具时什么都不掉', () => {
     for (const block of Object.values(BlockType)) {
       if (!BLOCKS[block].requiresTool) continue;
       expect(blockDrop(block, ToolClass.None), `方块 ${block} 空手`).toBeNull();
-      // 拿着的不是对口的那一类也一样：石头要镐，斧头挖得动也拿不到东西
+      // 拿着的不是正确工具那一类也一样：石头要镐，斧头挖得动也拿不到东西
       expect(blockDrop(block, ToolClass.Axe), `方块 ${block} 持斧`).toBeNull();
     }
   });
@@ -240,9 +240,9 @@ describe('硬度换算成挖掘耗时', () => {
 describe('挖掘耗时看手上的工具', () => {
   /**
    * issue #15 的「关键数值」一节给的 tick 数：耗时 = 向上取整（硬度 × 30 ÷ 倍率），
-   * 需要工具而手上没有对口工具时则是硬度 × 100。同样写死字面值。
+   * 需要工具而手上没有正确工具时则是每点硬度 100 tick。同样写死字面值。
    */
-  const TIMINGS: Array<[string, BlockType, HeldTool, number]> = [
+  const TIMINGS: Array<[string, BlockType, MiningTool, number]> = [
     ['泥土持木铲', BlockType.Dirt, tool(ToolClass.Shovel, WOODEN), 8],
     ['草方块持木铲', BlockType.Grass, tool(ToolClass.Shovel, WOODEN), 9],
     ['原木持木斧', BlockType.OakLog, tool(ToolClass.Axe, WOODEN), 30],
@@ -258,7 +258,7 @@ describe('挖掘耗时看手上的工具', () => {
   }
 
   it('拿错工具与空手一样慢', () => {
-    // 铲挖原木、镐挖泥土都不对口，倍率不起作用
+    // 铲挖原木、镐挖泥土都不是正确工具，倍率不起作用
     expect(miningTicks(BlockType.OakLog, tool(ToolClass.Shovel, STONE))).toBe(
       miningTicks(BlockType.OakLog, BARE_HAND),
     );
@@ -267,7 +267,7 @@ describe('挖掘耗时看手上的工具', () => {
     );
   });
 
-  it('需要工具的方块，拿错工具时仍按 5 倍那一档算', () => {
+  it('需要工具的方块，拿错工具时仍按每点硬度 100 tick 那一档算', () => {
     // 石头要镐：拿着斧头挖仍是 150 tick，不是 1.5 × 30 ÷ 4
     expect(miningTicks(BlockType.Stone, tool(ToolClass.Axe, STONE))).toBe(150);
   });

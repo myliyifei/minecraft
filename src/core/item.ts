@@ -42,15 +42,18 @@ export type ToolClass = (typeof ToolClass)[keyof typeof ToolClass];
  *
  * 只有这两个数进得了耗时公式，所以挖掘拿到的是它而不是整堆物品——耐久与图标不参与
  * 算耗时。哪种物品对应哪一件工具是物品表的事（#21、#22）。
+ *
+ * 与 `Hand` 不是一回事，别混：`Hand` 是「选中格里那一堆物品」，这里是「那一堆在挖掘
+ * 那一步算什么」。空手也有这么一个值（`BARE_HAND`），它不是一只 `Hand`。
  */
-export interface HeldTool {
+export interface MiningTool {
   readonly toolClass: ToolClass;
   /** 挖掘速度倍率：木 2、石 4（见 #15 的物品属性表）。空手是 1。 */
   readonly speed: number;
 }
 
 /** 空手：没有类别，因此对任何方块都不算正确工具，倍率 1。手上拿着的不是工具时也是它。 */
-export const BARE_HAND: HeldTool = Object.freeze({ toolClass: ToolClass.None, speed: 1 });
+export const BARE_HAND: MiningTool = Object.freeze({ toolClass: ToolClass.None, speed: 1 });
 
 export interface ItemDef {
   /** 一格最多堆多少个。工具那类不可堆叠的物品（后续切片）是 1。 */

@@ -26,7 +26,7 @@ interface SlotRef {
 }
 
 /** 关闭界面时一样东西都不用交出去。共用一份，免得每次关界面都分配一个空数组。 */
-const NOTHING_SPILLED: readonly ItemStack[] = Object.freeze([]);
+const NO_LEFTOVERS: readonly ItemStack[] = Object.freeze([]);
 
 /** 背包界面的只读视图。界面层读它画覆盖层。 */
 export interface InventoryScreenView {
@@ -83,7 +83,7 @@ export class InventoryScreen implements InventoryScreenView {
    */
   toggle(): readonly ItemStack[] {
     this.isOpen = !this.isOpen;
-    return this.isOpen ? NOTHING_SPILLED : this.putEverythingBack();
+    return this.isOpen ? NO_LEFTOVERS : this.putEverythingBack();
   }
 
   /**
@@ -152,9 +152,9 @@ export class InventoryScreen implements InventoryScreenView {
    * 而不是留在一个已经关掉的界面里。
    */
   private putEverythingBack(): readonly ItemStack[] {
-    const spilled: ItemStack[] = [];
+    const leftovers: ItemStack[] = [];
     const fromCursor = this.putCursorBack();
-    if (fromCursor) spilled.push(fromCursor);
+    if (fromCursor) leftovers.push(fromCursor);
 
     const extra = this.extra;
     if (extra) {
@@ -163,10 +163,10 @@ export class InventoryScreen implements InventoryScreenView {
         if (!stack) continue;
         extra.setSlot(i, undefined);
         const spare = this.slots.add(stack);
-        if (spare > 0) spilled.push({ item: stack.item, count: spare });
+        if (spare > 0) leftovers.push({ item: stack.item, count: spare });
       }
     }
-    return spilled;
+    return leftovers;
   }
 
   /**

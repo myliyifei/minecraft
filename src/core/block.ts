@@ -1,4 +1,4 @@
-import { ItemType, ToolClass, type HeldTool, type ItemStack } from './item';
+import { ItemType, ToolClass, type ItemStack, type MiningTool } from './item';
 
 /**
  * 方块种类。数值直接存进区块的 Uint8Array，因此已发布的编号不可改动，新方块追加即可。
@@ -171,7 +171,7 @@ const TICKS_PER_HARDNESS = 30;
 
 /**
  * 需要工具而手上没有正确工具时，一点硬度要挖多少 tick。
- * 是上面那一档的 5 倍，石头因此空手要 150 tick。
+ * 石头因此空手要 150 tick，而不是按上面那一档算出来的 45。
  */
 const TICKS_PER_HARDNESS_WITHOUT_TOOL = 100;
 
@@ -198,7 +198,7 @@ function isProperTool(def: BlockDef, toolClass: ToolClass): boolean {
  *
  * 空手（`BARE_HAND`）的结果：草 18、泥土 15、树叶 6、原木 60、石头 150。
  */
-export function miningTicks(block: BlockType, tool: HeldTool): number {
+export function miningTicks(block: BlockType, tool: MiningTool): number {
   const def = BLOCKS[block];
   const proper = isProperTool(def, tool.toolClass);
   if (def.requiresTool && !proper) {

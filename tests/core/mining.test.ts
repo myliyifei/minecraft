@@ -125,7 +125,7 @@ describe('挖掘耗时按硬度表', () => {
   const TIMINGS: Array<[string, BlockType, number]> = [
     ['草方块', BlockType.Grass, 18],
     ['泥土', BlockType.Dirt, 15],
-    // 石头要镐，空着手是每点硬度 5 秒而不是 1.5 秒
+    // 石头要镐，空着手是每点硬度 100 tick 而不是 30
     ['石头', BlockType.Stone, 150],
     ['原木', BlockType.OakLog, 60],
     ['树叶', BlockType.OakLeaves, 6],

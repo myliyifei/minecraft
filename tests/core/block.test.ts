@@ -253,7 +253,7 @@ describe('放置表', () => {
 });
 
 describe('方块表的「使用」一列', () => {
-  it('只有工作台是可使用方块：右键对着它打开界面', () => {
+  it('只有工作台是可使用方块：使用键对着它打开界面', () => {
     for (const block of Object.values(BlockType)) {
       expect(blockUse(block), `方块 ${block}`).toBe(
         block === BlockType.CraftingTable ? BlockUse.CraftingTable : BlockUse.None,

@@ -22,7 +22,7 @@ export const STRINGS = {
   // 两套界面里的合成网格（背包界面 2x2、工作台界面 3x3），以及旁边显示成品的输出格。
   craftingGrid: '合成网格',
   craftingOutput: '输出格',
-  // 工作台界面的标题：右键对着工作台打开的那一层。
+  // 工作台界面的标题：使用键对着工作台打开的那一层。
   craftingTable: '工作台',
 } as const;
 

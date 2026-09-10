@@ -62,7 +62,7 @@ function dirt(count: number): ItemStack {
 interface Setup {
   readonly world: World;
   readonly inventory: Inventory;
-  /** 按一次右键：试着放一块，返回放下了没有。 */
+  /** 按一次使用键：试着放一块，返回放下了没有。 */
   place(): boolean;
   /** 换成瞄着别处，或者什么都没瞄（undefined）。 */
   aimAt(hit: BlockHit | undefined): void;

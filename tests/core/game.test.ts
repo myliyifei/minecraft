@@ -813,7 +813,7 @@ describe('GameCore 的快捷栏选中格', () => {
 });
 
 describe('GameCore 的放置方块', () => {
-  /** 按一次右键并推进一个 tick。 */
+  /** 按一次使用键并推进一个 tick。 */
   function placeOnce(core: GameCore): void {
     core.use();
     core.tick();
@@ -881,7 +881,7 @@ describe('GameCore 的放置方块', () => {
     expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
   });
 
-  it('超过 4.5 格就不是目标，右键什么都不发生', () => {
+  it('超过 4.5 格就不是目标，使用键什么都不发生', () => {
     const core = holdingDirt();
     // 6 格外立一块，平视对着它：触及距离之外，没有目标
     core.setBlock(6, FLAT_GROUND_Y + 1, 0, BlockType.Stone);
@@ -907,7 +907,7 @@ describe('GameCore 的放置方块', () => {
     expect(core.inventory.held).toBeUndefined();
   });
 
-  it('选中格是空的时候右键无效', () => {
+  it('选中格是空的时候使用键无效', () => {
     // 空手站在地面上，斜着看 3 格外那块草的顶面：手上有东西的话这一下放得下
     const core = coreOnFlatGround();
     look(core, EAST_YAW, ASIDE_PITCH);
@@ -955,7 +955,7 @@ describe('GameCore 的放置方块', () => {
     expect(core.takeChangedBlocks()).toEqual([]);
   });
 
-  it('同一个 tick 里按两次右键只放一块', () => {
+  it('同一个 tick 里按两次使用键只放一块', () => {
     const core = holdingDirt();
     core.setMining(true);
     core.tick(miningTicks(BlockType.Grass, BARE_HAND));
@@ -1246,7 +1246,7 @@ describe('GameCore 的合成网格与输出格', () => {
     return core;
   }
 
-  it('手持木板按右键放置：命中面外侧那一格变成木板方块，手上少 1 块', () => {
+  it('手持木板按使用键放置：命中面外侧那一格变成木板方块，手上少 1 块', () => {
     const core = holdingPlanks();
     core.use();
     core.tick();
@@ -1308,7 +1308,7 @@ describe('GameCore 的工作台', () => {
     return core;
   }
 
-  /** 按一次右键（使用）并推进一个 tick。 */
+  /** 按一次使用键并推进一个 tick。 */
   function useOnce(core: GameCore): void {
     core.use();
     core.tick();
@@ -1330,7 +1330,7 @@ describe('GameCore 的工作台', () => {
     expect(core.experience.total).toBe(3);
   });
 
-  it('手持工作台按右键放置成工作台方块，手上那一格清空', () => {
+  it('手持工作台按使用键放置成工作台方块，手上那一格清空', () => {
     // 先把摆好的工作台挖来，再对着它身后那块石头把它放回去
     const core = facingTable();
     core.setBlock(...BEHIND_AHEAD, BlockType.Stone);
@@ -1346,7 +1346,7 @@ describe('GameCore 的工作台', () => {
     expect(core.inventory.held).toBeUndefined();
   });
 
-  it('对着触及距离内的工作台按右键，下一个 tick 打开工作台界面（ADR-0004）', () => {
+  it('对着触及距离内的工作台按使用键，下一个 tick 打开工作台界面（ADR-0004）', () => {
     const core = facingTable();
     core.use();
     expect(core.craftingTableScreen.open).toBe(false);
@@ -1379,7 +1379,7 @@ describe('GameCore 的工作台', () => {
     expect(core.mining.progress).toBe(0);
   });
 
-  it('手里拿着泥土对着工作台按右键也是打开界面，泥土一块不少（ADR-0009）', () => {
+  it('手里拿着泥土对着工作台按使用键也是打开界面，泥土一块不少（ADR-0009）', () => {
     // 站在坑里、手上一块泥土，正前方两格摆一个工作台
     const core = holdingDirt();
     core.setBlock(...AHEAD_FROM_PIT, BlockType.CraftingTable);
@@ -1394,14 +1394,14 @@ describe('GameCore 的工作台', () => {
     expect(core.takeChangedBlocks()).toEqual([]);
   });
 
-  it('对着泥土或草按右键仍是放置', () => {
+  it('对着泥土或草按使用键仍是放置', () => {
     const core = holdingDirt();
     useOnce(core);
     expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Dirt);
     expect(core.craftingTableScreen.open).toBe(false);
   });
 
-  it('工作台超出触及距离时按右键什么都不发生', () => {
+  it('工作台超出触及距离时按使用键什么都不发生', () => {
     const core = facingTable(FAR_AHEAD);
     expect(core.mining.target).toBeUndefined();
     useOnce(core);
@@ -1419,7 +1419,7 @@ describe('GameCore 的工作台', () => {
     expect(core.uiMode).toBe(false);
   });
 
-  it('背包界面开着时右键不生效：工作台界面不会开，也不放置', () => {
+  it('背包界面开着时使用键不生效：工作台界面不会开，也不放置', () => {
     const core = facingTable();
     core.toggleInventory();
     core.tick();

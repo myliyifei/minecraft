@@ -36,7 +36,7 @@ export const INVENTORY_SCREEN_LABEL: InventoryScreenLabel = {
   title: STRINGS.inventory,
 };
 
-/** 工作台界面那一层：右键对着工作台打开。 */
+/** 工作台界面那一层：使用键对着工作台打开。 */
 export const CRAFTING_TABLE_SCREEN_LABEL: InventoryScreenLabel = {
   id: 'crafting-table-screen',
   title: STRINGS.craftingTable,

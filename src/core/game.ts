@@ -61,8 +61,8 @@ export class GameCore implements BlockEdit {
   private readonly xpOrbsState: XpOrbs;
   private readonly experienceState: Experience;
   private readonly inventoryState: Inventory;
-  private readonly craftingGrid: CraftingGrid;
-  private readonly screenState: InventoryScreen;
+  private readonly inventoryCraftingGrid: CraftingGrid;
+  private readonly inventoryScreenState: InventoryScreen;
   /**
    * 工作台界面（见 CONTEXT.md）：与背包界面同一套实现，只是合成网格是 3x3。
    * 两个界面各持自己的网格，同一时刻最多开一个（`activeScreen`）。
@@ -107,8 +107,8 @@ export class GameCore implements BlockEdit {
     this.xpOrbsState = new XpOrbs();
     this.experienceState = new Experience();
     this.inventoryState = new Inventory();
-    this.craftingGrid = new CraftingGrid(INVENTORY_CRAFTING_GRID);
-    this.screenState = new InventoryScreen(this.inventoryState, this.craftingGrid);
+    this.inventoryCraftingGrid = new CraftingGrid(INVENTORY_CRAFTING_GRID);
+    this.inventoryScreenState = new InventoryScreen(this.inventoryState, this.inventoryCraftingGrid);
     this.craftingTableGrid = new CraftingGrid(CRAFTING_TABLE_GRID);
     this.craftingTableState = new InventoryScreen(this.inventoryState, this.craftingTableGrid);
     this.miningState = new Mining(
@@ -157,7 +157,7 @@ export class GameCore implements BlockEdit {
    * 放置就都不算数了（见 `step`），这是游戏规则。
    */
   get inventoryScreen(): InventoryScreenView {
-    return this.screenState;
+    return this.inventoryScreenState;
   }
 
   /**
@@ -181,7 +181,7 @@ export class GameCore implements BlockEdit {
 
   /** 此刻开着的那个界面，一个都没开时 undefined。同一时刻最多开一个。 */
   private get activeScreen(): InventoryScreen | undefined {
-    if (this.screenState.open) return this.screenState;
+    if (this.inventoryScreenState.open) return this.inventoryScreenState;
     if (this.craftingTableState.open) return this.craftingTableState;
     return undefined;
   }
@@ -428,7 +428,7 @@ export class GameCore implements BlockEdit {
     // 有界面开着就关它，没有就开背包界面。关的时候光标上、合成网格里还有东西而背包
     // 一格不剩的，扔在玩家脚下那一格，与原版一样：界面一关就看不见的东西不能凭空消失。
     // 玩家挪出一格来就能拾取回去。
-    for (const stack of (active ?? this.screenState).toggle()) {
+    for (const stack of (active ?? this.inventoryScreenState).toggle()) {
       this.dropsState.spawnAt(stack, this.playerState.position);
     }
   }

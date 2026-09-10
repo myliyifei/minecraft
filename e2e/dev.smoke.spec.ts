@@ -1992,7 +1992,7 @@ test('背包界面开着时不显示十字准星', async ({ page }) => {
  * 工作台由 `setBlock` 直接摆进世界：核心没有往背包里塞物品的入口，而 4 块木板合成它要先
  * 拆堆（#25）。这条测的是右键那一下的接线，不是合成。
  */
-async function placeTableAhead(page: Page): Promise<Vec3> {
+async function setTableAhead(page: Page): Promise<Vec3> {
   return page.evaluate(
     ({ table, eyeHeight }) => {
       const core = window.__VOXEL__!.core;
@@ -2015,7 +2015,7 @@ async function placeTableAhead(page: Page): Promise<Vec3> {
 test('右键对着工作台打开工作台界面并交还鼠标，按 E 关闭并抓回鼠标，准星随之隐藏与复现', async ({
   page,
 }) => {
-  await placeTableAhead(page);
+  await setTableAhead(page);
   await grabPointer(page);
   const screen = page.locator('#crafting-table-screen');
   const inventory = page.locator('#inventory-screen');
@@ -2058,7 +2058,7 @@ test('右键对着工作台打开工作台界面并交还鼠标，按 E 关闭�
 });
 
 test('工作台界面开着时按 Esc 也关掉它', async ({ page }) => {
-  await placeTableAhead(page);
+  await setTableAhead(page);
   await grabPointer(page);
   const screen = page.locator('#crafting-table-screen');
   await page.evaluate(

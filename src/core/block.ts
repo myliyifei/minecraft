@@ -244,6 +244,8 @@ export function blockExperience(block: BlockType): number {
 export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   [ItemType.Dirt]: BlockType.Dirt,
   [ItemType.OakLog]: BlockType.OakLog,
+  // 木板方块要等 #18，在那之前木板只是合成出来的一种物品，放不下去。
+  [ItemType.OakPlanks]: null,
 };
 
 /**

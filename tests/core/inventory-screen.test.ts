@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { INVENTORY_SIZE, Inventory, isSlotIndex } from '../../src/core/inventory';
+import { CraftingGrid } from '../../src/core/crafting-grid';
+import { INVENTORY_SIZE, Inventory } from '../../src/core/inventory';
 import { InventoryScreen } from '../../src/core/inventory-screen';
-import { ItemType, type ItemStack, type SlotBatch } from '../../src/core/item';
+import { ItemType, type ItemStack } from '../../src/core/item';
 
 /** 一堆泥土。 */
 function dirt(count: number): ItemStack {
@@ -13,38 +14,28 @@ function logs(count: number): ItemStack {
   return { item: ItemType.OakLog, count };
 }
 
-/**
- * 一批独立的格子，界面里当附加格子用。
- *
- * 第二切片的合成网格就是这么一批（#17），它不按入包规则收物品——拾取到的东西不该
- * 落进网格里——所以只实现 `SlotBatch`。
- */
-class TestBatch implements SlotBatch {
-  private readonly cells: Array<ItemStack | undefined>;
+/** 四块木板：原木出木板那条配方的成品。 */
+const PLANKS_X4: ItemStack = { item: ItemType.OakPlanks, count: 4 };
 
-  constructor(readonly size: number) {
-    this.cells = Array<ItemStack | undefined>(size).fill(undefined);
-  }
-
-  slot(index: number): ItemStack | undefined {
-    return this.cells[index];
-  }
-
-  setSlot(index: number, stack: ItemStack | undefined): void {
-    if (!isSlotIndex(index, this.size)) return;
-    this.cells[index] = stack;
-  }
+/** 一堆木板。 */
+function planks(count: number): ItemStack {
+  return { item: ItemType.OakPlanks, count };
 }
 
-/** 附加格子的第一格在界面里的格号：背包 36 格之后接着编号。 */
+/** 背包界面那块 2x2 的合成网格。附加格子那几组测试拿它当一批普通格子用。 */
+function grid(): CraftingGrid {
+  return new CraftingGrid({ width: 2, height: 2 });
+}
+
+/** 合成网格的第一格在界面里的格号：背包 36 格之后接着编号。 */
 const FIRST_EXTRA = INVENTORY_SIZE;
 
 /**
- * 一个背包加一个开着的背包界面。背包里的东西由 `fill` 摆，`extra` 是附加的那批格子。
+ * 一个背包加一个开着的背包界面。背包里的东西由 `fill` 摆，`extra` 是附加的那块合成网格。
  */
 function opened(
   fill: (inventory: Inventory) => void = () => {},
-  extra?: SlotBatch,
+  extra?: CraftingGrid,
 ): {
   inventory: Inventory;
   screen: InventoryScreen;
@@ -225,7 +216,7 @@ describe('背包界面的光标物品', () => {
 
 describe('附加格子：格号接在背包之后，操作与背包格一致', () => {
   it('点附加格子里有东西的那一格，拿起整堆', () => {
-    const extra = new TestBatch(4);
+    const extra = grid();
     extra.setSlot(0, dirt(10));
     const { screen } = opened(() => {}, extra);
     screen.clickSlot(FIRST_EXTRA);
@@ -234,7 +225,7 @@ describe('附加格子：格号接在背包之后，操作与背包格一致', (
   });
 
   it('从背包拿起，放进附加格子的空格', () => {
-    const extra = new TestBatch(4);
+    const extra = grid();
     const { inventory, screen } = opened((inv) => inv.setSlot(0, dirt(10)), extra);
     screen.clickSlot(0);
     screen.clickSlot(FIRST_EXTRA + 3);
@@ -244,7 +235,7 @@ describe('附加格子：格号接在背包之后，操作与背包格一致', (
   });
 
   it('点附加格子里的同种物品并成一堆，超过上限的余量留在光标上', () => {
-    const extra = new TestBatch(4);
+    const extra = grid();
     extra.setSlot(1, dirt(30));
     const { screen } = opened((inv) => inv.setSlot(0, dirt(60)), extra);
     screen.clickSlot(0);
@@ -254,7 +245,7 @@ describe('附加格子：格号接在背包之后，操作与背包格一致', (
   });
 
   it('点附加格子里的异种物品与光标交换', () => {
-    const extra = new TestBatch(4);
+    const extra = grid();
     extra.setSlot(0, logs(5));
     const { screen } = opened((inv) => inv.setSlot(0, dirt(10)), extra);
     screen.clickSlot(0);
@@ -264,7 +255,7 @@ describe('附加格子：格号接在背包之后，操作与背包格一致', (
   });
 
   it('附加格子之外的格号仍然什么都不发生', () => {
-    const extra = new TestBatch(4);
+    const extra = grid();
     const { inventory, screen } = opened((inv) => inv.setSlot(0, dirt(10)), extra);
     screen.clickSlot(FIRST_EXTRA + 4);
     expect(screen.cursor).toBeUndefined();
@@ -283,7 +274,7 @@ describe('附加格子：格号接在背包之后，操作与背包格一致', (
 
 describe('关闭界面时附加格子里的东西回背包', () => {
   it('按入包规则落到第一个空格，附加格子清空', () => {
-    const extra = new TestBatch(4);
+    const extra = grid();
     extra.setSlot(2, dirt(10));
     const { inventory, screen } = opened(() => {}, extra);
 
@@ -293,7 +284,7 @@ describe('关闭界面时附加格子里的东西回背包', () => {
   });
 
   it('背包里有同种的未满堆就先并进去', () => {
-    const extra = new TestBatch(4);
+    const extra = grid();
     extra.setSlot(0, dirt(10));
     const { inventory, screen } = opened((inv) => inv.setSlot(5, dirt(50)), extra);
 
@@ -302,7 +293,7 @@ describe('关闭界面时附加格子里的东西回背包', () => {
   });
 
   it('背包 36 格全满时把附加格子里的每一堆都交出去', () => {
-    const extra = new TestBatch(4);
+    const extra = grid();
     extra.setSlot(0, dirt(10));
     extra.setSlot(1, logs(3));
     const { screen } = opened((inv) => inv.add(dirt(36 * 64)), extra);
@@ -314,7 +305,7 @@ describe('关闭界面时附加格子里的东西回背包', () => {
   });
 
   it('放得下一部分时只交出剩下的那些', () => {
-    const extra = new TestBatch(4);
+    const extra = grid();
     extra.setSlot(0, dirt(10));
     // 35 格塞满泥土，最后一格塞满原木：泥土那一堆只并得进第 35 格之前的空位
     const { screen } = opened((inv) => {
@@ -326,7 +317,7 @@ describe('关闭界面时附加格子里的东西回背包', () => {
   });
 
   it('光标上的东西先回原格，再轮到附加格子', () => {
-    const extra = new TestBatch(4);
+    const extra = grid();
     extra.setSlot(0, dirt(10));
     const { inventory, screen } = opened(() => {}, extra);
     // 从附加格子里拿起来：原格是附加格子的第 0 格，光标先回那里，随后它跟着入包
@@ -339,11 +330,149 @@ describe('关闭界面时附加格子里的东西回背包', () => {
   });
 
   it('重新打开时附加格子仍是空的：上一次已经清干净了', () => {
-    const extra = new TestBatch(4);
+    const extra = grid();
     extra.setSlot(0, dirt(10));
     const { screen } = opened(() => {}, extra);
     screen.toggle();
     screen.toggle();
     expect(extra.slot(0)).toBeUndefined();
+  });
+});
+
+describe('输出格：网格里凑成配方就显示成品，点它拿走', () => {
+  /** 开着的界面，网格里已经摆了几个原木。 */
+  function withLogsInGrid(count: number, fill: (inventory: Inventory) => void = () => {}) {
+    const extra = grid();
+    extra.setSlot(0, logs(count));
+    const { inventory, screen } = opened(fill, extra);
+    return { inventory, screen, extra };
+  }
+
+  it('没附加网格的界面没有合成视图，点输出格什么都不发生', () => {
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, dirt(1)));
+    expect(screen.crafting).toBeUndefined();
+    screen.clickOutput();
+    expect(screen.cursor).toBeUndefined();
+    expect(inventory.slot(0)).toEqual(dirt(1));
+  });
+
+  it('合成视图报网格尺寸、第一格的格号与各格内容', () => {
+    const { screen, extra } = withLogsInGrid(2);
+    const crafting = screen.crafting!;
+    expect(crafting.width).toBe(2);
+    expect(crafting.height).toBe(2);
+    expect(crafting.firstSlot).toBe(FIRST_EXTRA);
+    expect(crafting.slot(0)).toEqual(logs(2));
+    expect(crafting.slot(1)).toBeUndefined();
+    extra.setSlot(1, dirt(1));
+    expect(crafting.slot(1)).toEqual(dirt(1));
+  });
+
+  it('摆好材料后输出格显示成品，不匹配时是空的', () => {
+    const { screen, extra } = withLogsInGrid(1);
+    expect(screen.crafting!.output).toEqual(PLANKS_X4);
+    extra.setSlot(1, dirt(1));
+    expect(screen.crafting!.output).toBeUndefined();
+  });
+
+  it('从背包把原木放进网格，输出格随即显示木板', () => {
+    const { screen } = opened((inv) => inv.setSlot(0, logs(1)), grid());
+    expect(screen.crafting!.output).toBeUndefined();
+    screen.clickSlot(0);
+    screen.clickSlot(FIRST_EXTRA + 3);
+    expect(screen.crafting!.output).toEqual(PLANKS_X4);
+  });
+
+  it('光标空着时点输出格，成品到光标上，网格那一格减 1，输出格按剩下的重算', () => {
+    const { screen, extra } = withLogsInGrid(2);
+    screen.clickOutput();
+    expect(screen.cursor).toEqual(PLANKS_X4);
+    expect(extra.slot(0)).toEqual(logs(1));
+    expect(screen.crafting!.output).toEqual(PLANKS_X4);
+  });
+
+  it('最后一个原木用掉之后输出格变空', () => {
+    const { screen, extra } = withLogsInGrid(1);
+    screen.clickOutput();
+    expect(extra.slot(0)).toBeUndefined();
+    expect(screen.crafting!.output).toBeUndefined();
+  });
+
+  it('输出格空着时点它什么都不发生', () => {
+    const extra = grid();
+    extra.setSlot(0, dirt(3));
+    const { screen } = opened(() => {}, extra);
+    screen.clickOutput();
+    expect(screen.cursor).toBeUndefined();
+    expect(extra.slot(0)).toEqual(dirt(3));
+  });
+
+  it('光标上拿着同种物品时点输出格，成品并上去，材料照样消耗', () => {
+    const { screen, extra } = withLogsInGrid(3, (inv) => inv.setSlot(0, planks(4)));
+    screen.clickSlot(0);
+    screen.clickOutput();
+    screen.clickOutput();
+    expect(screen.cursor).toEqual(planks(12));
+    expect(extra.slot(0)).toEqual(logs(1));
+  });
+
+  it('光标上的同种物品装不下整份成品时不合成：材料一个都不动', () => {
+    // 木板上限 64，光标上 61 个只剩 3 格空位，一份 4 块并不进去
+    const { screen, extra } = withLogsInGrid(1, (inv) => inv.setSlot(0, planks(61)));
+    screen.clickSlot(0);
+    screen.clickOutput();
+    expect(screen.cursor).toEqual(planks(61));
+    expect(extra.slot(0)).toEqual(logs(1));
+  });
+
+  it('光标上正好还容得下一份时并到堆叠上限', () => {
+    const { screen, extra } = withLogsInGrid(1, (inv) => inv.setSlot(0, planks(60)));
+    screen.clickSlot(0);
+    screen.clickOutput();
+    expect(screen.cursor).toEqual(planks(64));
+    expect(extra.slot(0)).toBeUndefined();
+  });
+
+  it('光标上拿着别的东西时点输出格不动：成品不覆盖光标上的东西', () => {
+    const { screen, extra } = withLogsInGrid(1, (inv) => inv.setSlot(0, dirt(5)));
+    screen.clickSlot(0);
+    screen.clickOutput();
+    expect(screen.cursor).toEqual(dirt(5));
+    expect(extra.slot(0)).toEqual(logs(1));
+  });
+
+  it('界面关着时点输出格什么都不发生', () => {
+    const { screen, extra } = withLogsInGrid(1);
+    screen.toggle();
+    // 关界面把原木还回了背包，再往网格里摆一个模拟「关着时网格里有东西」
+    extra.setSlot(0, logs(1));
+    screen.clickOutput();
+    expect(screen.cursor).toBeUndefined();
+    expect(extra.slot(0)).toEqual(logs(1));
+  });
+
+  it('从输出格拿到光标上的成品，关闭界面时按入包规则进背包', () => {
+    const { inventory, screen } = withLogsInGrid(1, (inv) => inv.setSlot(5, planks(10)));
+    screen.clickOutput();
+    expect(screen.toggle()).toEqual([]);
+    // 先并进同种未满堆：成品不是从哪一格拿起来的，没有「原格」可回
+    expect(inventory.slot(5)).toEqual(planks(14));
+    expect(inventory.slot(0)).toBeUndefined();
+  });
+
+  it('背包全满时从输出格拿的成品关闭界面时交出去', () => {
+    const { screen } = withLogsInGrid(1, (inv) => inv.add(dirt(36 * 64)));
+    screen.clickOutput();
+    expect(screen.toggle()).toEqual([PLANKS_X4]);
+  });
+
+  it('关闭界面时网格里剩下的材料回背包，网格清空', () => {
+    const { inventory, screen, extra } = withLogsInGrid(3);
+    screen.clickOutput();
+    expect(screen.toggle()).toEqual([]);
+    expect(extra.slot(0)).toBeUndefined();
+    // 先光标物品再网格：木板先落第 0 格，原木随后落第 1 格
+    expect(inventory.slot(0)).toEqual(PLANKS_X4);
+    expect(inventory.slot(1)).toEqual(logs(2));
   });
 });

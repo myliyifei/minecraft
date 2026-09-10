@@ -1,6 +1,7 @@
 import { BlockType, type BlockEdit } from './block';
 import type { ChunkView } from './chunk';
 import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS } from './constants';
+import { CraftingGrid, INVENTORY_CRAFTING_GRID } from './crafting-grid';
 import { Drops, type DropsView } from './drop';
 import { Experience, type ExperienceView } from './experience';
 import { Inventory, wrapHotbarSlot, type InventoryView } from './inventory';
@@ -20,6 +21,16 @@ import {
   type ChunkSourceFactory,
 } from './world';
 
+/**
+ * 背包界面上的一下点击：点了第几格，或点了输出格。
+ *
+ * 两种点击排进同一条队列而不是两条：「放进网格、点输出格、把成品放到别处」是同一个 tick
+ * 里可能连着来的三下，分成两条队列就丢了先后。
+ */
+type ScreenClick = { readonly kind: 'slot'; readonly index: number } | { readonly kind: 'output' };
+
+const OUTPUT_CLICK: ScreenClick = Object.freeze({ kind: 'output' });
+
 export interface GameCoreOptions {
   /** 世界种子。同一种子每次进入得到同样的地形。 */
   readonly seed?: number;
@@ -36,9 +47,9 @@ export interface GameCoreOptions {
  * 无头游戏核心：纯 TypeScript，不依赖 Three.js 与 DOM，可在 Node 中直接实例化。
  * 这是主测试接缝——渲染与输入适配器只通过这里的指令和查询与游戏交互。
  *
- * 本切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」「空手挖掘」
- * 「掉落物与背包」「经验球与等级」「放置方块」「背包界面」九件事。合成、生物等系统由后续
- * 切片挂进 step()。
+ * 第一切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」「空手挖掘」
+ * 「掉落物与背包」「经验球与等级」「放置方块」「背包界面」九件事，第二切片起加「合成」。
+ * 生物等系统由后续切片挂进 step()。
  */
 export class GameCore implements BlockEdit {
   private readonly world: World;
@@ -49,6 +60,7 @@ export class GameCore implements BlockEdit {
   private readonly xpOrbsState: XpOrbs;
   private readonly experienceState: Experience;
   private readonly inventoryState: Inventory;
+  private readonly craftingGrid: CraftingGrid;
   private readonly screenState: InventoryScreen;
   private readonly miningState: Mining;
   private ticks = 0;
@@ -66,14 +78,14 @@ export class GameCore implements BlockEdit {
    *
    * - 放置折成一个布尔：一次点击放一块，两下也只放一块，与原版一致。
    * - 背包开合异或抵消：一开一关，界面状态没有净变化。
-   * - 点格子排队重放：「拿起再放到别处」本来就是两下，合成一下就丢了一半意思。
+   * - 点格子与点输出格排队重放：「拿起再放到别处」本来就是两下，合成一下就丢了一半意思。
    */
   /** 这一 tick 里按过放置键没有。 */
   private placeQueued = false;
   /** 这一 tick 里按过背包键没有。 */
   private toggleQueued = false;
-  /** 这一 tick 里点过背包界面的哪几格，按点击顺序。 */
-  private readonly slotClicks: number[] = [];
+  /** 这一 tick 里在背包界面上点过哪些地方（格子与输出格），按点击顺序。 */
+  private readonly screenClicks: ScreenClick[] = [];
 
   constructor(options: GameCoreOptions = {}) {
     this.worldSeed = options.seed ?? DEFAULT_SEED;
@@ -88,7 +100,8 @@ export class GameCore implements BlockEdit {
     this.xpOrbsState = new XpOrbs();
     this.experienceState = new Experience();
     this.inventoryState = new Inventory();
-    this.screenState = new InventoryScreen(this.inventoryState);
+    this.craftingGrid = new CraftingGrid(INVENTORY_CRAFTING_GRID);
+    this.screenState = new InventoryScreen(this.inventoryState, this.craftingGrid);
     this.miningState = new Mining(
       this.world,
       this.playerState,
@@ -128,7 +141,8 @@ export class GameCore implements BlockEdit {
   }
 
   /**
-   * 背包界面的只读视图：开着没有、光标上拿着什么。界面层读它画那层覆盖层。
+   * 背包界面的只读视图：开着没有、光标上拿着什么、合成网格与输出格里是什么。界面层读它画
+   * 那层覆盖层。
    *
    * 「界面开着没有」是核心状态而不是界面层自己的一个布尔：它一开，移动、视角、挖掘、
    * 放置就都不算数了（见 `step`），这是游戏规则。
@@ -228,7 +242,15 @@ export class GameCore implements BlockEdit {
    * 就是两下点击，合成一下就丢了一半的意思。界面关着时点了没有反应。
    */
   clickSlot(index: number): void {
-    this.slotClicks.push(index);
+    this.screenClicks.push({ kind: 'slot', index });
+  }
+
+  /**
+   * 点背包界面的输出格，下一个 tick 生效（ADR-0004）。与点格子排在同一条队列里，先后
+   * 顺序照点击的来。成品到光标上、材料各减 1 的规则在 `InventoryScreen.clickOutput` 里。
+   */
+  clickCraftingOutput(): void {
+    this.screenClicks.push(OUTPUT_CLICK);
   }
 
   /** 本世界的种子。地形完全由它决定，端到端测试用它断言「同一种子同一个世界」。 */
@@ -351,12 +373,15 @@ export class GameCore implements BlockEdit {
    * 到达，而玩家先点了格子才去按键。
    */
   private stepInventoryScreen(): void {
-    for (const index of this.slotClicks) this.screenState.clickSlot(index);
-    this.slotClicks.length = 0;
+    for (const click of this.screenClicks) {
+      if (click.kind === 'slot') this.screenState.clickSlot(click.index);
+      else this.screenState.clickOutput();
+    }
+    this.screenClicks.length = 0;
 
     if (!this.toggleQueued) return;
     this.toggleQueued = false;
-    // 背包一格不剩、光标上还拿着东西（或附加格子里还摆着东西）时把那些扔在玩家脚下那一格，
+    // 背包一格不剩、光标上还拿着东西（或合成网格里还摆着东西）时把那些扔在玩家脚下那一格，
     // 与原版一样：界面一关就看不见的东西不能凭空消失。玩家挪出一格来就能捡回去。
     for (const stack of this.screenState.toggle()) {
       this.dropsState.spawnAt(stack, this.playerState.position);

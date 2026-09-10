@@ -7,6 +7,7 @@ import {
   SEA_LEVEL,
   TICK_RATE,
 } from '../src/core/constants';
+import { INVENTORY_CRAFTING_GRID } from '../src/core/crafting-grid';
 import { PICKUP_DELAY_TICKS } from '../src/core/drop';
 import { HOTBAR_SIZE, INVENTORY_SIZE } from '../src/core/inventory';
 import { BARE_HAND, ItemType, type ItemStack } from '../src/core/item';
@@ -41,6 +42,9 @@ import {
   readElementPixels,
   waitForFirstFrame,
 } from './canvas';
+
+/** 背包界面那块合成网格有几格。 */
+const CRAFTING_CELLS = INVENTORY_CRAFTING_GRID.width * INVENTORY_CRAFTING_GRID.height;
 
 /** 默认视距下已加载区块覆盖的世界坐标区间。 */
 const LOADED_MIN = -DEFAULT_VIEW_RADIUS * CHUNK_SIZE;
@@ -1613,8 +1617,10 @@ test('按 E 打开背包界面，36 格与快捷栏对应，再按 E 关闭', as
   await expect(screen).toHaveAttribute('aria-label', STRINGS.inventory);
   await expect(page.locator('#inventory-screen .invscreen__title')).toHaveText(STRINGS.inventory);
 
-  // 36 格，其中一行 9 格就是快捷栏
-  await expect(page.locator('#inventory-screen .invscreen__slot')).toHaveCount(INVENTORY_SIZE);
+  // 36 格加合成网格那 4 格，其中一行 9 格就是快捷栏
+  await expect(page.locator('#inventory-screen .invscreen__slot')).toHaveCount(
+    INVENTORY_SIZE + CRAFTING_CELLS,
+  );
   await expect(
     page.locator('#inventory-screen .invscreen__hotbar .invscreen__slot'),
   ).toHaveCount(HOTBAR_SIZE);
@@ -1729,6 +1735,63 @@ test('背包界面里点一格拿起泥土，再点空格放下', async ({ page 
   await expect(cursor).toBeHidden();
   // HUD 的快捷栏跟着空了：界面里那一格与 HUD 那一格是同一格
   await expect(page.locator('#hotbar .hotbar__slot[data-slot="0"][data-item]')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('背包界面里有 2x2 合成网格与输出格，放进原木后输出格出现木板，点它拿走', async ({ page }) => {
+  // 脚下那块换成原木再挖来：东西只能挖来，核心没有往背包里塞物品的入口。挖掘与开合都
+  // 直接给核心，理由同上一条。
+  await page.evaluate(
+    ({ pitch, logTicks, pickupTicks, oakLog }) => {
+      const core = window.__VOXEL__!.core;
+      const { x, y, z } = core.player.position;
+      core.setBlock(Math.floor(x), Math.floor(y) - 1, Math.floor(z), oakLog);
+      core.turn(0, -pitch);
+      core.setMining(true);
+      core.tick(logTicks);
+      core.setMining(false);
+      core.tick(pickupTicks);
+      core.toggleInventory();
+      core.tick();
+    },
+    {
+      pitch: MAX_PITCH,
+      logTicks: miningTicks(BlockType.OakLog, BARE_HAND),
+      pickupTicks: PICKUP_DELAY_TICKS + 2,
+      oakLog: BlockType.OakLog,
+    },
+  );
+
+  const screen = page.locator('#inventory-screen');
+  await expect(screen).toBeVisible();
+
+  // 网格 4 格，格号接在 36 格之后；输出格单独一个，文字来自字符串表
+  const gridCells = page.locator('#inventory-screen .invscreen__grid .invscreen__slot');
+  await expect(gridCells).toHaveCount(CRAFTING_CELLS);
+  await expect(gridCells.first()).toHaveAttribute('data-slot', String(INVENTORY_SIZE));
+  const output = page.locator('#inventory-screen [data-output]');
+  await expect(output).toBeVisible();
+  await expect(output).toHaveAttribute('aria-label', STRINGS.craftingOutput);
+  await expect(output).not.toHaveAttribute('data-item', /./);
+
+  // 拿起原木放进网格第一格：输出格出现木板
+  const first = page.locator('#inventory-screen .invscreen__slot[data-slot="0"]');
+  await expect(first).toHaveAttribute('data-item', String(ItemType.OakLog));
+  await first.click();
+  await gridCells.first().click();
+  await expect(gridCells.first()).toHaveAttribute('data-item', String(ItemType.OakLog));
+  await expect(output).toHaveAttribute('data-item', String(ItemType.OakPlanks));
+  await expect(output).toHaveAttribute('title', ITEM_NAMES[ItemType.OakPlanks]);
+  await expect(output.locator('.invscreen__count')).toHaveText('4');
+
+  // 点输出格：4 块木板到光标上，原木用掉，输出格空了
+  const cursor = page.locator('#inventory-screen .invscreen__cursor');
+  await output.click();
+  await expect(cursor).toBeVisible();
+  await expect(cursor).toHaveAttribute('data-item', String(ItemType.OakPlanks));
+  await expect(cursor.locator('.invscreen__count')).toHaveText('4');
+  await expect(gridCells.first()).not.toHaveAttribute('data-item', /./);
+  await expect(output).not.toHaveAttribute('data-item', /./);
   expect(errors).toEqual([]);
 });
 

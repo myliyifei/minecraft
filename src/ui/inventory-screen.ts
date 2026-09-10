@@ -1,5 +1,5 @@
 import { HOTBAR_SIZE, INVENTORY_SIZE, type InventoryView } from '../core/inventory';
-import type { InventoryScreenView } from '../core/inventory-screen';
+import type { CraftingView, InventoryScreenView } from '../core/inventory-screen';
 import {
   applyAtlasGrid,
   buildItemBox,
@@ -17,13 +17,17 @@ export interface InventoryScreenSource {
   readonly inventoryScreen: InventoryScreenView;
   /** 点了第 index 格。下一个 tick 生效（ADR-0004）。 */
   clickSlot(index: number): void;
+  /** 点了输出格。下一个 tick 生效（ADR-0004）。 */
+  clickCraftingOutput(): void;
 }
 
 /**
- * 背包界面（见 CONTEXT.md）的那层 DOM 覆盖层：36 格加一个跟着鼠标走的光标物品。
+ * 背包界面（见 CONTEXT.md）的那层 DOM 覆盖层：36 格、一块合成网格加输出格，以及一个
+ * 跟着鼠标走的光标物品。
  *
- * 开着没有、光标上拿着什么、点一格之后东西怎么搬，全都在核心里（`src/core/
- * inventory-screen.ts`）。这里只做两件事：把核心的状态画成格子，把点击的格号递回去。
+ * 开着没有、光标上拿着什么、点一格之后东西怎么搬、输出格里显示什么，全都在核心里
+ * （`src/core/inventory-screen.ts`）。这里只做两件事：把核心的状态画成格子，把点击的格号
+ * （或「点了输出格」）递回去。
  *
  * 格子与快捷栏共用 `item-slot.ts` 那套画法，所以界面里第 0 格与 HUD 底部第 0 格画出来
  * 是同一堆东西——它们本来就是背包的同一格。
@@ -60,6 +64,9 @@ export function installInventoryScreen(
   title.className = 'invscreen__title';
   title.textContent = STRINGS.inventory;
 
+  // 合成网格在左、输出格在右。格号由核心给（接在 36 格之后），这里只照着编。
+  const crafting = buildCraftingHud(source.inventoryScreen.crafting);
+
   // 储物格：背包的第 9–35 格，3 行 9 列
   const storage = document.createElement('div');
   storage.className = 'invscreen__storage';
@@ -79,7 +86,9 @@ export function installInventoryScreen(
     cells.push(buildSlotCell(i < HOTBAR_SIZE ? hotbar : storage, 'invscreen', i));
   }
 
-  panel.append(title, storage, hotbar);
+  panel.append(title);
+  if (crafting) panel.append(crafting.root);
+  panel.append(storage, hotbar);
   root.append(panel);
 
   // 光标物品挂在面板外面：它要能盖到面板之外的地方去，鼠标移到哪儿它就在哪儿。
@@ -94,17 +103,22 @@ export function installInventoryScreen(
   };
 
   /**
-   * 点一格：把格号递给核心。
+   * 点一格：把格号递给核心；点输出格递的是另一条指令。
    *
-   * 事件委托挂在覆盖层上而不是 36 个格子各挂一个：格子是一次建好不再变的，但一个监听器
-   * 比 36 个好卸。点在格子之间的空隙上什么都不做。
+   * 事件委托挂在覆盖层上而不是 40 个格子各挂一个：格子是一次建好不再变的，但一个监听器
+   * 比 40 个好卸。点在格子之间的空隙上什么都不做。
    */
   const onClick = (event: MouseEvent): void => {
     followPointer(event);
     if (!(event.target instanceof Element)) return;
-    const slot = event.target.closest('[data-slot]');
-    if (!(slot instanceof HTMLElement) || slot.dataset.slot === undefined) return;
-    source.clickSlot(Number(slot.dataset.slot));
+    const hit = event.target.closest('[data-slot], [data-output]');
+    if (!(hit instanceof HTMLElement)) return;
+    if (hit.dataset.output !== undefined) {
+      source.clickCraftingOutput();
+      return;
+    }
+    if (hit.dataset.slot === undefined) return;
+    source.clickSlot(Number(hit.dataset.slot));
   };
 
   root.addEventListener('click', onClick);
@@ -129,6 +143,7 @@ export function installInventoryScreen(
       for (let i = 0; i < cells.length; i++) {
         refreshSlot(cells[i]!, source.inventory.slot(i));
       }
+      crafting?.update();
 
       refreshSlot(cursor, stack);
       const hasCursor = stack !== undefined;
@@ -141,6 +156,60 @@ export function installInventoryScreen(
       root.removeEventListener('click', onClick);
       root.removeEventListener('pointermove', followPointer);
       root.remove();
+    },
+  };
+}
+
+/** 合成网格与输出格的 DOM 与刷新。 */
+interface CraftingHud {
+  readonly root: HTMLElement;
+  /** 让网格与输出格跟上核心。 */
+  update(): void;
+}
+
+/**
+ * 造合成网格与输出格：一块 `width × height` 的网格，旁边一个输出格。界面没带合成网格时不造。
+ *
+ * 网格格子与背包格子是同一种格子（同一套画法、同样带 data-slot），点它递的也是格号；
+ * 输出格不是格子——它不存东西、没有格号，带的是 data-output，点它递的是另一条指令。
+ */
+function buildCraftingHud(area: CraftingView | undefined): CraftingHud | undefined {
+  if (!area) return undefined;
+
+  const root = document.createElement('div');
+  root.className = 'invscreen__crafting';
+  root.style.setProperty('--invscreen-grid-cols', String(area.width));
+
+  const grid = document.createElement('div');
+  grid.className = 'invscreen__grid';
+  grid.setAttribute('role', 'list');
+  grid.setAttribute('aria-label', STRINGS.craftingGrid);
+
+  const cells: SlotCell[] = [];
+  for (let i = 0; i < area.width * area.height; i++) {
+    cells.push(buildSlotCell(grid, 'invscreen', area.firstSlot + i));
+  }
+
+  // 箭头只是装饰：从网格到输出格的方向。读屏软件不必报它。
+  const arrow = document.createElement('span');
+  arrow.className = 'invscreen__arrow';
+  arrow.setAttribute('aria-hidden', 'true');
+
+  const output = buildItemBox(root, 'invscreen', 'invscreen__output');
+  output.slot.setAttribute('role', 'button');
+  output.slot.setAttribute('aria-label', STRINGS.craftingOutput);
+  // 端到端测试与点击处理都据此认出这是输出格。
+  output.slot.dataset.output = '';
+
+  root.prepend(grid, arrow);
+
+  return {
+    root,
+    update(): void {
+      for (let i = 0; i < cells.length; i++) {
+        refreshSlot(cells[i]!, area.slot(i));
+      }
+      refreshSlot(output, area.output);
     },
   };
 }

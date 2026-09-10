@@ -51,6 +51,8 @@ const BEDROCK = [85, 85, 85];
 const LOG_BARK = [104, 78, 46];
 const LOG_CORE = [166, 133, 86];
 const LEAVES = [63, 110, 45];
+const PLANKS = [162, 130, 78];
+const PLANKS_SEAM = [110, 84, 48];
 
 /** 每个格号对应的画法：painter(x, y, rand) → [r, g, b, a]。 */
 const TILES = {
@@ -88,6 +90,12 @@ const TILES = {
   7: (_x, _y, rand) => {
     if (rand() < 0.18) return [0, 0, 0, 0];
     return shade(LEAVES, Math.floor(rand() * 46) - 23);
+  },
+  // oak_planks：四条横板，板与板之间一条深色接缝，每条板上错开一处竖向的短接缝
+  8: (x, y, rand) => {
+    const seam = y % 4 === 3 || (x === (Math.floor(y / 4) * 5) % TILE_PX && y % 4 !== 3);
+    if (seam) return shade(PLANKS_SEAM, Math.floor(rand() * 16) - 8);
+    return shade(PLANKS, Math.floor(rand() * 22) - 11 + (y % 4 === 0 ? 8 : 0));
   },
 };
 

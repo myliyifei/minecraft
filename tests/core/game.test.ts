@@ -1131,6 +1131,122 @@ describe('GameCore 的背包界面', () => {
   });
 });
 
+describe('GameCore 的合成网格与输出格', () => {
+  /** 合成网格第一格在界面里的格号。 */
+  const GRID_FIRST = INVENTORY_SIZE;
+  const PLANKS_X4 = { item: ItemType.OakPlanks, count: 4 };
+
+  /**
+   * 手上有一个原木、背包界面开着的核心。脚下那块草换成原木再挖，东西只能挖来（理由见
+   * `holdingDirt`）。
+   */
+  function openedWithOneLog(): GameCore {
+    const core = coreOnFlatGround();
+    core.setBlock(...UNDERFOOT, BlockType.OakLog);
+    digUnderfoot(core, BlockType.OakLog);
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.OakLog, count: 1 });
+    core.toggleInventory();
+    core.tick();
+    return core;
+  }
+
+  it('背包界面带一块 2x2 合成网格，格号接在 36 格之后，开局输出格是空的', () => {
+    const core = coreOnFlatGround();
+    const crafting = core.inventoryScreen.crafting!;
+    expect(crafting.width).toBe(2);
+    expect(crafting.height).toBe(2);
+    expect(crafting.firstSlot).toBe(GRID_FIRST);
+    expect(crafting.output).toBeUndefined();
+  });
+
+  it('把原木放进网格，下一个 tick 输出格显示 4 块木板', () => {
+    const core = openedWithOneLog();
+    core.clickSlot(0);
+    core.clickSlot(GRID_FIRST + 1);
+    core.tick();
+    const crafting = core.inventoryScreen.crafting!;
+    expect(crafting.slot(1)).toEqual({ item: ItemType.OakLog, count: 1 });
+    expect(crafting.output).toEqual(PLANKS_X4);
+  });
+
+  it('点输出格下一个 tick 生效（ADR-0004）：成品到光标上，材料用掉', () => {
+    const core = openedWithOneLog();
+    core.clickSlot(0);
+    core.clickSlot(GRID_FIRST);
+    core.tick();
+
+    core.clickCraftingOutput();
+    expect(core.inventoryScreen.cursor).toBeUndefined();
+    core.tick();
+    expect(core.inventoryScreen.cursor).toEqual(PLANKS_X4);
+    expect(core.inventoryScreen.crafting!.slot(0)).toBeUndefined();
+    expect(core.inventoryScreen.crafting!.output).toBeUndefined();
+  });
+
+  it('同一个 tick 里点格子与点输出格按先后顺序来', () => {
+    const core = openedWithOneLog();
+    // 拿起原木、放进网格、点输出格、把成品放到第 20 格：四下都在同一个 tick 里
+    core.clickSlot(0);
+    core.clickSlot(GRID_FIRST + 3);
+    core.clickCraftingOutput();
+    core.clickSlot(20);
+    core.tick();
+    expect(core.inventory.slot(20)).toEqual(PLANKS_X4);
+    expect(core.inventoryScreen.cursor).toBeUndefined();
+    expect(core.inventoryScreen.crafting!.slot(3)).toBeUndefined();
+  });
+
+  it('界面关着时点输出格什么都不发生', () => {
+    const core = coreOnFlatGround();
+    core.clickCraftingOutput();
+    core.tick();
+    expect(core.inventoryScreen.cursor).toBeUndefined();
+  });
+
+  it('关掉界面时网格里的材料回背包', () => {
+    const core = openedWithOneLog();
+    core.clickSlot(0);
+    core.clickSlot(GRID_FIRST);
+    core.tick();
+    expect(core.inventory.slot(0)).toBeUndefined();
+
+    core.toggleInventory();
+    core.tick();
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.OakLog, count: 1 });
+    expect(core.inventoryScreen.crafting!.slot(0)).toBeUndefined();
+  });
+
+  it('关掉界面时光标上的成品进背包，快捷栏第一格因此拿得到木板', () => {
+    const core = openedWithOneLog();
+    core.clickSlot(0);
+    core.clickSlot(GRID_FIRST);
+    core.clickCraftingOutput();
+    core.toggleInventory();
+    core.tick();
+    expect(core.inventoryScreen.open).toBe(false);
+    expect(core.inventory.slot(0)).toEqual(PLANKS_X4);
+    expect(core.inventory.held).toEqual(PLANKS_X4);
+  });
+
+  it('木板还不能放置：手持木板按右键世界不变', () => {
+    const core = openedWithOneLog();
+    core.clickSlot(0);
+    core.clickSlot(GRID_FIRST);
+    core.clickCraftingOutput();
+    core.toggleInventory();
+    core.tick();
+    look(core, EAST_YAW, ASIDE_PITCH);
+    core.tick();
+    expect(core.mining.target).toBeDefined();
+    core.takeChangedBlocks();
+
+    core.place();
+    core.tick();
+    expect(core.inventory.held).toEqual(PLANKS_X4);
+    expect(core.takeChangedBlocks()).toEqual([]);
+  });
+});
+
 describe('GameCore 的初始区块加载', () => {
   it('构造后已加载区块数大于 0', () => {
     expect(new GameCore().loadedChunkCount).toBeGreaterThan(0);

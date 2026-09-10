@@ -20,6 +20,7 @@ export const TILE = {
   oakLogTop: 5,
   oakLogSide: 6,
   oakLeaves: 7,
+  oakPlanks: 8,
 } as const;
 
 export interface FaceTiles {
@@ -64,6 +65,7 @@ export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
     bottom: TILE.oakLogTop,
     side: TILE.oakLogSide,
   },
+  [ItemType.OakPlanks]: { top: TILE.oakPlanks, bottom: TILE.oakPlanks, side: TILE.oakPlanks },
 };
 
 export interface UvRect {

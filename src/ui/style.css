@@ -249,6 +249,7 @@ body {
  */
 .hotbar__slot,
 .invscreen__slot,
+.invscreen__output,
 .invscreen__cursor {
   position: relative;
   display: grid;
@@ -321,7 +322,7 @@ body {
   font-family: var(--font-ui);
 }
 
-/* 面板：标题在上，储物格与快捷栏两片格子在下，间距仍是 --tile 的倍数。 */
+/* 面板：标题在上，合成网格与输出格居中，储物格与快捷栏两片格子在下，间距仍是 --tile 的倍数。 */
 .invscreen__panel {
   display: grid;
   gap: var(--tile);
@@ -354,8 +355,42 @@ body {
   background: rgb(0 0 0 / 35%);
 }
 
+/*
+ * 合成网格在左、箭头居中、输出格在右，三样竖向对齐到中线。
+ * 网格一行几格由 inventory-screen.ts 写成 --invscreen-grid-cols（来源是核心报的网格宽度），
+ * 所以 2x2 与将来工作台的 3x3 用的是同一段样式。
+ */
+.invscreen__crafting {
+  display: flex;
+  align-items: center;
+  gap: var(--tile);
+}
+
+.invscreen__grid {
+  display: grid;
+  grid-template-columns: repeat(var(--invscreen-grid-cols), var(--slot-cell));
+  gap: 2px;
+  padding: 2px;
+  background: rgb(0 0 0 / 35%);
+}
+
+/* 从网格指向输出格的箭头：一块白色按多边形裁出箭头形，硬边，与准星同一套画法。 */
+.invscreen__arrow {
+  width: var(--tile);
+  height: calc(var(--tile) / 2);
+  background: #fff;
+  clip-path: polygon(0 35%, 60% 35%, 60% 0, 100% 50%, 60% 100%, 60% 65%, 0 65%);
+}
+
+/* 输出格：与背包格同一种外框，单独一格，成品在这里预览。 */
+.invscreen__output {
+  background: rgb(255 255 255 / 14%);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 35%);
+}
+
 /* 鼠标停在哪一格上就亮一档：点下去动的是这一格。与快捷栏的选中格同一套加亮。 */
-.invscreen__slot:hover {
+.invscreen__slot:hover,
+.invscreen__output:hover {
   background: rgb(255 255 255 / 30%);
 }
 

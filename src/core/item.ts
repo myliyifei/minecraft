@@ -8,6 +8,7 @@
 export const ItemType = {
   Dirt: 1,
   OakLog: 2,
+  OakPlanks: 3,
 } as const;
 
 export type ItemType = (typeof ItemType)[keyof typeof ItemType];
@@ -67,6 +68,7 @@ export const DEFAULT_STACK_SIZE = 64;
 export const ITEMS: Readonly<Record<ItemType, ItemDef>> = {
   [ItemType.Dirt]: { stackSize: DEFAULT_STACK_SIZE },
   [ItemType.OakLog]: { stackSize: DEFAULT_STACK_SIZE },
+  [ItemType.OakPlanks]: { stackSize: DEFAULT_STACK_SIZE },
 };
 
 /** 这种物品一格最多堆多少个。 */

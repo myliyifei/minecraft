@@ -117,7 +117,7 @@ export class Player implements PlayerView {
    * 视线方向的单位向量。
    *
    * 与相机的朝向是同一个式子：偏航 0、俯仰 0 时是 (0, 0, −1)，抬头 y 为正。
-   * 水平分量和 `moveHorizontally` 的前向量一致，只是多乘了俯仰的余弦——走路不看俯仰，
+   * 水平分量和 `moveHorizontally` 的前向量一致，只是多乘了俯仰的余弦——移动不看俯仰，
    * 瞄准看。
    */
   get lookDirection(): Vec3 {

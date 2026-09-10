@@ -109,7 +109,7 @@ export class Inventory implements InventoryView, ItemSink, Hand, SlotStore {
   /**
    * 把一堆物品收进背包，返回没放下的数量（0 表示全收下了）。
    *
-   * 两轮：先把同种的未满堆填满，再占空格。顺序是原版的手感——捡起东西优先并进
+   * 两轮：先把同种的未满堆填满，再占空格。顺序是原版的手感——拾取到的东西优先并进
    * 手上已有的那一堆，而不是每次都新开一格。
    */
   add(stack: ItemStack): number {

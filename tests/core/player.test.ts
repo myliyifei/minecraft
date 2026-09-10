@@ -391,7 +391,7 @@ describe('玩家的眼睛与视线', () => {
     }
   });
 
-  it('视线的水平分量与走路的方向同向', () => {
+  it('视线的水平分量与移动的方向同向', () => {
     const player = standingAt();
     player.turn(1.1, -0.7);
     const look = player.lookDirection;

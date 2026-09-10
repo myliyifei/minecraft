@@ -112,7 +112,7 @@ export class XpOrbs implements XpOrbsView, XpOrbSink {
   }
 }
 
-/** 一个经验球：位置、当前速率、经验点数、存活 tick。 */
+/** 一个经验球：位置、当前速率、经验值、存活 tick。 */
 class XpOrb implements XpOrbView {
   readonly id: number;
   readonly amount: number;

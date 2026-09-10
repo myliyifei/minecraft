@@ -92,7 +92,7 @@ async function waitForFullViewDistance(page: Page): Promise<void> {
     .toBeGreaterThanOrEqual(CHUNKS_IN_VIEW);
 }
 
-/** 走路的方向。视角始终朝 −Z，所以往前是 −Z、往回退是 +Z。 */
+/** 移动的方向。视角始终朝 −Z，所以往前是 −Z、往回退是 +Z。 */
 type WalkDirection = 'forward' | 'back';
 
 /**
@@ -1366,7 +1366,7 @@ test('锁定鼠标后右键把手上的方块放回世界，网格跟着重建',
   const aimed = await digDirtAndAimAside(page);
   expect(aimed.held).toEqual({ item: ItemType.Dirt, count: 1 });
 
-  // 按键与它落地的那一个 tick 必须在同一次同步的 evaluate 里，游戏循环才插不进来。
+  // 按键与它生效的那一个 tick 必须在同一次同步的 evaluate 里，游戏循环才插不进来。
   const placed = await page.evaluate(
     ({ spot, placeButton }) => {
       const { core, renderer, hud } = window.__VOXEL__!;
@@ -1379,7 +1379,7 @@ test('锁定鼠标后右键把手上的方块放回世界，网格跟着重建',
 
       // 右键：事件真的经过输入适配器（监听器就挂在 document 上）。
       // 用合成事件而不是 page.mouse.down：指针锁定下 Playwright 的鼠标事件会连带甩一发
-      // 大位移的 mousemove，视线当场偏到别处，而放置在下一个 tick 才落地——那一 tick
+      // 大位移的 mousemove，视线当场偏到别处，而放置在下一个 tick 才生效——那一 tick
       // 什么时候来由游戏循环说了算，届时对准的已经不是刚才那一格。真右键的那一面由
       // 「未锁定鼠标时右键不放置」验。
       document.dispatchEvent(new MouseEvent('mousedown', { button: placeButton }));

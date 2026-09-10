@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   BLOCKS,
   BlockType,
+  BlockUse,
   UNBREAKABLE,
   blockDrop,
   blockExperience,
+  blockUse,
   isBreakable,
   miningTicks,
   placedBlock,
@@ -38,6 +40,8 @@ const HAND_MINING: Array<[string, BlockType, number, number]> = [
   ['树叶', BlockType.OakLeaves, 0.2, 6],
   // 木板与原木同硬度（issue #18）
   ['木板', BlockType.OakPlanks, 2, 60],
+  // 工作台比木板硬半点（issue #19）
+  ['工作台', BlockType.CraftingTable, 2.5, 75],
 ];
 
 describe('方块的硬度表', () => {
@@ -92,6 +96,7 @@ describe('方块表的正确工具一列', () => {
     ['石头', BlockType.Stone, ToolClass.Pickaxe],
     ['原木', BlockType.OakLog, ToolClass.Axe],
     ['木板', BlockType.OakPlanks, ToolClass.Axe],
+    ['工作台', BlockType.CraftingTable, ToolClass.Axe],
     ['树叶', BlockType.OakLeaves, ToolClass.None],
     ['空气', BlockType.Air, ToolClass.None],
     ['基岩', BlockType.Bedrock, ToolClass.None],
@@ -121,6 +126,7 @@ describe('空手挖掘的掉落表', () => {
     ['泥土掉泥土', BlockType.Dirt, ItemType.Dirt],
     ['橡木原木掉原木', BlockType.OakLog, ItemType.OakLog],
     ['橡木木板掉木板', BlockType.OakPlanks, ItemType.OakPlanks],
+    ['工作台掉工作台', BlockType.CraftingTable, ItemType.CraftingTable],
     ['树叶什么都不掉', BlockType.OakLeaves, null],
     // 石头要镐，空着手挖掉了也拿不到东西
     ['空手挖石头什么都不掉', BlockType.Stone, null],
@@ -189,6 +195,7 @@ describe('挖掉一块给多少经验', () => {
     ['石头', BlockType.Stone, 3],
     ['树叶', BlockType.OakLeaves, 3],
     ['木板', BlockType.OakPlanks, 3],
+    ['工作台', BlockType.CraftingTable, 3],
     ['原木', BlockType.OakLog, 6],
   ];
 
@@ -228,6 +235,7 @@ describe('放置表', () => {
     ['泥土放下去是泥土方块', ItemType.Dirt, BlockType.Dirt],
     ['原木放下去是原木方块', ItemType.OakLog, BlockType.OakLog],
     ['木板放下去是木板方块', ItemType.OakPlanks, BlockType.OakPlanks],
+    ['工作台放下去是工作台方块', ItemType.CraftingTable, BlockType.CraftingTable],
     ['木棍放不下去', ItemType.Stick, null],
   ];
 
@@ -241,6 +249,16 @@ describe('放置表', () => {
     // issue #18：放下去的木板方块挖掉后掉回木板，材料不损失
     const block = placedBlock(ItemType.OakPlanks)!;
     expect(blockDrop(block, ToolClass.None)).toEqual({ item: ItemType.OakPlanks, count: 1 });
+  });
+});
+
+describe('方块表的「使用」一列', () => {
+  it('只有工作台是可使用方块：右键对着它打开界面', () => {
+    for (const block of Object.values(BlockType)) {
+      expect(blockUse(block), `方块 ${block}`).toBe(
+        block === BlockType.CraftingTable ? BlockUse.CraftingTable : BlockUse.None,
+      );
+    }
   });
 });
 

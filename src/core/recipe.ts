@@ -1,6 +1,6 @@
 import { ItemType, type ItemStack } from './item';
 
-/** 一块合成网格有几列几行。背包界面的是 2x2，工作台（#19）的是 3x3。 */
+/** 一块合成网格有几列几行。背包界面的是 2x2，工作台界面的是 3x3。 */
 export interface GridSize {
   readonly width: number;
   readonly height: number;
@@ -45,7 +45,7 @@ export type Recipe = ShapedRecipe | ShapelessRecipe;
 /**
  * 配方表——纯数据（见 CONTEXT.md 的「合成」）。加配方只加一条。
  *
- * 目前有原木出木板、木板出木棍两条。工作台（#19）、六件工具（#21、#23）随各自的票加进来。
+ * 目前有原木出木板、木板出木棍、木板出工作台三条。六件工具（#21、#23）随各自的票加进来。
  */
 export const RECIPES: ReadonlyArray<Recipe> = [
   {
@@ -58,6 +58,16 @@ export const RECIPES: ReadonlyArray<Recipe> = [
     kind: 'shaped',
     result: { item: ItemType.Stick, count: 4 },
     pattern: [[ItemType.OakPlanks], [ItemType.OakPlanks]],
+    mirrored: false,
+  },
+  // 四块木板摆成方形出一个工作台。方形四向对称，镜像与否结果相同，写 false。
+  {
+    kind: 'shaped',
+    result: { item: ItemType.CraftingTable, count: 1 },
+    pattern: [
+      [ItemType.OakPlanks, ItemType.OakPlanks],
+      [ItemType.OakPlanks, ItemType.OakPlanks],
+    ],
     mirrored: false,
   },
 ];

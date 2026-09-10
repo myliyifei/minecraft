@@ -28,7 +28,7 @@ export type BodyView = Pick<PlayerView, 'hitbox'>;
  * 手上不是方块物品（工具、食物）时按了没反应，这条写在放置表里（`placedBlock`）。
  *
  * 写成函数而不是类：它没有跨 tick 的状态，与 `raycastBlocks`、`streamChunks` 一样。
- * 等按住右键要连发（原版约 4 次/秒）时才需要一个记着冷却的对象。
+ * 等按住使用键要连发（原版约 4 次/秒）时才需要一个记着冷却的对象。
  */
 export function placeBlock(
   blocks: BlockEdit,

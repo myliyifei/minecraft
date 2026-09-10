@@ -1,5 +1,5 @@
 import type { ItemStack } from '../core/item';
-import { ATLAS_COLS, ATLAS_PATH, ATLAS_ROWS, ITEM_TILES, tileCell } from '../render/atlas';
+import { ATLAS_COLS, ATLAS_PATH, ATLAS_ROWS, ITEM_TILES, faceTile, tileCell } from '../render/atlas';
 import { ITEM_NAMES } from './strings';
 
 /**
@@ -92,7 +92,8 @@ function paintSlot(cell: SlotCell, stack: ItemStack | undefined): void {
     return;
   }
 
-  const { col, row } = tileCell(ITEM_TILES[stack.item].side);
+  // 图标取正面：有正面贴图的（工作台）画正面才认得出，其余方块正面就是侧面。
+  const { col, row } = tileCell(faceTile(ITEM_TILES[stack.item], 'front'));
   // 物品种类进 data 属性：端到端测试据此认出这一格里是什么，不必去比图片像素。
   cell.slot.dataset.item = String(stack.item);
   cell.slot.title = ITEM_NAMES[stack.item];

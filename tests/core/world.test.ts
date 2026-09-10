@@ -136,6 +136,17 @@ describe('已改区块在卸载后保留', () => {
     expect(world.getBlock(1, FLAT_GROUND_Y + 1, 1)).toBe(BlockType.OakPlanks);
   });
 
+  it('放下的是工作台也一样留着：它是普通方块，进已改区块的数据', () => {
+    const world = new World(flatTestTerrain);
+    world.loadChunk(0, 0);
+    world.setBlock(1, FLAT_GROUND_Y + 1, 1, BlockType.CraftingTable);
+
+    world.unloadChunk(0, 0);
+    world.loadChunk(0, 0);
+
+    expect(world.getBlock(1, FLAT_GROUND_Y + 1, 1)).toBe(BlockType.CraftingTable);
+  });
+
   it('已改区块重新加载时复用留着的那一份，不向来源要新的', () => {
     const { source, generated } = countingTerrain();
     const world = new World(source);

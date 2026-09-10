@@ -10,20 +10,41 @@ import {
 import { STRINGS } from './strings';
 
 /**
- * 背包界面要读核心的哪几样、往回递哪一条指令。写成窄接口，接线接错了编译期就报。
+ * 一层界面要读核心的哪几样、往回递哪一条指令。写成窄接口，接线接错了编译期就报。
+ *
+ * 背包界面与工作台界面各接一份：`screen` 是各自那个界面对象的视图，`inventory` 与两条
+ * 点击指令是同一份——36 个背包格子两层都画，点击由核心递给开着的那个界面。
  */
 export interface InventoryScreenSource {
   readonly inventory: InventoryView;
-  readonly inventoryScreen: InventoryScreenView;
+  readonly screen: InventoryScreenView;
   /** 点了第 index 格。下一个 tick 生效（ADR-0004）。 */
   clickSlot(index: number): void;
   /** 点了输出格。下一个 tick 生效（ADR-0004）。 */
   clickCraftingOutput(): void;
 }
 
+/** 这一层覆盖层在页面上叫什么：元素 id（端到端测试据此找它）与标题。 */
+export interface InventoryScreenLabel {
+  readonly id: string;
+  readonly title: string;
+}
+
+/** 背包界面那一层：按 E 打开。 */
+export const INVENTORY_SCREEN_LABEL: InventoryScreenLabel = {
+  id: 'inventory-screen',
+  title: STRINGS.inventory,
+};
+
+/** 工作台界面那一层：右键对着工作台打开。 */
+export const CRAFTING_TABLE_SCREEN_LABEL: InventoryScreenLabel = {
+  id: 'crafting-table-screen',
+  title: STRINGS.craftingTable,
+};
+
 /**
  * 背包界面（见 CONTEXT.md）的那层 DOM 覆盖层：36 格、一块合成网格加输出格，以及一个
- * 跟着鼠标走的光标物品。
+ * 跟着鼠标走的光标物品。工作台界面是同一层的另一份实例：网格 3x3，标题换成「工作台」。
  *
  * 开着没有、光标上拿着什么、点一格之后东西怎么搬、输出格里显示什么，全都在核心里
  * （`src/core/inventory-screen.ts`）。这里只做两件事：把核心的状态画成格子，把点击的格号
@@ -39,18 +60,19 @@ export interface InventoryScreenHud {
   remove(): void;
 }
 
-/** 把背包界面挂到页面上。返回的句柄要每帧 `update()`。 */
+/** 把一层界面挂到页面上。返回的句柄要每帧 `update()`。 */
 export function installInventoryScreen(
   parent: HTMLElement,
   source: InventoryScreenSource,
+  label: InventoryScreenLabel,
 ): InventoryScreenHud {
   const root = document.createElement('div');
-  root.id = 'inventory-screen';
+  root.id = label.id;
   root.className = 'invscreen';
   // 一层模态覆盖层：读屏软件因此把它当成一个对话框，而不是页面上多出来的一片东西。
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
-  root.setAttribute('aria-label', STRINGS.inventory);
+  root.setAttribute('aria-label', label.title);
   root.hidden = true;
   applyAtlasGrid(root);
   // 一行摆几格由快捷栏的格数决定（36 = 9 × 4），排布的算式留在 CSS 里：这里只给格数，
@@ -62,10 +84,10 @@ export function installInventoryScreen(
 
   const title = document.createElement('h2');
   title.className = 'invscreen__title';
-  title.textContent = STRINGS.inventory;
+  title.textContent = label.title;
 
   // 合成网格在左、输出格在右。格号由核心给（接在 36 格之后），这里只照着编。
-  const crafting = buildCraftingHud(source.inventoryScreen.crafting);
+  const crafting = buildCraftingHud(source.screen.crafting);
 
   // 储物格：背包的第 9–35 格，3 行 9 列
   const storage = document.createElement('div');
@@ -131,7 +153,7 @@ export function installInventoryScreen(
 
   return {
     update(): void {
-      const { open, cursor: stack } = source.inventoryScreen;
+      const { open, cursor: stack } = source.screen;
       if (open !== shownOpen) {
         shownOpen = open;
         root.hidden = !open;

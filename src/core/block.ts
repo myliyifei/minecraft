@@ -12,9 +12,24 @@ export const BlockType = {
   OakLog: 5,
   OakLeaves: 6,
   OakPlanks: 7,
+  CraftingTable: 8,
 } as const;
 
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
+
+/**
+ * 使用键对着这种方块（见 CONTEXT.md 的「使用」、ADR-0009）打开哪种界面；`None` 是不可使用，
+ * 那一下走放置。
+ *
+ * 值是字符串而不是编号：它不进存档（由方块种类查出来），与 `ToolClass` 同一个理由。
+ * 熔炉、箱子（第三切片）各加一个值，核心那边多一条分派，挖掘与放置的逻辑不必动。
+ */
+export const BlockUse = {
+  None: 'none',
+  CraftingTable: 'crafting-table',
+} as const;
+
+export type BlockUse = (typeof BlockUse)[keyof typeof BlockUse];
 
 /** 挖不动的方块的硬度。基岩是唯一一个。 */
 export const UNBREAKABLE = Infinity;
@@ -58,6 +73,11 @@ export interface BlockDef {
    * docs/design-decisions.md，等有矿石了往这里加行。
    */
   readonly experience: number;
+  /**
+   * 使用键对着它是使用还是放置（见 `BlockUse`）。绝大多数方块是 `None`：对着它们
+   * 走放置。工作台这类带界面的方块填自己那一档，对着它时不看手上拿的是什么。
+   */
+  readonly use: BlockUse;
 }
 
 /** 一个某种物品的掉落。掉落表里绝大多数行都是这个形状。 */
@@ -79,6 +99,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     requiresTool: false,
     drop: null,
     experience: 0,
+    use: BlockUse.None,
   },
   // 草方块掉的是泥土，不是草方块本身——与原版一致。
   [BlockType.Grass]: {
@@ -89,6 +110,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     requiresTool: false,
     drop: one(ItemType.Dirt),
     experience: COMMON_EXPERIENCE,
+    use: BlockUse.None,
   },
   [BlockType.Dirt]: {
     opaque: true,
@@ -98,6 +120,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     requiresTool: false,
     drop: one(ItemType.Dirt),
     experience: COMMON_EXPERIENCE,
+    use: BlockUse.None,
   },
   // 空手挖得掉石头，但什么也拿不到（要镐）。
   [BlockType.Stone]: {
@@ -108,6 +131,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     requiresTool: true,
     drop: null,
     experience: COMMON_EXPERIENCE,
+    use: BlockUse.None,
   },
   [BlockType.Bedrock]: {
     opaque: true,
@@ -119,6 +143,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     drop: null,
     // 挖不动，所以它永远碎不了，也就不会生成经验球。
     experience: 0,
+    use: BlockUse.None,
   },
   [BlockType.OakLog]: {
     opaque: true,
@@ -129,6 +154,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     drop: one(ItemType.OakLog),
     // 原木自成一档，比普通方块高一倍。
     experience: 6,
+    use: BlockUse.None,
   },
   // 树叶什么都不掉。树苗与苹果要等树叶凋落（后续切片）。
   [BlockType.OakLeaves]: {
@@ -142,6 +168,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     // 树叶什么都不掉，但「任何方块都给经验」（见 CONTEXT.md 的「经验球」），
     // 所以它照普通方块给 3 点。原版的树叶不给经验，这一条是本项目自己定的。
     experience: COMMON_EXPERIENCE,
+    use: BlockUse.None,
   },
   // 挖掉掉回木板本身：放下去再挖起来材料不损失，木板因此是可以反复用的建材。
   [BlockType.OakPlanks]: {
@@ -153,6 +180,19 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     drop: one(ItemType.OakPlanks),
     // 木板是加工过的建材，不像原木那样自成一档，按普通方块给。
     experience: COMMON_EXPERIENCE,
+    use: BlockUse.None,
+  },
+  // 工作台（见 CONTEXT.md）：木制，比木板硬半点；挖掉掉回工作台本身，搬得走。
+  // 它是本切片唯一的可使用方块：使用键对着它打开工作台界面，而不是往它上面放方块。
+  [BlockType.CraftingTable]: {
+    opaque: true,
+    solid: true,
+    hardness: 2.5,
+    properTool: ToolClass.Axe,
+    requiresTool: false,
+    drop: one(ItemType.CraftingTable),
+    experience: COMMON_EXPERIENCE,
+    use: BlockUse.CraftingTable,
   },
 };
 
@@ -244,6 +284,14 @@ export function blockExperience(block: BlockType): number {
 }
 
 /**
+ * 使用键对着这种方块打开哪种界面，`None` 是不可使用（那一下走放置）。
+ * 空气也是 `None`：什么都没瞄准时谈不上使用。
+ */
+export function blockUse(block: BlockType): BlockUse {
+  return BLOCKS[block].use;
+}
+
+/**
  * 放置表：一种物品放下去变成哪种方块，`null` 表示放不下去（工具、食物那些）。
  *
  * 与 `BLOCKS` 的 `drop` 一列正好反着来，但两张表并不互逆：草方块掉的是泥土，
@@ -259,6 +307,7 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   [ItemType.OakPlanks]: BlockType.OakPlanks,
   // 木棍只是材料，没有对应的方块。
   [ItemType.Stick]: null,
+  [ItemType.CraftingTable]: BlockType.CraftingTable,
 };
 
 /**

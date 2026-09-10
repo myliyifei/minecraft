@@ -137,6 +137,43 @@ describe('配方表里的木板出木棍', () => {
   });
 });
 
+describe('配方表里的木板出工作台', () => {
+  /** 一个工作台。 */
+  const TABLE_X1 = { item: ItemType.CraftingTable, count: 1 };
+
+  it('4 块木板摆满 2x2 出 1 个工作台', () => {
+    const full = grid(
+      TWO_BY_TWO,
+      [0, ItemType.OakPlanks],
+      [1, ItemType.OakPlanks],
+      [2, ItemType.OakPlanks],
+      [3, ItemType.OakPlanks],
+    );
+    expect(matchRecipe(full, TWO_BY_TWO)).toEqual(TABLE_X1);
+  });
+
+  it('3 块不出：少一角就不是那个方形', () => {
+    const three = grid(
+      TWO_BY_TWO,
+      [0, ItemType.OakPlanks],
+      [1, ItemType.OakPlanks],
+      [2, ItemType.OakPlanks],
+    );
+    expect(matchRecipe(three, TWO_BY_TWO)).toBeUndefined();
+  });
+
+  it('2x2 方形摆在 3x3 的右下角也出：图案摆在网格里任意位置都算', () => {
+    const corner = grid(
+      THREE_BY_THREE,
+      [4, ItemType.OakPlanks],
+      [5, ItemType.OakPlanks],
+      [7, ItemType.OakPlanks],
+      [8, ItemType.OakPlanks],
+    );
+    expect(matchRecipe(corner, THREE_BY_THREE)).toEqual(TABLE_X1);
+  });
+});
+
 describe('有序配方的匹配规则（测试内构造的配方）', () => {
   it('图案贴在 2x2 的左列或右列都识别', () => {
     const left = grid(TWO_BY_TWO, [0, ItemType.Dirt], [2, ItemType.OakLog]);

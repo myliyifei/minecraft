@@ -2,8 +2,11 @@ import { isSlotIndex } from './inventory';
 import type { ItemStack, SlotBatch } from './item';
 import { matchRecipe, type GridSize } from './recipe';
 
-/** 背包界面那块合成网格的尺寸（见 CONTEXT.md 的「合成网格」）：2x2。工作台（#19）是 3x3。 */
+/** 背包界面那块合成网格的尺寸（见 CONTEXT.md 的「合成网格」）：2x2。 */
 export const INVENTORY_CRAFTING_GRID: GridSize = Object.freeze({ width: 2, height: 2 });
+
+/** 工作台界面那块合成网格的尺寸：3x3。工具那几条配方只摆得进它。 */
+export const CRAFTING_TABLE_GRID: GridSize = Object.freeze({ width: 3, height: 3 });
 
 /**
  * 合成网格（见 CONTEXT.md）：一批按行排列的格子，加一个由内容算出来的输出格。

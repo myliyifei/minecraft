@@ -1,12 +1,16 @@
-import type { InventoryScreenView } from '../core/inventory-screen';
+import type { GameCore } from '../core/game';
 import { STRINGS } from './strings';
+
+/** 准星只要读核心的一样东西：有没有界面开着。 */
+export type UiModeView = Pick<GameCore, 'uiMode'>;
 
 /**
  * 十字准星 HUD（见 CONTEXT.md）：屏幕正中那个十字，标出视线落在哪一点。
  *
  * 纯表现，一个数都不读核心的世界状态——视线撞上哪一块是目标方块的事（`src/core/
  * raycast.ts`），准星只是把「那条视线从屏幕的哪一点射出去」画出来。它唯一要跟着变的
- * 是背包界面开没开：那时玩家在摆物品，不是在瞄准，屏幕正中不该还立着一个准星。
+ * 是有没有界面开着（背包界面或工作台界面）：那时玩家在摆物品，不是在瞄准，屏幕正中不该
+ * 还立着一个准星。
  *
  * 居中不写在 JS 里：CSS 用视口的 50% 定位，窗口一改尺寸浏览器自己重排，这里不必挂
  * resize 监听器。十字长什么样也在 `style.css` 里。
@@ -19,10 +23,7 @@ export interface CrosshairHud {
 }
 
 /** 把十字准星挂到页面上。返回的句柄要每帧 `update()`。 */
-export function installCrosshair(
-  parent: HTMLElement,
-  inventoryScreen: InventoryScreenView,
-): CrosshairHud {
+export function installCrosshair(parent: HTMLElement, source: UiModeView): CrosshairHud {
   const root = document.createElement('div');
   root.id = 'crosshair';
   root.className = 'crosshair';
@@ -37,7 +38,7 @@ export function installCrosshair(
 
   return {
     update(): void {
-      const { open } = inventoryScreen;
+      const open = source.uiMode;
       if (open === shownOpen) return;
       shownOpen = open;
       root.hidden = open;

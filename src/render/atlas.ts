@@ -22,13 +22,41 @@ export const TILE = {
   oakLeaves: 7,
   oakPlanks: 8,
   stick: 9,
+  craftingTableTop: 10,
+  craftingTableSide: 11,
+  craftingTableFront: 12,
 } as const;
 
+/**
+ * 一种方块（或物品小方块）六个面各取哪一格。
+ *
+ * `front` 是可选的：绝大多数方块四个侧面同一张图，只有工作台这类有「正面」的方块才填。
+ * 填了的话它贴在 −X 与 −Z 两面（西面与北面），另两面仍是 `side`——与原版工作台的朝向
+ * 一致。本项目的方块没有朝向，所以正面固定朝这两个方向。取面用 `faceTile`，没填的
+ * `front` 落回 `side`。
+ */
 export interface FaceTiles {
   readonly top: number;
   readonly bottom: number;
   readonly side: number;
+  readonly front?: number;
 }
+
+/** 一个面的名字：`FaceTiles` 的键。 */
+export type Face = keyof FaceTiles;
+
+/** 这个面取哪一格。没有正面贴图的方块，正面就是侧面。 */
+export function faceTile(tiles: FaceTiles, face: Face): number {
+  return tiles[face] ?? tiles.side;
+}
+
+/** 工作台：顶面是台面，底面是木板，侧面与正面各一张。方块与物品小方块共用这一份。 */
+const CRAFTING_TABLE_TILES: FaceTiles = {
+  top: TILE.craftingTableTop,
+  bottom: TILE.oakPlanks,
+  side: TILE.craftingTableSide,
+  front: TILE.craftingTableFront,
+};
 
 /**
  * 方块到贴图格号的映射——纯数据。后续切片加方块只往这张表加行。
@@ -51,6 +79,7 @@ export const BLOCK_TILES: Readonly<Record<BlockType, FaceTiles | null>> = {
     side: TILE.oakLeaves,
   },
   [BlockType.OakPlanks]: { top: TILE.oakPlanks, bottom: TILE.oakPlanks, side: TILE.oakPlanks },
+  [BlockType.CraftingTable]: CRAFTING_TABLE_TILES,
 };
 
 /**
@@ -70,6 +99,7 @@ export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
   [ItemType.OakPlanks]: { top: TILE.oakPlanks, bottom: TILE.oakPlanks, side: TILE.oakPlanks },
   // 木棍没有对应的方块，掉落物的小方块六面都贴同一张图标；手持画平面图标要等 #21。
   [ItemType.Stick]: { top: TILE.stick, bottom: TILE.stick, side: TILE.stick },
+  [ItemType.CraftingTable]: CRAFTING_TABLE_TILES,
 };
 
 export interface UvRect {
@@ -129,15 +159,9 @@ export function tileUvRect(tile: number): UvRect {
 /**
  * three.js 的 `BoxGeometry` 六个面的顺序，以及每个面取方块的哪一张贴图。
  * 顺序由 three 决定（+X、−X、+Y、−Y、+Z、−Z），改不了，只能对着它写。
+ * 正面贴 −X 与 −Z，与区块网格（`src/render/mesh.ts`）一致。
  */
-const BOX_FACES: readonly (keyof FaceTiles)[] = [
-  'side',
-  'side',
-  'top',
-  'bottom',
-  'side',
-  'side',
-];
+const BOX_FACES: readonly Face[] = ['side', 'front', 'top', 'bottom', 'side', 'front'];
 
 /**
  * `BoxGeometry` 每个面四个顶点的 uv，归一化到这一面自己的 [0, 1]²。
@@ -161,7 +185,7 @@ export function itemCubeUvs(item: ItemType): Float32Array {
   const uvs = new Float32Array(BOX_FACES.length * BOX_FACE_UV.length * 2);
   let i = 0;
   for (const face of BOX_FACES) {
-    const rect = tileUvRect(tiles[face]);
+    const rect = tileUvRect(faceTile(tiles, face));
     for (const [du, dv] of BOX_FACE_UV) {
       uvs[i++] = rect.u0 + du * (rect.u1 - rect.u0);
       uvs[i++] = rect.v0 + dv * (rect.v1 - rect.v0);

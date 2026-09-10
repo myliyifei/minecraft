@@ -815,7 +815,7 @@ describe('GameCore 的快捷栏选中格', () => {
 describe('GameCore 的放置方块', () => {
   /** 按一次右键并推进一个 tick。 */
   function placeOnce(core: GameCore): void {
-    core.place();
+    core.use();
     core.tick();
   }
 
@@ -963,8 +963,8 @@ describe('GameCore 的放置方块', () => {
     core.tick(PICKUP_TICKS);
     expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 2 });
 
-    core.place();
-    core.place();
+    core.use();
+    core.use();
     core.tick();
     expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
   });
@@ -1054,7 +1054,7 @@ describe('GameCore 的背包界面', () => {
     core.takeChangedBlocks();
 
     openInventory(core);
-    core.place();
+    core.use();
     core.tick();
     expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
     expect(core.takeChangedBlocks()).toEqual([]);
@@ -1248,7 +1248,7 @@ describe('GameCore 的合成网格与输出格', () => {
 
   it('手持木板按右键放置：命中面外侧那一格变成木板方块，手上少 1 块', () => {
     const core = holdingPlanks();
-    core.place();
+    core.use();
     core.tick();
     expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.OakPlanks);
     expect(core.inventory.held).toEqual({ item: ItemType.OakPlanks, count: 3 });
@@ -1256,7 +1256,7 @@ describe('GameCore 的合成网格与输出格', () => {
 
   it('空手挖掉放下的木板方块要 60 tick，掉回 1 块木板，给 3 点经验', () => {
     const core = holdingPlanks();
-    core.place();
+    core.use();
     core.tick();
     const experienceBefore = core.experience.total;
     // 目标方块每 tick 重算（ADR-0006）：放下之后再过一个 tick，视线就落在木板方块上，
@@ -1275,6 +1275,218 @@ describe('GameCore 的合成网格与输出格', () => {
     core.tick(PICKUP_TICKS + TICK_RATE);
     expect(core.inventory.held).toEqual(PLANKS_X4);
     expect(core.experience.total - experienceBefore).toBe(3);
+  });
+});
+
+describe('GameCore 的工作台', () => {
+  /** 眼睛那一层：站在平地上，眼睛在脚上方约 1.6 格，落在地表之上第二格里。 */
+  const EYE_LAYER_Y = FLAT_GROUND_Y + 2;
+  /**
+   * 站在出生点朝 −Z 平视时，正前方紧挨着的那一格。触及距离之内，而且挖掉之后掉落物
+   * 落在脚边一格之内，拾得起来。
+   */
+  const AHEAD: [number, number, number] = [0, EYE_LAYER_Y, -1];
+  /** 正前方第二格：放置测试里给工作台身后垫一块石头当目标。 */
+  const BEHIND_AHEAD: [number, number, number] = [0, EYE_LAYER_Y, -2];
+  /** 正前方六格远的那一格：超出触及距离（4.5 格）。 */
+  const FAR_AHEAD: [number, number, number] = [0, EYE_LAYER_Y, -6];
+  /** 站在一格深的坑里朝 −Z 平视时，正前方两格远的那一格。 */
+  const AHEAD_FROM_PIT: [number, number, number] = [0, FLAT_GROUND_Y + 1, -2];
+  const TABLE_X1 = { item: ItemType.CraftingTable, count: 1 };
+
+  /**
+   * 站在平地上、正前方摆着一个工作台、朝它平视的核心。
+   *
+   * 工作台由 `setBlock` 直接摆进世界：4 块木板合成它要把一堆木板拆成四格各一块，
+   * 拆堆是 #25 的事；合成本身在 tests/core/recipe.test.ts 里验。
+   */
+  function facingTable(at: [number, number, number] = AHEAD): GameCore {
+    const core = coreOnFlatGround();
+    core.setBlock(...at, BlockType.CraftingTable);
+    look(core, 0, 0);
+    core.tick();
+    return core;
+  }
+
+  /** 按一次右键（使用）并推进一个 tick。 */
+  function useOnce(core: GameCore): void {
+    core.use();
+    core.tick();
+  }
+
+  it('空手挖掉工作台要 75 tick，掉回 1 个工作台，给 3 点经验', () => {
+    const core = facingTable();
+    expect(core.mining.target).toMatchObject(toVec(AHEAD));
+    core.setMining(true);
+    core.tick(74);
+    expect(core.getBlock(...AHEAD)).toBe(BlockType.CraftingTable);
+    core.tick(1);
+    expect(core.getBlock(...AHEAD)).toBe(BlockType.Air);
+    core.setMining(false);
+
+    // 掉落物落到脚边被吸走，经验球飞过来被吸收
+    core.tick(PICKUP_TICKS + 3 * TICK_RATE);
+    expect(core.inventory.held).toEqual(TABLE_X1);
+    expect(core.experience.total).toBe(3);
+  });
+
+  it('手持工作台按右键放置成工作台方块，手上那一格清空', () => {
+    // 先把摆好的工作台挖来，再对着它身后那块石头把它放回去
+    const core = facingTable();
+    core.setBlock(...BEHIND_AHEAD, BlockType.Stone);
+    core.setMining(true);
+    core.tick(miningTicks(BlockType.CraftingTable, BARE_HAND));
+    core.setMining(false);
+    core.tick(PICKUP_TICKS + 3 * TICK_RATE);
+    expect(core.inventory.held).toEqual(TABLE_X1);
+    expect(core.mining.target).toMatchObject({ ...toVec(BEHIND_AHEAD), normal: { z: 1 } });
+
+    useOnce(core);
+    expect(core.getBlock(...AHEAD)).toBe(BlockType.CraftingTable);
+    expect(core.inventory.held).toBeUndefined();
+  });
+
+  it('对着触及距离内的工作台按右键，下一个 tick 打开工作台界面（ADR-0004）', () => {
+    const core = facingTable();
+    core.use();
+    expect(core.craftingTableScreen.open).toBe(false);
+    core.tick();
+    expect(core.craftingTableScreen.open).toBe(true);
+    // 开的是工作台界面，不是背包界面；两者都算界面模式
+    expect(core.inventoryScreen.open).toBe(false);
+    expect(core.uiMode).toBe(true);
+  });
+
+  it('工作台界面带一块 3x3 合成网格，格号接在 36 格之后', () => {
+    const core = facingTable();
+    const crafting = core.craftingTableScreen.crafting!;
+    expect(crafting.width).toBe(3);
+    expect(crafting.height).toBe(3);
+    expect(crafting.firstSlot).toBe(INVENTORY_SIZE);
+    expect(crafting.output).toBeUndefined();
+  });
+
+  it('工作台界面开着时移动与挖掘指令被忽略', () => {
+    const core = facingTable();
+    useOnce(core);
+    const standing = core.player.position;
+
+    core.setMoveIntent({ ...IDLE_INTENT, forward: true });
+    core.setMining(true);
+    core.tick(2 * miningTicks(BlockType.CraftingTable, BARE_HAND));
+    expect(core.player.position).toEqual(standing);
+    expect(core.getBlock(...AHEAD)).toBe(BlockType.CraftingTable);
+    expect(core.mining.progress).toBe(0);
+  });
+
+  it('手里拿着泥土对着工作台按右键也是打开界面，泥土一块不少（ADR-0009）', () => {
+    // 站在坑里、手上一块泥土，正前方两格摆一个工作台
+    const core = holdingDirt();
+    core.setBlock(...AHEAD_FROM_PIT, BlockType.CraftingTable);
+    look(core, 0, 0);
+    core.tick();
+    expect(core.mining.target).toMatchObject(toVec(AHEAD_FROM_PIT));
+    core.takeChangedBlocks();
+
+    useOnce(core);
+    expect(core.craftingTableScreen.open).toBe(true);
+    expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
+    expect(core.takeChangedBlocks()).toEqual([]);
+  });
+
+  it('对着泥土或草按右键仍是放置', () => {
+    const core = holdingDirt();
+    useOnce(core);
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Dirt);
+    expect(core.craftingTableScreen.open).toBe(false);
+  });
+
+  it('工作台超出触及距离时按右键什么都不发生', () => {
+    const core = facingTable(FAR_AHEAD);
+    expect(core.mining.target).toBeUndefined();
+    useOnce(core);
+    expect(core.craftingTableScreen.open).toBe(false);
+    expect(core.uiMode).toBe(false);
+  });
+
+  it('工作台界面开着时按背包键关闭它，而不是再开背包界面', () => {
+    const core = facingTable();
+    useOnce(core);
+    core.toggleInventory();
+    core.tick();
+    expect(core.craftingTableScreen.open).toBe(false);
+    expect(core.inventoryScreen.open).toBe(false);
+    expect(core.uiMode).toBe(false);
+  });
+
+  it('背包界面开着时右键不生效：工作台界面不会开，也不放置', () => {
+    const core = facingTable();
+    core.toggleInventory();
+    core.tick();
+    expect(core.inventoryScreen.open).toBe(true);
+
+    useOnce(core);
+    expect(core.craftingTableScreen.open).toBe(false);
+    expect(core.inventoryScreen.open).toBe(true);
+  });
+
+  it('同一时刻最多开一个界面：关掉工作台界面之后按背包键才开背包界面', () => {
+    const core = facingTable();
+    useOnce(core);
+    core.toggleInventory();
+    core.tick();
+    core.toggleInventory();
+    core.tick();
+    expect(core.inventoryScreen.open).toBe(true);
+    expect(core.craftingTableScreen.open).toBe(false);
+  });
+
+  it('工作台界面里 3x3 摆出原木出木板，关闭后材料回背包', () => {
+    // 脚下那块草换成原木挖来，掉进坑里之后正前方两格摆一个工作台
+    const core = coreOnFlatGround();
+    core.setBlock(...UNDERFOOT, BlockType.OakLog);
+    digUnderfoot(core, BlockType.OakLog);
+    core.setBlock(...AHEAD_FROM_PIT, BlockType.CraftingTable);
+    look(core, 0, 0);
+    core.tick();
+    useOnce(core);
+    expect(core.craftingTableScreen.open).toBe(true);
+
+    // 原木放进 3x3 的正中那一格（第 4 格）
+    const center = INVENTORY_SIZE + 4;
+    core.clickSlot(0);
+    core.clickSlot(center);
+    core.tick();
+    const crafting = core.craftingTableScreen.crafting!;
+    expect(crafting.slot(4)).toEqual({ item: ItemType.OakLog, count: 1 });
+    expect(crafting.output).toEqual({ item: ItemType.OakPlanks, count: 4 });
+    expect(core.inventory.slot(0)).toBeUndefined();
+
+    core.toggleInventory();
+    core.tick();
+    expect(core.craftingTableScreen.open).toBe(false);
+    expect(crafting.slot(4)).toBeUndefined();
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.OakLog, count: 1 });
+  });
+
+  it('工作台界面开着时点输出格拿走成品，关闭后成品进背包', () => {
+    const core = coreOnFlatGround();
+    core.setBlock(...UNDERFOOT, BlockType.OakLog);
+    digUnderfoot(core, BlockType.OakLog);
+    core.setBlock(...AHEAD_FROM_PIT, BlockType.CraftingTable);
+    look(core, 0, 0);
+    core.tick();
+    useOnce(core);
+
+    core.clickSlot(0);
+    core.clickSlot(INVENTORY_SIZE);
+    core.clickCraftingOutput();
+    core.tick();
+    expect(core.craftingTableScreen.cursor).toEqual({ item: ItemType.OakPlanks, count: 4 });
+
+    core.toggleInventory();
+    core.tick();
+    expect(core.inventory.held).toEqual({ item: ItemType.OakPlanks, count: 4 });
   });
 });
 
@@ -1482,7 +1694,7 @@ describe('GameCore 的已改区块在玩家走远再回来之后', () => {
 
   it('把拾取到的泥土放在旁边，走远再走回来那一块还在', () => {
     const core = holdingDirt(coreForRoundTrip());
-    core.place();
+    core.use();
     core.tick();
     expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Dirt);
 

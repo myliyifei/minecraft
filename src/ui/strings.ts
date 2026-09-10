@@ -19,9 +19,11 @@ export const STRINGS = {
   // 背包界面里除快捷栏之外的那 27 格。读屏软件靠它把两片格子分开报。
   inventoryStorage: '储物格',
   cursorItem: '光标物品',
-  // 背包界面里那块 2x2 合成网格，以及旁边显示成品的输出格。
+  // 两套界面里的合成网格（背包界面 2x2、工作台界面 3x3），以及旁边显示成品的输出格。
   craftingGrid: '合成网格',
   craftingOutput: '输出格',
+  // 工作台界面的标题：右键对着工作台打开的那一层。
+  craftingTable: '工作台',
 } as const;
 
 /**
@@ -32,4 +34,5 @@ export const ITEM_NAMES: Readonly<Record<ItemType, string>> = {
   [ItemType.OakLog]: '橡木原木',
   [ItemType.OakPlanks]: '橡木木板',
   [ItemType.Stick]: '木棍',
+  [ItemType.CraftingTable]: '工作台',
 };

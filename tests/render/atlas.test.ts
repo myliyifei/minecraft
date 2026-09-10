@@ -12,6 +12,7 @@ import {
   TILE,
   TILE_PX,
   crackStage,
+  faceTile,
   itemCubeUvs,
   tileCell,
   tileUvRect,
@@ -37,11 +38,22 @@ describe('方块到贴图格号的映射表', () => {
     const capacity = ATLAS_COLS * ATLAS_ROWS;
     for (const tiles of Object.values(BLOCK_TILES)) {
       if (!tiles) continue;
-      for (const tile of [tiles.top, tiles.bottom, tiles.side]) {
+      for (const tile of [tiles.top, tiles.bottom, tiles.side, faceTile(tiles, 'front')]) {
         expect(tile).toBeGreaterThanOrEqual(0);
         expect(tile).toBeLessThan(capacity);
       }
     }
+  });
+
+  it('没有正面贴图的方块，正面就取侧面那一张', () => {
+    expect(faceTile(BLOCK_TILES[BlockType.Dirt]!, 'front')).toBe(TILE.dirt);
+    expect(faceTile(BLOCK_TILES[BlockType.OakLog]!, 'front')).toBe(TILE.oakLogSide);
+  });
+
+  it('工作台的顶面、侧面、正面各是一张，底面是木板', () => {
+    const tiles = BLOCK_TILES[BlockType.CraftingTable]!;
+    expect(new Set([tiles.top, tiles.side, faceTile(tiles, 'front')]).size).toBe(3);
+    expect(tiles.bottom).toBe(TILE.oakPlanks);
   });
 
   it('不同格的 uv 矩形互不重叠，且都在 [0, 1] 内', () => {
@@ -65,7 +77,7 @@ describe('物品到贴图格号的映射表', () => {
     for (const item of Object.values(ItemType)) {
       const tiles = ITEM_TILES[item];
       expect(tiles, `物品 ${item} 缺贴图`).toBeDefined();
-      for (const tile of [tiles.top, tiles.bottom, tiles.side]) {
+      for (const tile of [tiles.top, tiles.bottom, tiles.side, faceTile(tiles, 'front')]) {
         expect(tile).toBeGreaterThanOrEqual(0);
         expect(tile).toBeLessThan(capacity);
       }
@@ -119,6 +131,19 @@ describe('掉落物小方块的 uv', () => {
     for (const face of [0, 1, 4, 5]) {
       expect(startsAt(face), `第 ${face} 面`).toEqual([side.u0, side.v1]);
     }
+  });
+
+  it('工作台的正面贴在 −X 与 −Z 两面，+X 与 +Z 是侧面', () => {
+    const uvs = itemCubeUvs(ItemType.CraftingTable);
+    const tiles = ITEM_TILES[ItemType.CraftingTable];
+    const side = tileUvRect(tiles.side);
+    const front = tileUvRect(faceTile(tiles, 'front'));
+    const startsAt = (face: number): number[] => faceUvs(uvs, face).slice(0, 2);
+    // BoxGeometry 的面序是 +X、−X、+Y、−Y、+Z、−Z
+    expect(startsAt(0)).toEqual([side.u0, side.v1]);
+    expect(startsAt(1)).toEqual([front.u0, front.v1]);
+    expect(startsAt(4)).toEqual([side.u0, side.v1]);
+    expect(startsAt(5)).toEqual([front.u0, front.v1]);
   });
 
   it('uv 全落在 [0, 1] 内', () => {

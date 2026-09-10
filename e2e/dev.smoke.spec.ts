@@ -7,7 +7,7 @@ import {
   SEA_LEVEL,
   TICK_RATE,
 } from '../src/core/constants';
-import { INVENTORY_CRAFTING_GRID } from '../src/core/crafting-grid';
+import { CRAFTING_TABLE_GRID, INVENTORY_CRAFTING_GRID } from '../src/core/crafting-grid';
 import { PICKUP_DELAY_TICKS } from '../src/core/drop';
 import { HOTBAR_SIZE, INVENTORY_SIZE } from '../src/core/inventory';
 import { BARE_HAND, ItemType, type ItemStack } from '../src/core/item';
@@ -1402,7 +1402,7 @@ test('锁定鼠标后右键把手上的方块放回世界，网格跟着重建',
         filledSlots: document.querySelectorAll('#hotbar .hotbar__slot[data-item]').length,
       };
     },
-    { spot: aimed.spot, placeButton: MOUSE_BINDINGS.place },
+    { spot: aimed.spot, placeButton: MOUSE_BINDINGS.use },
   );
 
   // 挖来的那一个泥土放回了世界：落点原来是空气，现在是泥土方块
@@ -1420,7 +1420,7 @@ test('未锁定鼠标时右键不放置', async ({ page }) => {
   const aimed = await digDirtAndAimAside(page);
   expect(aimed.held).toEqual({ item: ItemType.Dirt, count: 1 });
 
-  // 真按一下右键（Playwright 按名字给按钮，'right' 就是 MOUSE_BINDINGS.place 那个编号）。
+  // 真按一下右键（Playwright 按名字给按钮，'right' 就是 MOUSE_BINDINGS.use 那个编号）。
   // 没有指针锁定，输入适配器一概不理——Esc 之后不该还能改世界。
   await page.mouse.down({ button: 'right' });
   await page.mouse.up({ button: 'right' });
@@ -1846,7 +1846,7 @@ test('合成出的木板放到世界里，画面正中从草绿变成木板的�
       renderer.render(1);
       const before = { block: core.getBlock(spot.x, spot.y, spot.z), rgb: centerRgb() };
 
-      core.place();
+      core.use();
       core.tick();
       renderer.syncChunkMeshes();
       renderer.render(1);
@@ -1983,6 +1983,120 @@ test('背包界面开着时不显示十字准星', async ({ page }) => {
   await page.keyboard.press(KEY_BINDINGS.inventory);
   await expect(screen).toBeHidden();
   await expect(crosshair).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 在玩家正前方紧挨着的那一格摆一个工作台，并让玩家朝它平视。返回那一格的坐标。
+ *
+ * 工作台由 `setBlock` 直接摆进世界：核心没有往背包里塞物品的入口，而 4 块木板合成它要先
+ * 拆堆（#25）。这条测的是右键那一下的接线，不是合成。
+ */
+async function placeTableAhead(page: Page): Promise<Vec3> {
+  return page.evaluate(
+    ({ table, eyeHeight }) => {
+      const core = window.__VOXEL__!.core;
+      const { x, y, z } = core.player.position;
+      // 眼睛那一层、正前方（−Z）一格
+      const spot = { x: Math.floor(x), y: Math.floor(y + eyeHeight), z: Math.floor(z) - 1 };
+      core.setBlock(spot.x, spot.y, spot.z, table);
+      core.turn(-core.player.yaw, -core.player.pitch);
+      core.tick();
+      const target = core.mining.target;
+      if (!target || target.x !== spot.x || target.y !== spot.y || target.z !== spot.z) {
+        throw new Error('平视时应该对准正前方那个工作台');
+      }
+      return spot;
+    },
+    { table: BlockType.CraftingTable, eyeHeight: PLAYER_EYE_HEIGHT },
+  );
+}
+
+test('右键对着工作台打开工作台界面并交还鼠标，按 E 关闭并抓回鼠标，准星随之隐藏与复现', async ({
+  page,
+}) => {
+  await placeTableAhead(page);
+  await grabPointer(page);
+  const screen = page.locator('#crafting-table-screen');
+  const inventory = page.locator('#inventory-screen');
+  const crosshair = page.locator('#crosshair');
+  await expect(screen).toBeHidden();
+  await expect(crosshair).toBeVisible();
+
+  // 右键：事件真的经过输入适配器。用合成事件而不是 page.mouse，理由见放置那条测试。
+  // 使用下一个 tick 生效，交给游戏循环推进；释放鼠标是输入适配器在随后一帧做的。
+  await page.evaluate(
+    (useButton) => document.dispatchEvent(new MouseEvent('mousedown', { button: useButton })),
+    MOUSE_BINDINGS.use,
+  );
+  await expect(screen).toBeVisible();
+  await expect(inventory).toBeHidden();
+  await expect.poll(() => readLockedElementId(page)).toBe(null);
+  await expect(crosshair).toBeHidden();
+  await expect(page.locator('#hud')).toBeHidden();
+
+  // 标题与无障碍名都是「工作台」；3x3 网格 9 格，格号接在 36 格之后；36 个背包格子也都在
+  await expect(screen).toHaveAttribute('aria-label', STRINGS.craftingTable);
+  await expect(page.locator('#crafting-table-screen .invscreen__title')).toHaveText(
+    STRINGS.craftingTable,
+  );
+  const gridCells = page.locator('#crafting-table-screen .invscreen__grid .invscreen__slot');
+  await expect(gridCells).toHaveCount(CRAFTING_TABLE_GRID.width * CRAFTING_TABLE_GRID.height);
+  await expect(gridCells.first()).toHaveAttribute('data-slot', String(INVENTORY_SIZE));
+  await expect(page.locator('#crafting-table-screen .invscreen__slot')).toHaveCount(
+    INVENTORY_SIZE + CRAFTING_TABLE_GRID.width * CRAFTING_TABLE_GRID.height,
+  );
+  await expect(page.locator('#crafting-table-screen [data-output]')).toBeVisible();
+
+  // 按 E 关掉的是工作台界面，不是再开一层背包界面；鼠标当场回到第一人称
+  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await expect(screen).toBeHidden();
+  await expect(inventory).toBeHidden();
+  await expect.poll(() => readLockedElementId(page)).toBe('game');
+  await expect(crosshair).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('工作台界面开着时按 Esc 也关掉它', async ({ page }) => {
+  await placeTableAhead(page);
+  await grabPointer(page);
+  const screen = page.locator('#crafting-table-screen');
+  await page.evaluate(
+    (useButton) => document.dispatchEvent(new MouseEvent('mousedown', { button: useButton })),
+    MOUSE_BINDINGS.use,
+  );
+  await expect(screen).toBeVisible();
+  await expect.poll(() => readLockedElementId(page)).toBe(null);
+
+  await page.keyboard.press(INVENTORY_CLOSE_KEY);
+  await expect(screen).toBeHidden();
+  await expect.poll(() => readLockedElementId(page)).toBe('game');
+  expect(errors).toEqual([]);
+});
+
+test('工作台方块画得出来：平视它时画面正中从远处的草绿变成木板的褐黄', async ({ page }) => {
+  await waitForFullViewDistance(page);
+  // 整段跑在一次同步的 evaluate 里，读到的就是刚画的那一帧。玩家朝 −Z 平视，工作台摆在
+  // 正前方两格、眼睛那一层，正对视线的是它的 −Z 面——也就是正面。
+  const rgb = await page.evaluate(
+    ({ table, eyeHeight }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const centerRgb = window.__CENTER_RGB__!;
+      core.turn(-core.player.yaw, -core.player.pitch);
+      renderer.render(1);
+      const before = centerRgb();
+      const { x, y, z } = core.player.position;
+      core.setBlock(Math.floor(x), Math.floor(y + eyeHeight), Math.floor(z) - 2, table);
+      core.tick();
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      return { before, after: centerRgb() };
+    },
+    { table: BlockType.CraftingTable, eyeHeight: PLAYER_EYE_HEIGHT },
+  );
+  // 摆上之后画面正中变了，而且是木板的褐黄：红分量高于绿分量
+  expect(rgb.after).not.toEqual(rgb.before);
+  expect(rgb.after[0]).toBeGreaterThan(rgb.after[1]);
   expect(errors).toEqual([]);
 });
 

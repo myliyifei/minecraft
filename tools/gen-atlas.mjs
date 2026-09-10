@@ -55,6 +55,10 @@ const PLANKS = [162, 130, 78];
 const PLANKS_SEAM = [110, 84, 48];
 const STICK = [140, 104, 58];
 const STICK_SHADOW = [96, 70, 38];
+const TABLE_TOP = [176, 142, 86];
+const TABLE_GRID = [92, 68, 40];
+const TABLE_CLOTH = [178, 60, 52];
+const TABLE_IRON = [200, 200, 205];
 
 /** 木棍图标的两端离格子边各留几像素，免得贴到边上。 */
 const STICK_MARGIN = 2;
@@ -109,6 +113,32 @@ const TILES = {
     if (offset < -1 || offset > 1) return [0, 0, 0, 0];
     if (x < STICK_MARGIN || x >= TILE_PX - STICK_MARGIN) return [0, 0, 0, 0];
     return shade(offset === 1 ? STICK_SHADOW : STICK, Math.floor(rand() * 16) - 8);
+  },
+  // crafting_table_top：浅色台面，四周一圈深边，中间两横两竖的深线划出 3x3 的格子
+  10: (x, y, rand) => {
+    const border = x === 0 || y === 0 || x === TILE_PX - 1 || y === TILE_PX - 1;
+    const line = x === 5 || x === 10 || y === 5 || y === 10;
+    if (border || line) return shade(TABLE_GRID, Math.floor(rand() * 14) - 7);
+    return shade(TABLE_TOP, Math.floor(rand() * 20) - 10);
+  },
+  // crafting_table_side：上沿一条台面色，下面是木板，木板上搭一块红布
+  11: (x, y, rand) => {
+    if (y < 2) return shade(TABLE_TOP, Math.floor(rand() * 16) - 8);
+    if (y >= 3 && y <= 8 && x >= 2 && x <= 13) {
+      return shade(TABLE_CLOTH, (y % 2 === 0 ? 10 : -10) + Math.floor(rand() * 12) - 6);
+    }
+    return TILES[8](x, y, rand);
+  },
+  // crafting_table_front：与侧面同一块底，红布换成挂着的锤与锯——竖着的木柄，顶上一块铁头
+  12: (x, y, rand) => {
+    if (y < 2) return shade(TABLE_TOP, Math.floor(rand() * 16) - 8);
+    const hammerHandle = x === 4 && y >= 5 && y <= 12;
+    const hammerHead = y >= 3 && y <= 5 && x >= 2 && x <= 6;
+    const sawHandle = x >= 9 && x <= 12 && y >= 3 && y <= 5;
+    const sawBlade = x >= 10 && x <= 11 && y >= 6 && y <= 13;
+    if (hammerHead || sawBlade) return shade(TABLE_IRON, Math.floor(rand() * 20) - 10);
+    if (hammerHandle || sawHandle) return shade(STICK_SHADOW, Math.floor(rand() * 12) - 6);
+    return TILES[8](x, y, rand);
   },
 };
 

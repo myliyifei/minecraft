@@ -1,7 +1,7 @@
-import { BlockType, type BlockEdit } from './block';
+import { BlockType, BlockUse, blockUse, type BlockEdit } from './block';
 import type { ChunkView } from './chunk';
 import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS } from './constants';
-import { CraftingGrid, INVENTORY_CRAFTING_GRID } from './crafting-grid';
+import { CRAFTING_TABLE_GRID, CraftingGrid, INVENTORY_CRAFTING_GRID } from './crafting-grid';
 import { Drops, type DropsView } from './drop';
 import { Experience, type ExperienceView } from './experience';
 import { Inventory, wrapHotbarSlot, type InventoryView } from './inventory';
@@ -22,10 +22,11 @@ import {
 } from './world';
 
 /**
- * 背包界面上的一下点击：点了第几格，或点了输出格。
+ * 界面上的一下点击：点了第几格，或点了输出格。
  *
  * 两种点击排进同一条队列而不是两条：「放进网格、点输出格、把成品放到别处」是同一个 tick
- * 里可能连着来的三下，分成两条队列就丢了先后。
+ * 里可能连着来的三下，分成两条队列就丢了先后。点的是哪个界面不必记：同一时刻最多开
+ * 一个界面，点击就落在开着的那个上。
  */
 type ScreenClick = { readonly kind: 'slot'; readonly index: number } | { readonly kind: 'output' };
 
@@ -48,8 +49,8 @@ export interface GameCoreOptions {
  * 核心层的测试都从这里驱动游戏，渲染与输入适配器也只通过这里的指令和查询与游戏交互。
  *
  * 第一切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」「空手挖掘」
- * 「掉落物与背包」「经验球与等级」「放置方块」「背包界面」九件事，第二切片起加「合成」。
- * 生物等系统由后续切片挂进 step()。
+ * 「掉落物与背包」「经验球与等级」「放置方块」「背包界面」九件事，第二切片起加「合成」
+ * 与「使用（工作台界面）」。生物等系统由后续切片挂进 step()。
  */
 export class GameCore implements BlockEdit {
   private readonly world: World;
@@ -62,6 +63,12 @@ export class GameCore implements BlockEdit {
   private readonly inventoryState: Inventory;
   private readonly craftingGrid: CraftingGrid;
   private readonly screenState: InventoryScreen;
+  /**
+   * 工作台界面（见 CONTEXT.md）：与背包界面同一套实现，只是合成网格是 3x3。
+   * 两个界面各持自己的网格，同一时刻最多开一个（`activeScreen`）。
+   */
+  private readonly craftingTableGrid: CraftingGrid;
+  private readonly craftingTableState: InventoryScreen;
   private readonly miningState: Mining;
   private ticks = 0;
   private intent: MoveIntent = IDLE_INTENT;
@@ -76,15 +83,15 @@ export class GameCore implements BlockEdit {
    * 下面三样是同一个 tick 里到达的一次性输入。折法各不相同，取决于「同一 tick 里来两下
    * 是什么意思」——三者都在 tick 边界消费（ADR-0004）：
    *
-   * - 放置归并成一个布尔：一次点击放一块，两下也只放一块，与原版一致。
+   * - 使用归并成一个布尔：一次点击放一块（或开一次界面），两下也只算一下，与原版一致。
    * - 背包开合异或抵消：一开一关，界面状态没有净变化。
    * - 点格子与点输出格排队重放：「拿起再放到别处」本来就是两下，合成一下就丢了一半意思。
    */
-  /** 这一 tick 里按过放置键没有。 */
-  private placeQueued = false;
+  /** 这一 tick 里按过使用键没有。 */
+  private useQueued = false;
   /** 这一 tick 里按过背包键没有。 */
   private toggleQueued = false;
-  /** 这一 tick 里在背包界面上点过哪些地方（格子与输出格），按点击顺序。 */
+  /** 这一 tick 里在界面上点过哪些地方（格子与输出格），按点击顺序。 */
   private readonly screenClicks: ScreenClick[] = [];
 
   constructor(options: GameCoreOptions = {}) {
@@ -102,6 +109,8 @@ export class GameCore implements BlockEdit {
     this.inventoryState = new Inventory();
     this.craftingGrid = new CraftingGrid(INVENTORY_CRAFTING_GRID);
     this.screenState = new InventoryScreen(this.inventoryState, this.craftingGrid);
+    this.craftingTableGrid = new CraftingGrid(CRAFTING_TABLE_GRID);
+    this.craftingTableState = new InventoryScreen(this.inventoryState, this.craftingTableGrid);
     this.miningState = new Mining(
       this.world,
       this.playerState,
@@ -152,13 +161,29 @@ export class GameCore implements BlockEdit {
   }
 
   /**
+   * 工作台界面的只读视图：开着没有、光标上拿着什么、那块 3x3 网格与输出格里是什么。
+   * 只能由使用键对着工作台（`use`）打开，按背包键关闭。
+   */
+  get craftingTableScreen(): InventoryScreenView {
+    return this.craftingTableState;
+  }
+
+  /**
    * 这一刻是界面模式吗（见 CONTEXT.md）——有界面开着就是。
    *
-   * 问的是「有没有界面开着」而不是「背包界面开着没有」：工作台界面（#19）接进来之后
-   * 这里多问一句，移动、视角、挖掘、放置那几处判定一行都不必改。
+   * 问的是「有没有界面开着」而不是「背包界面开着没有」：移动、视角、挖掘、使用那几处
+   * 判定只看这一个答案，再加一种界面也不必改它们。界面层与输入层也读它：准星藏不藏、
+   * 底部那一栏收不收、鼠标要不要交还页面，看的都是「有没有界面开着」。
    */
-  private get uiMode(): boolean {
-    return this.screenState.open;
+  get uiMode(): boolean {
+    return this.activeScreen !== undefined;
+  }
+
+  /** 此刻开着的那个界面，一个都没开时 undefined。同一时刻最多开一个。 */
+  private get activeScreen(): InventoryScreen | undefined {
+    if (this.screenState.open) return this.screenState;
+    if (this.craftingTableState.open) return this.craftingTableState;
+    return undefined;
   }
 
   /**
@@ -215,28 +240,30 @@ export class GameCore implements BlockEdit {
   }
 
   /**
-   * 放一块方块：把手上那一堆的一个放到目标方块的相邻面上。按一次放置键调一次。
+   * 使用（见 CONTEXT.md、ADR-0009）：目标方块是可使用方块（工作台）就打开它的界面，
+   * 不看手上拿的是什么；否则把手上那一堆的一个放到目标方块的相邻面上。按一次使用键调一次。
    *
-   * 与 `setMining` 同一条路，下一个 tick 生效（ADR-0004）。同一个 tick 里按两次也只放
-   * 一块——一次点击放一块，与原版一致。放不下去（那一格不是空气、会跟玩家撞上、
-   * 手上不是方块物品）时什么都不发生，规则在 `Placement` 里。
+   * 与 `setMining` 同一条路，下一个 tick 生效（ADR-0004）。同一个 tick 里按两次也只算
+   * 一下——一次点击放一块，与原版一致。放不下去（那一格不是空气、会跟玩家撞上、
+   * 手上不是方块物品）时什么都不发生，规则在 `placeBlock` 里。界面开着时这一下作废。
    */
-  place(): void {
-    this.placeQueued = true;
+  use(): void {
+    this.useQueued = true;
   }
 
   /**
-   * 开合背包界面，下一个 tick 生效（ADR-0004）。按一次背包键调一次。
+   * 按背包键，下一个 tick 生效（ADR-0004）：有界面开着就关掉它（不管是哪一个），
+   * 一个都没开就打开背包界面。工作台界面因此关得掉、开不了——它只由 `use` 打开。
    *
-   * 同一个 tick 里按两次相互抵消：一开一关，界面状态没有净变化。关闭时光标上还拿着
-   * 东西的话，它回背包，一格都放不下的那些掉在玩家脚下（`InventoryScreen.toggle`）。
+   * 同一个 tick 里按两次相互抵消：一开一关，界面状态没有净变化。关闭时光标上与合成网格
+   * 里还有东西的话，它们回背包，一格都放不下的那些掉在玩家脚下（`InventoryScreen.toggle`）。
    */
   toggleInventory(): void {
     this.toggleQueued = !this.toggleQueued;
   }
 
   /**
-   * 点背包界面的第 index 格，下一个 tick 生效（ADR-0004）。
+   * 点开着的那个界面的第 index 格，下一个 tick 生效（ADR-0004）。
    *
    * 同一个 tick 里点几下就按点的顺序处理几下，一下都不丢——「拿起再放到别处」本来
    * 就是两下点击，合成一下就丢了一半的意思。界面关着时点了没有反应。
@@ -246,8 +273,8 @@ export class GameCore implements BlockEdit {
   }
 
   /**
-   * 点背包界面的输出格，下一个 tick 生效（ADR-0004）。与点格子排在同一条队列里，先后
-   * 顺序照点击的来。成品到光标上、材料各减 1 的规则在 `InventoryScreen.clickOutput` 里。
+   * 点开着的那个界面的输出格，下一个 tick 生效（ADR-0004）。与点格子排在同一条队列里，
+   * 先后顺序照点击的来。成品到光标上、材料各减 1 的规则在 `InventoryScreen.clickOutput` 里。
    */
   clickCraftingOutput(): void {
     this.screenClicks.push(OUTPUT_CLICK);
@@ -338,26 +365,23 @@ export class GameCore implements BlockEdit {
     // 先让区块跟上玩家再算物理：玩家脚下的地形必须已经在世界里，否则他会踩进
     // 「未加载即空气」的虚空里往下掉。
     streamChunks(this.world, this.playerChunk, this.radius);
-    // 背包界面的输入排在最前：这一 tick 是不是界面模式，下面几步都要看它。
-    this.stepInventoryScreen();
-    // 界面模式下移动、挖掘、放置一律不算数（见 CONTEXT.md 的「界面模式」）：玩家在
+    // 界面的输入排在最前：这一 tick 是不是界面模式，下面几步都要看它。
+    this.stepScreens();
+    // 界面模式下移动、挖掘、使用一律不算数（见 CONTEXT.md 的「界面模式」）：玩家在
     // 摆物品，不是在操作世界。挡的是输入而不是世界——重力、掉落物、经验球照旧。
     const uiMode = this.uiMode;
     this.playerState.step(uiMode ? IDLE_INTENT : this.intent);
-    // 选中格先生效，再瞄准与放置：同一 tick 里切了格又按右键，放下的是新格里的东西。
+    // 选中格先生效，再瞄准与使用：同一 tick 里切了格又按使用键，放下的是新格里的东西。
     this.inventoryState.select(this.nextSlot);
     // 挖掘必须排在移动之后，理由见 Mining.step。界面一开就换成「什么键都没按」，
     // 进度因此当场归零，回头得重挖。
     this.miningState.step(uiMode ? IDLE_MINING : { held: this.miningHeld, chain: this.chainHeld });
-    // 放置排在挖掘之后：目标方块是挖掘那一步按走完之后的眼睛位置重投出来的（ADR-0006），
+    // 使用排在挖掘之后：目标方块是挖掘那一步按走完之后的眼睛位置重投出来的（ADR-0006），
     // 与玩家碰撞箱的判定用的也是这一 tick 走完之后的位置。
-    if (this.placeQueued) {
-      // 界面模式下这一下作废，不留到关掉界面之后补放一块。
-      this.placeQueued = false;
-      // 目标由挖掘那一步算出来，放置直接用它（ADR-0006）。
-      if (!uiMode) {
-        placeBlock(this.world, this.miningState, this.playerState, this.inventoryState);
-      }
+    if (this.useQueued) {
+      // 界面模式下这一下作废，不留到关掉界面之后补一下。
+      this.useQueued = false;
+      if (!uiMode) this.useTarget();
     }
     // 掉落物与经验球都排在挖掘之后：这一 tick 刚挖出来的东西同一 tick 就开始动，而
     // 掉落物的拾取延迟（PICKUP_DELAY_TICKS）也从这里起算。拾取与吸收判的都是玩家走完
@@ -367,23 +391,44 @@ export class GameCore implements BlockEdit {
   }
 
   /**
-   * 背包界面这一 tick 的输入：先处理点击，再处理开合。
+   * 使用键落在目标方块上：可使用方块（工作台）开界面，其余走放置（ADR-0009）。
+   *
+   * 目标由挖掘那一步算出来，这里直接用它（ADR-0006）：射线只走到触及距离，拿得到目标
+   * 就说明够得着，触及距离之外的工作台因此不是目标，使用键什么都不发生。
+   * 分派看的是方块表的「使用」一列（`blockUse`），熔炉、箱子加进来时这里各多一条。
+   */
+  private useTarget(): void {
+    const hit = this.miningState.target;
+    if (hit && blockUse(this.world.getBlock(hit.x, hit.y, hit.z)) === BlockUse.CraftingTable) {
+      // 走到这里说明没有界面开着（`uiMode` 为假），这一下切换就是打开。
+      this.craftingTableState.toggle();
+      return;
+    }
+    placeBlock(this.world, this.miningState, this.playerState, this.inventoryState);
+  }
+
+  /**
+   * 界面这一 tick 的输入：先处理点击，再处理开合。
    *
    * 点击排在开合之前，按下背包键那一 tick 里点的格子才算数——两件事都在这一 tick 里
-   * 到达，而玩家先点了格子才去按键。
+   * 到达，而玩家先点了格子才去按键。点击落在开着的那个界面上，一个都没开时点了没有反应。
    */
-  private stepInventoryScreen(): void {
-    for (const click of this.screenClicks) {
-      if (click.kind === 'slot') this.screenState.clickSlot(click.index);
-      else this.screenState.clickOutput();
+  private stepScreens(): void {
+    const active = this.activeScreen;
+    if (active) {
+      for (const click of this.screenClicks) {
+        if (click.kind === 'slot') active.clickSlot(click.index);
+        else active.clickOutput();
+      }
     }
     this.screenClicks.length = 0;
 
     if (!this.toggleQueued) return;
     this.toggleQueued = false;
-    // 背包一格不剩、光标上还拿着东西（或合成网格里还摆着东西）时把那些扔在玩家脚下那一格，
-    // 与原版一样：界面一关就看不见的东西不能凭空消失。玩家挪出一格来就能拾取回去。
-    for (const stack of this.screenState.toggle()) {
+    // 有界面开着就关它，没有就开背包界面。关的时候光标上、合成网格里还有东西而背包
+    // 一格不剩的，扔在玩家脚下那一格，与原版一样：界面一关就看不见的东西不能凭空消失。
+    // 玩家挪出一格来就能拾取回去。
+    for (const stack of (active ?? this.screenState).toggle()) {
       this.dropsState.spawnAt(stack, this.playerState.position);
     }
   }

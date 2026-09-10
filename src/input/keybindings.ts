@@ -57,11 +57,13 @@ export const MOVE_ACTIONS = Object.keys(IDLE_INTENT) as MoveAction[];
 /**
  * 鼠标按钮绑定：`MouseEvent.button` 的编号。别处不许再写按钮编号。
  *
- * 与 `KEY_BINDINGS` 分成两张表，因为它们查的是不同的事件字段。挖掘是左键，放置是右键。
+ * 与 `KEY_BINDINGS` 分成两张表，因为它们查的是不同的事件字段。挖掘是左键，使用是右键——
+ * 「使用」而不是「放置」：对着工作台是打开界面，对着别的方块才是放置（ADR-0009），
+ * 哪一种由核心决定。
  */
 export const MOUSE_BINDINGS = {
   mine: 0,
-  place: 2,
+  use: 2,
 } as const;
 
 /**

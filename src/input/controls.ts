@@ -27,19 +27,19 @@ export type PlayerInputTarget = Pick<
   | 'turn'
   | 'setMining'
   | 'setChainMining'
-  | 'place'
+  | 'use'
   | 'selectHotbarSlot'
   | 'scrollHotbar'
   | 'toggleInventory'
-  | 'inventoryScreen'
+  | 'uiMode'
 >;
 
 /**
- * 输入适配器：把键鼠事件翻译成移动意图、挖掘与放置、快捷栏切换与视角增量交给核心。
+ * 输入适配器：把键鼠事件翻译成移动意图、挖掘与使用、快捷栏切换与视角增量交给核心。
  *
- * 这里没有任何游戏逻辑——走多快、跳多高、撞不撞墙、一块方块挖多久、一块方块放得下放不下
- * 全在 `src/core/`。未锁定时按键与鼠标按钮都不生效，因此 Esc 之后玩家不会继续走、
- * 也不会继续挖。
+ * 这里没有任何游戏逻辑——走多快、跳多高、撞不撞墙、一块方块挖多久、一块方块放得下放不下、
+ * 右键这一下是开界面还是放方块，全在 `src/core/`。未锁定时按键与鼠标按钮都不生效，
+ * 因此 Esc 之后玩家不会继续走、也不会继续挖。
  *
  * 背包键是唯一在未锁定时也认的键，条件是界面正开着（界面模式，见 CONTEXT.md）：那时
  * 鼠标已经交还给页面，玩家得有办法把界面关掉。界面开着时其余按键一概不算数——「哪些
@@ -51,16 +51,25 @@ export type PlayerInputTarget = Pick<
  * 换不掉，所以它是 `INVENTORY_CLOSE_KEY` 这个单独的常量，不在 `KEY_BINDINGS` 里——
  * 设置界面（后续切片）改不到它。
  *
- * 返回卸载函数。
+ * 返回的句柄要每帧 `sync()`：界面可能不是由这里的按键打开的——右键对着工作台，界面在
+ * 下一个 tick 由核心打开——那时鼠标还锁着，得释放给页面。
  */
+export interface PlayerControls {
+  /** 让指针锁定跟上核心：有界面开着而鼠标还锁着，就释放。每帧调一次。 */
+  sync(): void;
+  /** 卸下全部监听器。 */
+  remove(): void;
+}
+
 export function installPlayerControls(
   canvas: HTMLCanvasElement,
   target: PlayerInputTarget,
-): () => void {
+): PlayerControls {
   const pressed = new Set<MoveAction>();
   const locked = (): boolean => document.pointerLockElement === canvas;
-  // 界面模式（见 CONTEXT.md）：这时鼠标已经交还给页面，键盘只认关掉界面那两颗键。
-  const uiOpen = (): boolean => target.inventoryScreen.open;
+  // 界面模式（见 CONTEXT.md）：背包界面或工作台界面开着。这时鼠标已经交还给页面，
+  // 键盘只认关掉界面那两颗键。
+  const uiOpen = (): boolean => target.uiMode;
   const sendIntent = (): void => target.setMoveIntent(intentOf(pressed));
 
   // 锁定生效后浏览器会补投一发 mousemove，带的是光标从点击位置归位到画面中心的位移
@@ -114,9 +123,9 @@ export function installPlayerControls(
 
   const onMouseDown = (event: MouseEvent): void => {
     if (!locked()) return;
-    // 挖掘是持续状态（按住不放一直挖），放置是一次动作（按一次放一块）。
+    // 挖掘是持续状态（按住不放一直挖），使用是一次动作（按一次放一块或开一次界面）。
     if (event.button === MOUSE_BINDINGS.mine) target.setMining(true);
-    else if (event.button === MOUSE_BINDINGS.place) target.place();
+    else if (event.button === MOUSE_BINDINGS.use) target.use();
   };
 
   const onMouseUp = (event: MouseEvent): void => {
@@ -125,7 +134,7 @@ export function installPlayerControls(
     target.setMining(false);
   };
 
-  // 锁定期间右键是放置，不该弹出浏览器菜单——菜单一弹就抢走了后面的按键。
+  // 锁定期间右键是使用，不该弹出浏览器菜单——菜单一弹就抢走了后面的按键。
   const onContextMenu = (event: MouseEvent): void => {
     if (locked()) event.preventDefault();
   };
@@ -155,14 +164,15 @@ export function installPlayerControls(
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
-    // 背包键两头都要认：锁定着的时候按它开界面，界面开着的时候按它关界面。
+    // 背包键两头都要认：锁定着的时候按它开背包界面，有界面开着（背包或工作台）的时候
+    // 按它关那个界面。开哪个、关哪个由核心定，这里只认「现在有没有界面开着」。
     if (event.code === KEY_BINDINGS.inventory && (locked() || uiOpen())) {
       event.preventDefault();
       // 按住不放时浏览器每几十毫秒补发一次 keydown。开合是切换型动作，连发会让界面
       // 每个 tick 开一次关一次；移动、连锁键那些「按下就设成同一个值」的动作幂等，
       // 所以只有切换型的这两处要挡。
       if (event.repeat) return;
-      // 现在开着就说明这一下是关它。开合下一个 tick 才生效，方向得在这里判。
+      // 现在有界面开着就说明这一下是关它。开合下一个 tick 才生效，方向得在这里判。
       const closing = uiOpen();
       target.toggleInventory();
       // 打开就把鼠标交还给页面，玩家拿它点格子；关上就抓回来，玩家不必再点一下画面。
@@ -239,16 +249,34 @@ export function installPlayerControls(
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
 
-  return () => {
-    canvas.removeEventListener('click', onClick);
-    document.removeEventListener('pointerlockchange', onLockChange);
-    document.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mousedown', onMouseDown);
-    document.removeEventListener('mouseup', onMouseUp);
-    document.removeEventListener('contextmenu', onContextMenu);
-    document.removeEventListener('wheel', onWheel);
-    window.removeEventListener('keydown', onKeyDown);
-    window.removeEventListener('keyup', onKeyUp);
+  // 上一帧看到的是有界面开着还是没有。只在「从没有到有」那一帧释放锁定。
+  let shownUiOpen = false;
+
+  return {
+    sync(): void {
+      // 右键对着工作台打开的界面：开合在核心那一侧的 tick 里发生，这里在下一帧看到它开了
+      // 才把鼠标交还给页面。按背包键开的界面在 onKeyDown 里当场就释放了，这一帧看到的是
+      // 已经释放的状态，再释放一次没有效果。释放不需要用户手势，所以可以放在每帧的同步里；
+      // 抓回来（关界面）需要，所以仍留在按键处理里。
+      //
+      // 只在打开那一帧判，不能每帧判「开着且锁着就释放」：按背包键关界面时锁定请求当场
+      // 发出，而界面要到下一个 tick 才关——锁定先到位的话，每帧判会把刚抓回来的锁定又
+      // 放掉，之后就没有手势再抓它了。
+      const open = uiOpen();
+      if (open && !shownUiOpen && locked()) document.exitPointerLock();
+      shownUiOpen = open;
+    },
+    remove(): void {
+      canvas.removeEventListener('click', onClick);
+      document.removeEventListener('pointerlockchange', onLockChange);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.removeEventListener('contextmenu', onContextMenu);
+      document.removeEventListener('wheel', onWheel);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    },
   };
 }
 

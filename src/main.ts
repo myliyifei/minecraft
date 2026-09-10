@@ -47,12 +47,13 @@ async function main(): Promise<void> {
   loading.remove();
   const hud = installHud(document.body, core);
   hud.update();
-  installPlayerControls(canvas, core);
+  const controls = installPlayerControls(canvas, core);
   installDebugHandle({ core, renderer, hud, chunks });
   startGameLoop(core, (alpha) => {
     renderer.syncChunkMeshes();
     renderer.render(alpha);
     hud.update();
+    controls.sync();
   });
 }
 

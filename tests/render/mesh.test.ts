@@ -249,6 +249,16 @@ describe('面到图集贴图的映射', () => {
     expectFaceTile(mesh, [1, 0, 0], TILE.oakLogSide);
   });
 
+  it('工作台顶面、侧面、正面各一张，正面贴 −X 与 −Z，底面是木板', () => {
+    const mesh = meshOf(sparse([[x, y, z, BlockType.CraftingTable]]));
+    expectFaceTile(mesh, [0, 1, 0], TILE.craftingTableTop);
+    expectFaceTile(mesh, [0, -1, 0], TILE.oakPlanks);
+    expectFaceTile(mesh, [1, 0, 0], TILE.craftingTableSide);
+    expectFaceTile(mesh, [0, 0, 1], TILE.craftingTableSide);
+    expectFaceTile(mesh, [-1, 0, 0], TILE.craftingTableFront);
+    expectFaceTile(mesh, [0, 0, -1], TILE.craftingTableFront);
+  });
+
   it('石头、基岩、泥土、树叶、木板六面同贴图', () => {
     const cases: Array<[BlockType, number]> = [
       [BlockType.Stone, TILE.stone],

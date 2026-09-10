@@ -1,7 +1,7 @@
 import { BlockType, isAir, isOpaque, type BlockView } from '../core/block';
 import { blockIndex, type ChunkView } from '../core/chunk';
 import { CHUNK_AREA, CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../core/constants';
-import { BLOCK_TILES, tileUvRect, type FaceTiles } from './atlas';
+import { BLOCK_TILES, faceTile, tileUvRect, type Face } from './atlas';
 
 /**
  * 一个区块的网格数据。纯 TypedArray，不含任何 three.js 类型——
@@ -27,8 +27,8 @@ interface FaceSpec {
   readonly corners: readonly [Point3, Point3, Point3, Point3];
   /** 四个角对应的 uv 归一化坐标，v 向上。 */
   readonly uv: readonly [Uv, Uv, Uv, Uv];
-  /** 取方块的哪一张贴图。 */
-  readonly face: keyof FaceTiles;
+  /** 取方块的哪一张贴图。正面（`front`）贴在 −X 与 −Z 两面，没有正面贴图的方块落回侧面。 */
+  readonly face: Face;
 }
 
 const FACES: readonly FaceSpec[] = [
@@ -62,7 +62,7 @@ const FACES: readonly FaceSpec[] = [
       [1, 1],
       [0, 1],
     ],
-    face: 'side',
+    face: 'front',
   },
   {
     normal: [0, 1, 0],
@@ -126,7 +126,7 @@ const FACES: readonly FaceSpec[] = [
       [1, 1],
       [1, 0],
     ],
-    face: 'side',
+    face: 'front',
   },
 ];
 
@@ -200,7 +200,7 @@ export function buildChunkMesh(chunk: ChunkView, view: BlockView): MeshData {
 
           const spec = FACES[f]!;
           const base = positions.length / 3;
-          const rect = tileUvRect(tiles[spec.face]);
+          const rect = tileUvRect(faceTile(tiles, spec.face));
           for (let v = 0; v < 4; v++) {
             const [ox, oy, oz] = spec.corners[v]!;
             positions.push(lx + ox, y + oy, lz + oz);

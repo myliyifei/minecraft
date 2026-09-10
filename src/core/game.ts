@@ -45,7 +45,7 @@ export interface GameCoreOptions {
 
 /**
  * 无头游戏核心：纯 TypeScript，不依赖 Three.js 与 DOM，可在 Node 中直接实例化。
- * 这是主测试接缝——渲染与输入适配器只通过这里的指令和查询与游戏交互。
+ * 核心层的测试都从这里驱动游戏，渲染与输入适配器也只通过这里的指令和查询与游戏交互。
  *
  * 第一切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」「空手挖掘」
  * 「掉落物与背包」「经验球与等级」「放置方块」「背包界面」九件事，第二切片起加「合成」。
@@ -69,14 +69,14 @@ export class GameCore implements BlockEdit {
   private chainHeld = false;
   /**
    * 下一个 tick 生效的选中格。数字键写绝对值，滚轮在它上面加减（ADR-0004：改变持续
-   * 状态的输入折成意图，等 tick 边界生效）。
+   * 状态的输入转换成意图，等 tick 边界生效）。
    */
   private nextSlot = 0;
   /*
    * 下面三样是同一个 tick 里到达的一次性输入。折法各不相同，取决于「同一 tick 里来两下
    * 是什么意思」——三者都在 tick 边界消费（ADR-0004）：
    *
-   * - 放置折成一个布尔：一次点击放一块，两下也只放一块，与原版一致。
+   * - 放置归并成一个布尔：一次点击放一块，两下也只放一块，与原版一致。
    * - 背包开合异或抵消：一开一关，界面状态没有净变化。
    * - 点格子与点输出格排队重放：「拿起再放到别处」本来就是两下，合成一下就丢了一半意思。
    */
@@ -207,7 +207,7 @@ export class GameCore implements BlockEdit {
   /**
    * 沿快捷栏挪 delta 格，下一个 tick 生效。正是往右，转到头从另一端接着来。
    *
-   * 输入适配器把滚轮的滚动量折成 ±1 交给这里：滚了多少像素是输入的事，一格一格地走
+   * 输入适配器把滚轮的滚动量换算成 ±1 交给这里：滚了多少像素是输入的事，一格一格地走
    * 是游戏规则。同一个 tick 里滚三下就是挪三格。
    */
   scrollHotbar(delta: number): void {
@@ -326,7 +326,7 @@ export class GameCore implements BlockEdit {
    * 出生点：世界原点那一列最高实心方块的顶面，落在方块中心。
    *
    * `highestBlockY` 找的是最高的非空气方块。当前除空气之外的方块都是实心的，两者等价。
-   * 树冠会把它抬到树顶去，所以出生点那一带干脆不长树，见 `OAK_SPAWN_CLEARANCE`。
+   * 树冠会把它抬到树冠的高度，所以出生点那一带干脆不长树，见 `OAK_SPAWN_CLEARANCE`。
    */
   get spawnPoint(): Vec3 {
     return { x: 0.5, y: this.highestBlockY(0, 0) + 1, z: 0.5 };
@@ -382,7 +382,7 @@ export class GameCore implements BlockEdit {
     if (!this.toggleQueued) return;
     this.toggleQueued = false;
     // 背包一格不剩、光标上还拿着东西（或合成网格里还摆着东西）时把那些扔在玩家脚下那一格，
-    // 与原版一样：界面一关就看不见的东西不能凭空消失。玩家挪出一格来就能捡回去。
+    // 与原版一样：界面一关就看不见的东西不能凭空消失。玩家挪出一格来就能拾取回去。
     for (const stack of this.screenState.toggle()) {
       this.dropsState.spawnAt(stack, this.playerState.position);
     }

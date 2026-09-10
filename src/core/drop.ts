@@ -31,7 +31,7 @@ export const DROP_LIFETIME_TICKS = 6000;
 
 /**
  * 吸入范围：玩家碰撞箱各方向外扩这么多格。
- * 玩家不必踩在掉落物上，走过去就收得到——这是原版的手感。
+ * 玩家不必踩在掉落物上，走过去就收得到，与原版一致。
  */
 export const PICKUP_MARGIN = 1;
 
@@ -145,7 +145,7 @@ export class Drops implements DropsView, DropSink {
    * `playerBox` 是玩家的碰撞箱，吸入范围是把它外扩 `PICKUP_MARGIN` 格；`into` 是收物品的
    * 地方。排在玩家移动之后调，吸入判定用的才是这一 tick 走完之后的位置。
    *
-   * 先判拾取再判到期：正好在第 6000 tick 上而玩家就贴着它时，宁可让他捡到，
+   * 先判拾取再判到期：正好在第 6000 tick 上而玩家就贴着它时，宁可让他拾取到，
    * 而不是在他手边凭空消失。
    */
   step(playerBox: Hitbox, into: ItemSink): void {

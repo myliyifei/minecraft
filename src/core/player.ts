@@ -30,7 +30,7 @@ export const MAX_PITCH = Math.PI / 2 - 0.01;
 /**
  * 起跳的竖直初速度（方块/tick）。
  * 与 `physics.ts` 的重力、阻力配在一起，最高点落在 1.252 方块：够上一格台阶，够不上
- * 两格。改这三个数中的任何一个都会改变这条手感，`tests/core/player.test.ts` 会检查它。
+ * 两格。改这三个数中的任何一个都会改变跳跃高度，`tests/core/player.test.ts` 会检查它。
  */
 export const JUMP_VELOCITY = 0.42;
 

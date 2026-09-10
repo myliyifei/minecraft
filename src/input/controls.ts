@@ -188,7 +188,7 @@ export function installPlayerControls(
     // （`GameCore.step`）：即便这里漏过去了，核心那一侧也不会照着走。
     if (!locked()) return;
 
-    // 数字键选快捷栏的一格。按住不放没有额外含义，所以不进 pressed 那套按下/松开的账。
+    // 数字键选快捷栏的一格。按住不放没有额外含义，所以不记入 pressed 的按下/松开状态。
     const slot = HOTBAR_SLOT_BY_CODE.get(event.code);
     if (slot !== undefined) {
       event.preventDefault();

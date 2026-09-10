@@ -144,7 +144,7 @@ describe('挖掘进度换算成裂纹阶', () => {
 
   it('十等分进度，每一阶占一份', () => {
     for (let stage = 0; stage < CRACK_STAGES; stage++) {
-      // 取每一份的中点，避开边界上的取整争议
+      // 取每一份的中点，避开边界上取整方向的歧义
       expect(crackStage((stage + 0.5) / CRACK_STAGES), `第 ${stage} 阶`).toBe(stage);
     }
   });

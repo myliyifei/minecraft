@@ -233,7 +233,7 @@ export function plantOakTrees(placement: TreePlacement, chunk: Chunk): void {
   for (const tree of oakTreesTouching(placement, chunk.cx, chunk.cz)) {
     const lx = tree.x - originX;
     const lz = tree.z - originZ;
-    // 先树冠后树干：两者在树顶那几格重叠，原木盖住树叶。
+    // 先树冠后树干：两者在树干顶端那几格重叠，原木盖住树叶。
     plantCanopy(chunk, tree, lx, lz);
     chunk.fillColumn(lx, lz, tree.rootY, oakTrunkTopY(tree), BlockType.OakLog);
   }

@@ -162,7 +162,7 @@ describe('已改区块在卸载后保留', () => {
     expect(generated()).toBe(2);
   });
 
-  it('改了一格的区块往返一趟，别的格子也没跑偏', () => {
+  it('改了一格的区块卸载再加载，别的格子不变', () => {
     const world = new World(flatTestTerrain);
     world.loadChunk(0, 0);
     world.setBlock(1, FLAT_GROUND_Y, 1, BlockType.Air);

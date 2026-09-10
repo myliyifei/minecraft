@@ -79,7 +79,7 @@ function xpLog(): { sink: XpOrbSink; spawned: SpawnedXp[] } {
 const IGNORED_DROPS: DropSink = dropLog().sink;
 const IGNORED_XP: XpOrbSink = xpLog().sink;
 
-/** 盯着正前方那块方块的挖掘状态机。 */
+/** 目标为正前方那块方块的挖掘状态机。 */
 function miningTowards(block: BlockType): {
   world: World;
   mining: Mining;
@@ -249,7 +249,7 @@ describe('挖掘的触及距离', () => {
     expect(world.getBlock(...far)).toBe(BlockType.Dirt);
   });
 
-  it('什么都没对准时按住挖掘键不出事', () => {
+  it('什么都没对准时按住挖掘键，没有目标、进度为 0', () => {
     const world = flatTestWorld();
     const mining = new Mining(world, turntable(LOOK_EMPTY).aim, IGNORED_DROPS, IGNORED_XP);
     hold(mining, 100);
@@ -396,7 +396,7 @@ function trunkCells(height: number): BlockCoord[] {
   return Array.from({ length: height }, (_, i) => [TARGET[0], TARGET[1] + i, TARGET[2]]);
 }
 
-/** 盯着一根 height 格高的原木树干最下面那块的挖掘状态机。 */
+/** 对准一根 height 格高的原木树干最下面那块的挖掘状态机。 */
 function miningTrunk(height: number): {
   world: World;
   cells: BlockCoord[];

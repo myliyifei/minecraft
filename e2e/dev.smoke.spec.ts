@@ -689,7 +689,7 @@ test('瞄准脚下的方块显示选框，挖掘中出裂纹，挖穿后网格�
   expect(dig.aimed.selection.crackStage).toBeUndefined();
   expect(dig.aimed.rgb[1]).toBeGreaterThan(dig.aimed.rgb[0]);
 
-  // 差一 tick 碎：草还在，裂纹到了最后一阶，而且真画上去了——正中被压暗了一大截
+  // 差一 tick 碎：草还在，裂纹到了最后一阶，而且真画上去了——正中亮度明显下降
   expect(dig.almost.block).toBe(BlockType.Grass);
   expect(dig.almost.selection.crackStage).toBe(CRACK_STAGES - 1);
   expect(brightness(dig.almost.rgb)).toBeLessThan(brightness(dig.aimed.rgb) * 0.7);
@@ -926,7 +926,7 @@ test('快捷栏图标取的就是图集里泥土那一格', async ({ page }) => 
 
 test('挖两块并进同一堆，快捷栏这才显示数量', async ({ page }) => {
   // 不锁鼠标：测的是 HUD，挖掘意图直接给核心。整段跑在一次同步的 evaluate 里，
-  // 游戏循环插不进来，捡到几个因此是精确的——锁定期间的任务调度会把这一点打乱。
+  // 游戏循环插不进来，拾取到几个因此是精确的——锁定期间的任务调度会把这一点打乱。
   const shown = await page.evaluate(
     ({ pitch, grassTicks, dirtTicks, pickupDelay }) => {
       const { core, hud } = window.__VOXEL__!;
@@ -973,7 +973,7 @@ test('挖两块并进同一堆，快捷栏这才显示数量', async ({ page }) 
   expect(errors).toEqual([]);
 });
 
-test('掉落物画成会转会漂的小方块，被捡走后从画面上消失', async ({ page }) => {
+test('掉落物画成会转会漂的小方块，被拾取后从画面上消失', async ({ page }) => {
   await waitForFullViewDistance(page);
 
   // 整段跑在一次同步的 evaluate 里：游戏循环插不进来，画面与 tick 数因此是精确的。
@@ -1046,9 +1046,9 @@ test('掉落物画成会转会漂的小方块，被捡走后从画面上消失',
   expect(dug.sameTick[0]!.spin).not.toBeCloseTo(dug.settled.drops[0]!.spin, 4);
   expect(dug.sameTick[0]!.position.y).not.toBeCloseTo(dug.settled.drops[0]!.position.y, 4);
   // 「漂浮整段都在落点之上、不沉进地面」要看一整个周期，浏览器里抓不到那么多帧
-  // （中途就被捡走了），那一条在 tests/render/drop-motion.test.ts 里。
+  // （中途就被拾取了），那一条在 tests/render/drop-motion.test.ts 里。
 
-  // 被捡走：核心里没有了，场景里那个小方块也不见了，同一条视线看到的是石头的灰
+  // 被拾取：核心里没有了，场景里那个小方块也不见了，同一条视线看到的是石头的灰
   expect(dug.dropCount).toBe(0);
   expect(dug.gone.drops).toEqual([]);
   expect(isDirtColored(dug.gone.rgb)).toBe(false);
@@ -1382,7 +1382,7 @@ test('锁定鼠标后右键把手上的方块放回世界，网格跟着重建',
       };
 
       // 右键：事件真的经过输入适配器（监听器就挂在 document 上）。
-      // 用合成事件而不是 page.mouse.down：指针锁定下 Playwright 的鼠标事件会连带甩一发
+      // 用合成事件而不是 page.mouse.down：指针锁定下 Playwright 的鼠标事件会连带投递一次
       // 大位移的 mousemove，视线当场偏到别处，而放置在下一个 tick 才生效——那一 tick
       // 什么时候来由游戏循环说了算，届时对准的已经不是刚才那一格。真右键的那一面由
       // 「未锁定鼠标时右键不放置」验。

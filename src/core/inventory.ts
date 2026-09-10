@@ -70,7 +70,7 @@ export class Inventory implements InventoryView, ItemSink, Hand, SlotStore {
    * 把某一格换成一堆物品（undefined 表示清空）。指不到格子的下标什么都不写
    * （`isSlotIndex`）——写进去会让这个数组多长出一个位置，「背包有 36 格」就不成立了。
    *
-   * 背包界面（`InventoryScreen`）的拿起放下走这条路：那套操作要的是「整堆搬来搬去」，
+   * 背包界面（`InventoryScreen`）的拿起放下走这条路：那套操作要的是「整堆移动」，
    * 与 `add` 的「先并进未满堆再占空格」不是一件事。
    */
   setSlot(index: number, stack: ItemStack | undefined): void {
@@ -109,7 +109,7 @@ export class Inventory implements InventoryView, ItemSink, Hand, SlotStore {
   /**
    * 把一堆物品收进背包，返回没放下的数量（0 表示全收下了）。
    *
-   * 两轮：先把同种的未满堆填满，再占空格。顺序是原版的手感——拾取到的东西优先并进
+   * 两轮：先把同种的未满堆填满，再占空格。顺序与原版一致：拾取到的东西优先并进
    * 手上已有的那一堆，而不是每次都新开一格。
    */
   add(stack: ItemStack): number {

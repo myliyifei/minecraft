@@ -197,7 +197,7 @@ describe('GameCore 在 Node 中的方块查询', () => {
     [31, -32],
   ];
 
-  it('地表以上只有空气与树，树顶之上什么都没有', () => {
+  it('地表以上只有空气与树，树冠之上什么都没有', () => {
     const core = sampleCore();
     for (const [x, z] of columns) {
       const surface = surfaceAt(x, z);
@@ -780,7 +780,7 @@ describe('GameCore 的快捷栏选中格', () => {
     expect(core.inventory.selectedSlot).toBe(3);
   });
 
-  it('滚轮沿快捷栏挪格，正是往右', () => {
+  it('滚轮沿快捷栏挪格，正向往右', () => {
     const core = coreOnFlatGround();
     core.scrollHotbar(1);
     core.tick();
@@ -1449,7 +1449,7 @@ describe('GameCore 的已改区块在玩家走远再回来之后', () => {
     expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Air);
   });
 
-  it('把捡到的泥土放在旁边，走远再走回来那一块还在', () => {
+  it('把拾取到的泥土放在旁边，走远再走回来那一块还在', () => {
     const core = holdingDirt(coreForRoundTrip());
     core.place();
     core.tick();

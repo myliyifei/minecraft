@@ -82,7 +82,7 @@ export class InventoryScreen implements InventoryScreenView {
 
   /**
    * 网格与输出格的视图，构造时造一次。它比网格本身多知道一件事——网格第 0 格在界面里
-   * 是第几格——其余都是网格自己的，所以是在网格上盖一层薄壳，而不是再存一份状态。
+   * 是第几格——其余都是网格自己的，所以它只是网格的一个只读包装，不另存状态。
    */
   readonly crafting: CraftingView | undefined;
 
@@ -267,7 +267,7 @@ export class InventoryScreen implements InventoryScreenView {
   }
 }
 
-/** 给一块合成网格盖上界面层要的那层薄壳：格号从 `firstSlot` 起。 */
+/** 给一块合成网格包一层界面层要的只读视图：格号从 `firstSlot` 起。 */
 function craftingView(grid: CraftingGrid, firstSlot: number): CraftingView {
   return {
     width: grid.width,

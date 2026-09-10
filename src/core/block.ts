@@ -234,7 +234,7 @@ export function blockExperience(block: BlockType): number {
 /**
  * 放置表：一种物品放下去变成哪种方块，`null` 表示放不下去（工具、食物那些）。
  *
- * 与 `BLOCKS` 的 `drop` 一列正好反着来，但两者不是一张表的两面：草方块掉的是泥土，
+ * 与 `BLOCKS` 的 `drop` 一列正好反着来，但两张表并不互逆：草方块掉的是泥土，
  * 泥土放下去是泥土方块，草方块因此没有对应的物品；工具与食物则一头都没有。
  *
  * 表放在这个文件里而不是 `item.ts` 里，是因为 `block.ts` 已经 import 了 `item.ts`

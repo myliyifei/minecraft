@@ -91,7 +91,7 @@ export const CRACK_STAGES = 10;
  * 挖掘进度对应的裂纹阶（0 到 `CRACK_STAGES` − 1），没在挖时没有裂纹，返回 undefined。
  *
  * 核心只报进度（见 `MiningView.progress`），分几阶是贴图的事：换一套阶数不同的贴图包
- * 只改这个文件。进度刚过 0 就出第一阶——玩家一按下就得看到反馈；进度到 1 时钳在最后
+ * 只改这个文件。进度刚过 0 就出第一阶——玩家一按下就得看到反馈；进度到 1 时限制在最后
  * 一阶，不会越界取到下一张图。
  */
 export function crackStage(progress: number): number | undefined {

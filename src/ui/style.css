@@ -49,7 +49,7 @@ body {
 /*
  * 加载屏是一段世界剖面：天空之下依次是草、泥土、石头、基岩，
  * 层序与地形生成出来的一列方块一致，色带高度都是 --tile 的整数倍、边界全是硬边。
- * 标题与状态行的基线正好落在草线上，字站在地面上。
+ * 标题与状态行的基线正好落在草线上，与草层顶边对齐。
  */
 #loading {
   position: fixed;
@@ -59,7 +59,7 @@ body {
   justify-items: center;
   padding-bottom: calc(var(--ground) + var(--tile));
   background-color: var(--sky);
-  /* 前两层是 16px 的方块网格，只铺在地层上：地面因此读作垒起来的方块，而不是几条色带。 */
+  /* 前两层是 16px 的方块网格，只铺在地层上：地面因此看上去是垒起来的方块，不是几条色带。 */
   background-image:
     repeating-linear-gradient(to right, rgb(0 0 0 / 8%) 0 1px, transparent 1px var(--tile)),
     repeating-linear-gradient(to bottom, rgb(0 0 0 / 8%) 0 1px, transparent 1px var(--tile)),
@@ -88,7 +88,7 @@ body {
   font-size: clamp(2rem, 9vw, 4rem);
   font-weight: 700;
   letter-spacing: 0.1em;
-  /* 一格硬阴影，没有模糊：像素界面的字是被凿出来的，不是打了投影的。 */
+  /* 一格硬阴影，没有模糊：像素风文字用硬阴影，不用模糊投影。 */
   text-shadow: calc(var(--tile) / 6) calc(var(--tile) / 6) 0 rgb(255 255 255 / 45%);
 }
 
@@ -99,7 +99,7 @@ body {
   letter-spacing: 0.2em;
 }
 
-/* 方块光标替代省略号：还在动的信号，形状也是这个游戏的形状。 */
+/* 方块光标替代省略号：表示仍在加载，形状与方块主题一致。 */
 .loading__cursor {
   display: inline-block;
   width: 0.5em;
@@ -163,7 +163,7 @@ body {
  * 也正是玩家点进第一人称时点的那一点。
  *
  * 不用原版那套反色混合（mix-blend-mode: difference）：反色在中灰上等于没画，而这个
- * 世界的石头正好是 --stone #7f7f7f，坑底与山壁一大片都是它。白线加墨边不挑背景色，
+ * 世界的石头正好是 --stone #7f7f7f，坑底与山壁大面积都是它。白线加墨边不挑背景色，
  * 硬边不带模糊，与标题、快捷栏数量那几处同一套做法。
  *
  * 这里刻意不给 display：JS 切的 hidden 属性因此直接生效，不必像上面那几处一样再把

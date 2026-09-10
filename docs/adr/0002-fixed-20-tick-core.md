@@ -10,7 +10,7 @@ date: 2026-09-05
 ## Considered Options
 
 - **逻辑跟随 requestAnimationFrame**：写起来最省事，但规则与帧率耦合，掉帧会改变游戏结果，测试必须依赖真实时钟。
-- **更高的 tick 频率（如 60）**：手感差别不大，但硬度表要重算，且每 tick 的预算被压到 16ms 以内。
+- **更高的 tick 频率（如 60）**：操作响应差别不大，但硬度表要重算，且每 tick 的预算被压到 16ms 以内。
 
 ## Consequences
 

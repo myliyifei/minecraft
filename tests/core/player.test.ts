@@ -217,7 +217,7 @@ describe('玩家与墙、台阶的碰撞', () => {
   it('跳跃能登上 1 格台阶', () => {
     const player = walkerFacingStep(worldWithStep(1));
     for (let i = 0; i < 30; i++) player.step({ ...FORWARD_INTENT, jump: true });
-    // 松开空格再走几步落稳，免得断言撞在某一次跳的半空中
+    // 松开空格再走几步落稳，免得断言时玩家正在某一次跳的半空中
     for (let i = 0; i < 10; i++) player.step(FORWARD_INTENT);
     expect(player.position.y).toBe(FLAT_STAND_Y + 1);
     expect(player.position.x).toBeGreaterThan(1);

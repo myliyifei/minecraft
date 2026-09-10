@@ -19,7 +19,7 @@ export type ToggleAction = 'inventory';
  * 用 `code` 而不是 `key`：`code` 是键的物理位置，与键盘布局无关——AZERTY 上左手那颗
  * 键仍然是 `KeyW`，不会变成 Z。设置界面里的自定义键位（后续切片）改的就是这张表：
  * 移动与连锁挖掘都在这里列出，「有哪些动作可以绑键」这份清单就是这张表的键。
- * 下面的 `MOVE_ACTIONS` 不是那份清单，它窄一些，只有折成移动意图的那几个。
+ * 下面的 `MOVE_ACTIONS` 不是那份清单，它窄一些，只有归入移动意图的那几个。
  *
  * 用 `satisfies` 而不是类型标注：既保证每个移动动作都绑了键（漏一个编译不过），又保住
  * 各个值的字面量类型——`KEY_BINDINGS.chainMining` 因此是 `'AltLeft'` 而不是 `string`。

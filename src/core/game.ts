@@ -138,6 +138,16 @@ export class GameCore implements BlockEdit {
   }
 
   /**
+   * 这一刻是界面模式吗（见 CONTEXT.md）——有界面开着就是。
+   *
+   * 问的是「有没有界面开着」而不是「背包界面开着没有」：工作台界面（#19）接进来之后
+   * 这里多问一句，移动、视角、挖掘、放置那几处判定一行都不必改。
+   */
+  private get uiMode(): boolean {
+    return this.screenState.open;
+  }
+
+  /**
    * 设定当前的移动意图，下一个 tick 生效。
    * 输入适配器每次按键状态变化时调一次，核心因此不知道任何键位。
    */
@@ -168,7 +178,7 @@ export class GameCore implements BlockEdit {
    * 界面模式下不转：那时鼠标已经交还给页面，它在点格子，不是在转头。
    */
   turn(yawDelta: number, pitchDelta: number): void {
-    if (this.screenState.open) return;
+    if (this.uiMode) return;
     this.playerState.turn(yawDelta, pitchDelta);
   }
 
@@ -310,7 +320,7 @@ export class GameCore implements BlockEdit {
     this.stepInventoryScreen();
     // 界面模式下移动、挖掘、放置一律不算数（见 CONTEXT.md 的「界面模式」）：玩家在
     // 摆物品，不是在操作世界。挡的是输入而不是世界——重力、掉落物、经验球照旧。
-    const uiMode = this.screenState.open;
+    const uiMode = this.uiMode;
     this.playerState.step(uiMode ? IDLE_INTENT : this.intent);
     // 选中格先生效，再瞄准与放置：同一 tick 里切了格又按右键，放下的是新格里的东西。
     this.inventoryState.select(this.nextSlot);
@@ -346,10 +356,10 @@ export class GameCore implements BlockEdit {
 
     if (!this.toggleQueued) return;
     this.toggleQueued = false;
-    const leftover = this.screenState.toggle();
-    if (!leftover) return;
-    // 背包一格不剩、光标上还拿着东西时把它扔在玩家脚下那一格，与原版一样：界面一关
-    // 就看不见的东西不能凭空消失。玩家挪出一格来就能捡回去。
-    this.dropsState.spawnAt(leftover, this.playerState.position);
+    // 背包一格不剩、光标上还拿着东西（或附加格子里还摆着东西）时把那些扔在玩家脚下那一格，
+    // 与原版一样：界面一关就看不见的东西不能凭空消失。玩家挪出一格来就能捡回去。
+    for (const stack of this.screenState.toggle()) {
+      this.dropsState.spawnAt(stack, this.playerState.position);
+    }
   }
 }

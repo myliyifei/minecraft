@@ -82,12 +82,12 @@ export interface ItemSink {
 }
 
 /**
- * 一批可以逐格读写的物品格子，还能按入包规则整堆收物品（`add`）。
+ * 一批可以逐格读写的物品格子。
  *
  * 背包界面依赖它而不是 `Inventory` 本身：那套拿起放下只搬格子里的东西，与选中格、
- * 快捷栏无关。将来箱子的 27 格也是这么一批格子。
+ * 快捷栏无关。合成网格（#17）与将来箱子的 27 格都是这么一批格子。
  */
-export interface SlotStore extends ItemSink {
+export interface SlotBatch {
   /** 格子总数。 */
   readonly size: number;
   /** 某一格里的一堆物品，空格与指不到格子的下标都是 undefined。 */
@@ -95,6 +95,15 @@ export interface SlotStore extends ItemSink {
   /** 把某一格换成一堆物品（undefined 表示清空）。指不到格子的下标什么都不写。 */
   setSlot(index: number, stack: ItemStack | undefined): void;
 }
+
+/**
+ * 一批格子，还能按入包规则整堆收物品（`add`）。背包是这么一批。
+ *
+ * 与 `SlotBatch` 分开是因为「收得下入包的东西」不是每一批格子都有的本事：合成网格
+ * 逐格读写，但拾取到的东西不该落进网格里，它因此只是 `SlotBatch`。关闭界面时东西
+ * 往回归还，收的那一头必须是这一种。
+ */
+export interface SlotStore extends SlotBatch, ItemSink {}
 
 /**
  * 手上拿着的那一堆物品，以及从它里面用掉一个。

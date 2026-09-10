@@ -249,12 +249,13 @@ describe('面到图集贴图的映射', () => {
     expectFaceTile(mesh, [1, 0, 0], TILE.oakLogSide);
   });
 
-  it('石头、基岩、泥土、树叶六面同贴图', () => {
+  it('石头、基岩、泥土、树叶、木板六面同贴图', () => {
     const cases: Array<[BlockType, number]> = [
       [BlockType.Stone, TILE.stone],
       [BlockType.Bedrock, TILE.bedrock],
       [BlockType.Dirt, TILE.dirt],
       [BlockType.OakLeaves, TILE.oakLeaves],
+      [BlockType.OakPlanks, TILE.oakPlanks],
     ];
     for (const [block, tile] of cases) {
       const mesh = meshOf(sparse([[x, y, z, block]]));

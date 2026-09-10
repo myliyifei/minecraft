@@ -53,6 +53,11 @@ const LOG_CORE = [166, 133, 86];
 const LEAVES = [63, 110, 45];
 const PLANKS = [162, 130, 78];
 const PLANKS_SEAM = [110, 84, 48];
+const STICK = [140, 104, 58];
+const STICK_SHADOW = [96, 70, 38];
+
+/** 木棍图标的两端离格子边各留几像素，免得贴到边上。 */
+const STICK_MARGIN = 2;
 
 /** 每个格号对应的画法：painter(x, y, rand) → [r, g, b, a]。 */
 const TILES = {
@@ -96,6 +101,14 @@ const TILES = {
     const seam = y % 4 === 3 || (x === (Math.floor(y / 4) * 5) % TILE_PX && y % 4 !== 3);
     if (seam) return shade(PLANKS_SEAM, Math.floor(rand() * 16) - 8);
     return shade(PLANKS, Math.floor(rand() * 22) - 11 + (y % 4 === 0 ? 8 : 0));
+  },
+  // stick：透明底上一根从左下到右上的斜木棍，三像素宽，右下那一条是暗面
+  9: (x, y, rand) => {
+    // 到反对角线（x + y = 15）的偏移：0 在线上，正数在右下
+    const offset = x + y - (TILE_PX - 1);
+    if (offset < -1 || offset > 1) return [0, 0, 0, 0];
+    if (x < STICK_MARGIN || x >= TILE_PX - STICK_MARGIN) return [0, 0, 0, 0];
+    return shade(offset === 1 ? STICK_SHADOW : STICK, Math.floor(rand() * 16) - 8);
   },
 };
 

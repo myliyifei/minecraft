@@ -1795,6 +1795,155 @@ test('背包界面里有 2x2 合成网格与输出格，放进原木后输出格
   expect(errors).toEqual([]);
 });
 
+test('合成出的木板放到世界里，画面正中从草绿变成木板的褐黄', async ({ page }) => {
+  await waitForFullViewDistance(page);
+
+  // 木板只能合成来：脚下换成原木挖来，在背包界面里合成，再关掉界面放到旁边。整段跑在
+  // 一次同步的 evaluate 里，游戏循环不会在中间执行，读到的就是刚断言的那一帧。
+  const placed = await page.evaluate(
+    ({ pitch, logTicks, pickupTicks, eastYaw, asidePitch, grass, air, oakLog, gridFirst }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const centerRgb = window.__CENTER_RGB__!;
+      const look = (yaw: number, to: number): void =>
+        core.turn(yaw - core.player.yaw, to - core.player.pitch);
+
+      // 把东边一条铺平：斜看过去对准的是一块草的顶面，放下的木板落在它前面、正对视线
+      const x = Math.floor(core.player.position.x);
+      const z = Math.floor(core.player.position.z);
+      const groundY = Math.floor(core.player.position.y) - 1;
+      for (let dx = 0; dx <= 5; dx++) {
+        core.setBlock(x + dx, groundY, z, grass);
+        core.setBlock(x + dx, groundY + 1, z, air);
+        core.setBlock(x + dx, groundY + 2, z, air);
+      }
+      core.setBlock(x, groundY, z, oakLog);
+
+      look(0, -pitch);
+      core.setMining(true);
+      core.tick(logTicks);
+      core.setMining(false);
+      core.tick(pickupTicks);
+
+      core.toggleInventory();
+      core.tick();
+      core.clickSlot(0);
+      core.clickSlot(gridFirst);
+      core.clickCraftingOutput();
+      core.toggleInventory();
+      core.tick();
+      const held = core.inventory.held;
+
+      look(eastYaw, asidePitch);
+      core.tick();
+      const target = core.mining.target;
+      if (!target) throw new Error('斜着往下看应该对准旁边那一格');
+      const spot = {
+        x: target.x + target.normal.x,
+        y: target.y + target.normal.y,
+        z: target.z + target.normal.z,
+      };
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      const before = { block: core.getBlock(spot.x, spot.y, spot.z), rgb: centerRgb() };
+
+      core.place();
+      core.tick();
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      const after = { block: core.getBlock(spot.x, spot.y, spot.z), rgb: centerRgb() };
+
+      return { held, before, after, heldAfter: core.inventory.held };
+    },
+    {
+      pitch: MAX_PITCH,
+      logTicks: miningTicks(BlockType.OakLog, BARE_HAND),
+      pickupTicks: PICKUP_DELAY_TICKS + 2,
+      eastYaw: EAST_YAW,
+      asidePitch: ASIDE_PITCH,
+      grass: BlockType.Grass,
+      air: BlockType.Air,
+      oakLog: BlockType.OakLog,
+      gridFirst: INVENTORY_SIZE,
+    },
+  );
+
+  expect(placed.held).toEqual({ item: ItemType.OakPlanks, count: 4 });
+  // 落点原来是空气，正中是草的绿；放下之后是木板方块，正中变成木板的褐黄（红分量大于绿与蓝）
+  expect(placed.before.block).toBe(BlockType.Air);
+  expect(placed.before.rgb[1]).toBeGreaterThan(placed.before.rgb[0]);
+  expect(placed.after.block).toBe(BlockType.OakPlanks);
+  expect(placed.after.rgb[0]).toBeGreaterThan(placed.after.rgb[1]);
+  expect(placed.after.rgb[0]).toBeGreaterThan(placed.after.rgb[2]);
+  expect(placed.heldAfter).toEqual({ item: ItemType.OakPlanks, count: 3 });
+  expect(errors).toEqual([]);
+});
+
+test('两堆木板竖排进合成网格，输出格出现带图标与中文名的木棍', async ({ page }) => {
+  // 两根原木出两堆木板：第一堆先放回快捷栏，第二堆从输出格拿到光标上——所以是两堆而不是
+  // 并成一堆。挖两块与合成都直接给核心，理由同上一条。
+  await page.evaluate(
+    ({ pitch, logTicks, pickupTicks, oakLog, gridFirst, landingTicks }) => {
+      const core = window.__VOXEL__!.core;
+      const x = Math.floor(core.player.position.x);
+      const z = Math.floor(core.player.position.z);
+      const groundY = Math.floor(core.player.position.y) - 1;
+      core.setBlock(x, groundY, z, oakLog);
+      core.setBlock(x, groundY - 1, z, oakLog);
+
+      // 一路往下挖两块：挖穿一块掉下去，目标当场落到下面那块上
+      core.turn(0, -pitch);
+      core.setMining(true);
+      core.tick(2 * (logTicks + landingTicks));
+      core.setMining(false);
+      core.tick(pickupTicks);
+
+      core.toggleInventory();
+      core.tick();
+      // 两根原木进网格，出第一堆木板放回第一格；再出第二堆留在光标上
+      core.clickSlot(0);
+      core.clickSlot(gridFirst);
+      core.clickCraftingOutput();
+      core.clickSlot(0);
+      core.clickCraftingOutput();
+      // 第二堆放进网格左下，第一堆再拿起来放进左上：左列竖排两块木板
+      core.clickSlot(gridFirst + 2);
+      core.clickSlot(0);
+      core.clickSlot(gridFirst);
+      core.tick();
+    },
+    {
+      pitch: MAX_PITCH,
+      logTicks: miningTicks(BlockType.OakLog, BARE_HAND),
+      pickupTicks: PICKUP_DELAY_TICKS + 2,
+      oakLog: BlockType.OakLog,
+      gridFirst: INVENTORY_SIZE,
+      landingTicks: LANDING_TICKS,
+    },
+  );
+
+  const gridCells = page.locator('#inventory-screen .invscreen__grid .invscreen__slot');
+  await expect(gridCells.nth(0)).toHaveAttribute('data-item', String(ItemType.OakPlanks));
+  await expect(gridCells.nth(2)).toHaveAttribute('data-item', String(ItemType.OakPlanks));
+
+  const output = page.locator('#inventory-screen [data-output]');
+  await expect(output).toHaveAttribute('data-item', String(ItemType.Stick));
+  await expect(output).toHaveAttribute('title', ITEM_NAMES[ItemType.Stick]);
+  await expect(output.locator('.invscreen__count')).toHaveText('4');
+  // 图标取的是图集里木棍那一格
+  const { col, row } = tileCell(ITEM_TILES[ItemType.Stick].side);
+  const icon = output.locator('.invscreen__icon');
+  await expect(icon).toBeVisible();
+  await expect(icon).toHaveCSS('--tile-col', String(col));
+  await expect(icon).toHaveCSS('--tile-row', String(row));
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 挖穿一块之后玩家落到下一块上、目标方块重算完成要的 tick 数。连着往下挖几块时每块加上它，
+ * 后一块的挖掘才从落地之后算起。
+ */
+const LANDING_TICKS = 4;
+
 /** 换到这个尺寸再核对一遍居中：宽高都跟默认视口不一样，两边还都是奇数。 */
 const ODD_VIEWPORT = { width: 901, height: 533 };
 

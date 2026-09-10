@@ -21,6 +21,7 @@ export const TILE = {
   oakLogSide: 6,
   oakLeaves: 7,
   oakPlanks: 8,
+  stick: 9,
 } as const;
 
 export interface FaceTiles {
@@ -49,6 +50,7 @@ export const BLOCK_TILES: Readonly<Record<BlockType, FaceTiles | null>> = {
     bottom: TILE.oakLeaves,
     side: TILE.oakLeaves,
   },
+  [BlockType.OakPlanks]: { top: TILE.oakPlanks, bottom: TILE.oakPlanks, side: TILE.oakPlanks },
 };
 
 /**
@@ -66,6 +68,8 @@ export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
     side: TILE.oakLogSide,
   },
   [ItemType.OakPlanks]: { top: TILE.oakPlanks, bottom: TILE.oakPlanks, side: TILE.oakPlanks },
+  // 木棍没有对应的方块，掉落物的小方块六面都贴同一张图标；手持画平面图标要等 #21。
+  [ItemType.Stick]: { top: TILE.stick, bottom: TILE.stick, side: TILE.stick },
 };
 
 export interface UvRect {

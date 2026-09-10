@@ -1228,7 +1228,11 @@ describe('GameCore 的合成网格与输出格', () => {
     expect(core.inventory.held).toEqual(PLANKS_X4);
   });
 
-  it('木板还不能放置：手持木板按右键世界不变', () => {
+  /**
+   * 手上有 4 块木板、站在坑里斜看旁边那块草的核心。
+   * 木板只能合成来：把原木放进网格、点输出格、关掉界面，成品就在快捷栏第一格。
+   */
+  function holdingPlanks(): GameCore {
     const core = openedWithOneLog();
     core.clickSlot(0);
     core.clickSlot(GRID_FIRST);
@@ -1237,13 +1241,40 @@ describe('GameCore 的合成网格与输出格', () => {
     core.tick();
     look(core, EAST_YAW, ASIDE_PITCH);
     core.tick();
-    expect(core.mining.target).toBeDefined();
-    core.takeChangedBlocks();
+    expect(core.inventory.held).toEqual(PLANKS_X4);
+    expect(core.mining.target).toMatchObject({ ...toVec(ASIDE), normal: { y: 1 } });
+    return core;
+  }
 
+  it('手持木板按右键放置：命中面外侧那一格变成木板方块，手上少 1 块', () => {
+    const core = holdingPlanks();
     core.place();
     core.tick();
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.OakPlanks);
+    expect(core.inventory.held).toEqual({ item: ItemType.OakPlanks, count: 3 });
+  });
+
+  it('空手挖掉放下的木板方块要 60 tick，掉回 1 块木板，给 3 点经验', () => {
+    const core = holdingPlanks();
+    core.place();
+    core.tick();
+    const experienceBefore = core.experience.total;
+    // 目标方块每 tick 重算（ADR-0006）：放下之后再过一个 tick，视线就落在木板方块上，
+    // 它挡在原来那块草的顶面前面
+    core.tick();
+    expect(core.mining.target).toMatchObject(toVec(ABOVE_ASIDE));
+
+    core.setMining(true);
+    core.tick(59);
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.OakPlanks);
+    core.tick(1);
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Air);
+    core.setMining(false);
+
+    // 掉落物过了拾取延迟才被吸入背包，经验球飞到玩家身上并被吸收再要不到一秒
+    core.tick(PICKUP_TICKS + TICK_RATE);
     expect(core.inventory.held).toEqual(PLANKS_X4);
-    expect(core.takeChangedBlocks()).toEqual([]);
+    expect(core.experience.total - experienceBefore).toBe(3);
   });
 });
 

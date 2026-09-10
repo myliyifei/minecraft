@@ -96,8 +96,44 @@ describe('配方表里的原木出木板', () => {
   });
 
   it('配方表的每一条都摆得进 2x2', () => {
-    // 本票只有原木出木板这一条；工具那几条（#21）要 3x3，进表之后这条断言要改
+    // 目前只有原木出木板、木板出木棍两条；工具那几条（#21）要 3x3，进表之后这条断言要改
     for (const recipe of RECIPES) expect(recipeFits(recipe, TWO_BY_TWO)).toBe(true);
+  });
+});
+
+describe('配方表里的木板出木棍', () => {
+  /** 四根木棍。 */
+  const STICKS_X4 = { item: ItemType.Stick, count: 4 };
+
+  it('两块木板竖排在 2x2 的左列或右列都出 4 根木棍', () => {
+    const left = grid(TWO_BY_TWO, [0, ItemType.OakPlanks], [2, ItemType.OakPlanks]);
+    const right = grid(TWO_BY_TWO, [1, ItemType.OakPlanks], [3, ItemType.OakPlanks]);
+    expect(matchRecipe(left, TWO_BY_TWO)).toEqual(STICKS_X4);
+    expect(matchRecipe(right, TWO_BY_TWO)).toEqual(STICKS_X4);
+  });
+
+  it('横排不出：有序配方看形状', () => {
+    const across = grid(TWO_BY_TWO, [0, ItemType.OakPlanks], [1, ItemType.OakPlanks]);
+    expect(matchRecipe(across, TWO_BY_TWO)).toBeUndefined();
+  });
+
+  it('3 块竖排在 3x3 里不出：材料要正好两块', () => {
+    const three = grid(
+      THREE_BY_THREE,
+      [1, ItemType.OakPlanks],
+      [4, ItemType.OakPlanks],
+      [7, ItemType.OakPlanks],
+    );
+    expect(matchRecipe(three, THREE_BY_THREE)).toBeUndefined();
+  });
+
+  it('两块竖排摆在 3x3 的中列下半也出：图案摆在网格里任意位置都算', () => {
+    const lower = grid(THREE_BY_THREE, [4, ItemType.OakPlanks], [7, ItemType.OakPlanks]);
+    expect(matchRecipe(lower, THREE_BY_THREE)).toEqual(STICKS_X4);
+  });
+
+  it('一块木板不出：那不是任何配方', () => {
+    expect(matchRecipe(grid(TWO_BY_TWO, [0, ItemType.OakPlanks]), TWO_BY_TWO)).toBeUndefined();
   });
 });
 

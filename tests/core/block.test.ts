@@ -7,6 +7,7 @@ import {
   blockExperience,
   isBreakable,
   miningTicks,
+  placedBlock,
 } from '../../src/core/block';
 import { BARE_HAND, ItemType, ToolClass, type MiningTool } from '../../src/core/item';
 
@@ -35,6 +36,8 @@ const HAND_MINING: Array<[string, BlockType, number, number]> = [
   ['石头', BlockType.Stone, 1.5, 150],
   ['原木', BlockType.OakLog, 2, 60],
   ['树叶', BlockType.OakLeaves, 0.2, 6],
+  // 木板与原木同硬度（issue #18）
+  ['木板', BlockType.OakPlanks, 2, 60],
 ];
 
 describe('方块的硬度表', () => {
@@ -88,6 +91,7 @@ describe('方块表的正确工具一列', () => {
     ['泥土', BlockType.Dirt, ToolClass.Shovel],
     ['石头', BlockType.Stone, ToolClass.Pickaxe],
     ['原木', BlockType.OakLog, ToolClass.Axe],
+    ['木板', BlockType.OakPlanks, ToolClass.Axe],
     ['树叶', BlockType.OakLeaves, ToolClass.None],
     ['空气', BlockType.Air, ToolClass.None],
     ['基岩', BlockType.Bedrock, ToolClass.None],
@@ -116,6 +120,7 @@ describe('空手挖掘的掉落表', () => {
     ['草方块掉泥土', BlockType.Grass, ItemType.Dirt],
     ['泥土掉泥土', BlockType.Dirt, ItemType.Dirt],
     ['橡木原木掉原木', BlockType.OakLog, ItemType.OakLog],
+    ['橡木木板掉木板', BlockType.OakPlanks, ItemType.OakPlanks],
     ['树叶什么都不掉', BlockType.OakLeaves, null],
     // 石头要镐，空着手挖掉了也拿不到东西
     ['空手挖石头什么都不掉', BlockType.Stone, null],
@@ -183,6 +188,7 @@ describe('挖掉一块给多少经验', () => {
     ['泥土', BlockType.Dirt, 3],
     ['石头', BlockType.Stone, 3],
     ['树叶', BlockType.OakLeaves, 3],
+    ['木板', BlockType.OakPlanks, 3],
     ['原木', BlockType.OakLog, 6],
   ];
 
@@ -210,6 +216,31 @@ describe('挖掉一块给多少经验', () => {
       if (!isBreakable(block)) continue;
       expect(blockExperience(block), `方块 ${block}`).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('放置表', () => {
+  /**
+   * issue #15 的放置表：哪种物品放下去是哪种方块，`null` 是放不下去。
+   * 写死字面值，不从 `PLACED_BLOCKS` 反读。
+   */
+  const PLACED: Array<[string, ItemType, BlockType | null]> = [
+    ['泥土放下去是泥土方块', ItemType.Dirt, BlockType.Dirt],
+    ['原木放下去是原木方块', ItemType.OakLog, BlockType.OakLog],
+    ['木板放下去是木板方块', ItemType.OakPlanks, BlockType.OakPlanks],
+    ['木棍放不下去', ItemType.Stick, null],
+  ];
+
+  for (const [name, item, block] of PLACED) {
+    it(name, () => {
+      expect(placedBlock(item)).toBe(block);
+    });
+  }
+
+  it('放下去再挖掉，拿回的是同一种物品：木板方块掉木板', () => {
+    // issue #18：放下去的木板方块挖掉后掉回木板，材料不损失
+    const block = placedBlock(ItemType.OakPlanks)!;
+    expect(blockDrop(block, ToolClass.None)).toEqual({ item: ItemType.OakPlanks, count: 1 });
   });
 });
 

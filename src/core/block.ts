@@ -11,6 +11,7 @@ export const BlockType = {
   Bedrock: 4,
   OakLog: 5,
   OakLeaves: 6,
+  OakPlanks: 7,
 } as const;
 
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
@@ -142,6 +143,17 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     // 所以它照普通方块给 3 点。原版的树叶不给经验，这一条是本项目自己定的。
     experience: COMMON_EXPERIENCE,
   },
+  // 挖掉掉回木板本身：放下去再挖起来材料不损失，木板因此是可以反复用的建材。
+  [BlockType.OakPlanks]: {
+    opaque: true,
+    solid: true,
+    hardness: 2,
+    properTool: ToolClass.Axe,
+    requiresTool: false,
+    drop: one(ItemType.OakPlanks),
+    // 木板是加工过的建材，不像原木那样自成一档，按普通方块给。
+    experience: COMMON_EXPERIENCE,
+  },
 };
 
 export function isAir(block: BlockType): boolean {
@@ -244,8 +256,9 @@ export function blockExperience(block: BlockType): number {
 export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   [ItemType.Dirt]: BlockType.Dirt,
   [ItemType.OakLog]: BlockType.OakLog,
-  // 木板方块要等 #18，在那之前木板只是合成出来的一种物品，放不下去。
-  [ItemType.OakPlanks]: null,
+  [ItemType.OakPlanks]: BlockType.OakPlanks,
+  // 木棍只是材料，没有对应的方块。
+  [ItemType.Stick]: null,
 };
 
 /**

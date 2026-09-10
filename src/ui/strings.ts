@@ -31,4 +31,5 @@ export const ITEM_NAMES: Readonly<Record<ItemType, string>> = {
   [ItemType.Dirt]: '泥土',
   [ItemType.OakLog]: '橡木原木',
   [ItemType.OakPlanks]: '橡木木板',
+  [ItemType.Stick]: '木棍',
 };

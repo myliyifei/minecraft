@@ -124,6 +124,18 @@ describe('已改区块在卸载后保留', () => {
     expect(world.getBlock(1, FLAT_GROUND_Y + 1, 1)).toBe(BlockType.Dirt);
   });
 
+  it('放下的是木板方块也一样留着：新方块编号进得了区块数据', () => {
+    // 区块里存的是 Uint8Array 的编号，追加的编号照样存得下、读得回
+    const world = new World(flatTestTerrain);
+    world.loadChunk(0, 0);
+    world.setBlock(1, FLAT_GROUND_Y + 1, 1, BlockType.OakPlanks);
+
+    world.unloadChunk(0, 0);
+    world.loadChunk(0, 0);
+
+    expect(world.getBlock(1, FLAT_GROUND_Y + 1, 1)).toBe(BlockType.OakPlanks);
+  });
+
   it('已改区块重新加载时复用留着的那一份，不向来源要新的', () => {
     const { source, generated } = countingTerrain();
     const world = new World(source);

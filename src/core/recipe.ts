@@ -45,13 +45,20 @@ export type Recipe = ShapedRecipe | ShapelessRecipe;
 /**
  * 配方表——纯数据（见 CONTEXT.md 的「合成」）。加配方只加一条。
  *
- * 本票只有原木出木板。木棍与工作台（#18、#19）、六件工具（#21、#23）随各自的票加进来。
+ * 目前有原木出木板、木板出木棍两条。工作台（#19）、六件工具（#21、#23）随各自的票加进来。
  */
 export const RECIPES: ReadonlyArray<Recipe> = [
   {
     kind: 'shapeless',
     result: { item: ItemType.OakPlanks, count: 4 },
     ingredients: [ItemType.OakLog],
+  },
+  // 两块木板竖排出 4 根木棍。图案上下对称也左右对称，镜像与否结果相同，写 false。
+  {
+    kind: 'shaped',
+    result: { item: ItemType.Stick, count: 4 },
+    pattern: [[ItemType.OakPlanks], [ItemType.OakPlanks]],
+    mirrored: false,
   },
 ];
 

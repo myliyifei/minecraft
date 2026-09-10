@@ -8,7 +8,19 @@ import {
   isBreakable,
   miningTicks,
 } from '../../src/core/block';
-import { ItemType } from '../../src/core/item';
+import { BARE_HAND, ItemType, ToolClass, type HeldTool } from '../../src/core/item';
+
+/**
+ * 木制与石制那一档的挖掘速度倍率，来自 #15 的物品属性表。
+ * 工具物品本身要等 #21，这里只用得上「类别 + 倍率」这两个数。
+ */
+const WOODEN = 2;
+const STONE = 4;
+
+/** 手上拿着某一类、某一档的工具。 */
+function tool(toolClass: ToolClass, speed: number): HeldTool {
+  return { toolClass, speed };
+}
 
 /**
  * issue #7 给的硬度与空手耗时，全部写死字面值。
@@ -29,7 +41,7 @@ describe('方块的硬度表', () => {
   it('硬度与空手耗时就是 issue #7 给的那两列', () => {
     for (const [name, block, hardness, ticks] of HAND_MINING) {
       expect(BLOCKS[block].hardness, `${name}的硬度`).toBe(hardness);
-      expect(miningTicks(block), `${name}的耗时`).toBe(ticks);
+      expect(miningTicks(block, BARE_HAND), `${name}的耗时`).toBe(ticks);
     }
   });
 
@@ -66,6 +78,35 @@ describe('方块的硬度表', () => {
   });
 });
 
+describe('方块表的正确工具一列', () => {
+  /**
+   * issue #15 的方块表给的「正确工具」一列。同样写死字面值，不从 `BLOCKS` 反读。
+   * 「无」是「没有哪种工具挖它更快」，树叶是这一档；空气与基岩不是挖掘目标，也记「无」。
+   */
+  const PROPER_TOOL: Array<[string, BlockType, ToolClass]> = [
+    ['草方块', BlockType.Grass, ToolClass.Shovel],
+    ['泥土', BlockType.Dirt, ToolClass.Shovel],
+    ['石头', BlockType.Stone, ToolClass.Pickaxe],
+    ['原木', BlockType.OakLog, ToolClass.Axe],
+    ['树叶', BlockType.OakLeaves, ToolClass.None],
+    ['空气', BlockType.Air, ToolClass.None],
+    ['基岩', BlockType.Bedrock, ToolClass.None],
+  ];
+
+  for (const [name, block, expected] of PROPER_TOOL) {
+    it(`${name}的正确工具是 ${expected}`, () => {
+      expect(BLOCKS[block].properTool).toBe(expected);
+    });
+  }
+
+  it('每一行都填了这一列，且填的是一种工具类别', () => {
+    const classes: readonly ToolClass[] = Object.values(ToolClass);
+    for (const block of Object.values(BlockType)) {
+      expect(classes, `方块 ${block}`).toContain(BLOCKS[block].properTool);
+    }
+  });
+});
+
 describe('空手挖掘的掉落表', () => {
   /**
    * issue #8 给的掉落表，`null` 是「什么都不掉」。
@@ -83,7 +124,7 @@ describe('空手挖掘的掉落表', () => {
 
   for (const [name, block, item] of HAND_DROPS) {
     it(name, () => {
-      const drop = blockDrop(block);
+      const drop = blockDrop(block, ToolClass.None);
       if (item === null) {
         expect(drop).toBeNull();
       } else {
@@ -93,7 +134,7 @@ describe('空手挖掘的掉落表', () => {
   }
 
   it('空气不掉东西', () => {
-    expect(blockDrop(BlockType.Air)).toBeNull();
+    expect(blockDrop(BlockType.Air, ToolClass.None)).toBeNull();
   });
 
   it('掉落表里每一堆都至少有一个', () => {
@@ -101,6 +142,34 @@ describe('空手挖掘的掉落表', () => {
       const drop = BLOCKS[block].drop;
       if (drop) expect(drop.count, `方块 ${block}`).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('掉落看手上的工具类别', () => {
+  it('需要工具的方块，手上没有对口工具时什么都不掉', () => {
+    for (const block of Object.values(BlockType)) {
+      if (!BLOCKS[block].requiresTool) continue;
+      expect(blockDrop(block, ToolClass.None), `方块 ${block} 空手`).toBeNull();
+      // 拿着的不是对口的那一类也一样：石头要镐，斧头挖得动也拿不到东西
+      expect(blockDrop(block, ToolClass.Axe), `方块 ${block} 持斧`).toBeNull();
+    }
+  });
+
+  it('不需要工具的方块不看工具：拿着什么挖都掉同一样', () => {
+    for (const block of Object.values(BlockType)) {
+      if (BLOCKS[block].requiresTool) continue;
+      const bare = blockDrop(block, ToolClass.None);
+      for (const toolClass of Object.values(ToolClass)) {
+        expect(blockDrop(block, toolClass), `方块 ${block} 持 ${toolClass}`).toEqual(bare);
+      }
+    }
+  });
+
+  it('草方块持镐挖照样掉泥土：镐不是它的正确工具，也不影响掉落', () => {
+    expect(blockDrop(BlockType.Grass, ToolClass.Pickaxe)).toEqual({
+      item: ItemType.Dirt,
+      count: 1,
+    });
   });
 });
 
@@ -129,10 +198,10 @@ describe('挖掉一块给多少经验', () => {
   });
 
   it('经验与掉落各算各的：空手挖石头没有掉落，经验照给', () => {
-    expect(blockDrop(BlockType.Stone)).toBeNull();
+    expect(blockDrop(BlockType.Stone, ToolClass.None)).toBeNull();
     expect(blockExperience(BlockType.Stone)).toBeGreaterThan(0);
     // 树叶同理
-    expect(blockDrop(BlockType.OakLeaves)).toBeNull();
+    expect(blockDrop(BlockType.OakLeaves, ToolClass.None)).toBeNull();
     expect(blockExperience(BlockType.OakLeaves)).toBeGreaterThan(0);
   });
 
@@ -148,19 +217,67 @@ describe('硬度换算成挖掘耗时', () => {
   it('耗时与硬度成正比', () => {
     // 原木硬度 2，泥土 0.5，两者都不需要工具，耗时之比就该是 4：这一条不看具体秒数，
     // 只看那个乘法关系确实在起作用
-    expect(miningTicks(BlockType.OakLog)).toBe(4 * miningTicks(BlockType.Dirt));
+    expect(miningTicks(BlockType.OakLog, BARE_HAND)).toBe(
+      4 * miningTicks(BlockType.Dirt, BARE_HAND),
+    );
   });
 
   it('耗时是整数个 tick，且不因浮点噪声多算一个', () => {
-    // 0.2 × 1.5 × 20 在二进制里是 6.000000000000001，天真的向上取整会给出 7
-    expect(miningTicks(BlockType.OakLeaves)).toBe(6);
+    // 0.2 × 30 在二进制里是 6.000000000000001，天真的向上取整会给出 7
+    expect(miningTicks(BlockType.OakLeaves, BARE_HAND)).toBe(6);
     for (const block of Object.values(BlockType)) {
       if (block === BlockType.Bedrock) continue;
-      expect(Number.isInteger(miningTicks(block)), `方块 ${block}`).toBe(true);
+      expect(Number.isInteger(miningTicks(block, BARE_HAND)), `方块 ${block}`).toBe(true);
     }
   });
 
   it('挖不动的方块耗时是无穷', () => {
-    expect(miningTicks(BlockType.Bedrock)).toBe(Infinity);
+    expect(miningTicks(BlockType.Bedrock, BARE_HAND)).toBe(Infinity);
+    expect(miningTicks(BlockType.Bedrock, tool(ToolClass.Pickaxe, STONE))).toBe(Infinity);
+  });
+});
+
+describe('挖掘耗时看手上的工具', () => {
+  /**
+   * issue #15 的「关键数值」一节给的 tick 数：耗时 = 向上取整（硬度 × 30 ÷ 倍率），
+   * 需要工具而手上没有对口工具时则是硬度 × 100。同样写死字面值。
+   */
+  const TIMINGS: Array<[string, BlockType, HeldTool, number]> = [
+    ['泥土持木铲', BlockType.Dirt, tool(ToolClass.Shovel, WOODEN), 8],
+    ['草方块持木铲', BlockType.Grass, tool(ToolClass.Shovel, WOODEN), 9],
+    ['原木持木斧', BlockType.OakLog, tool(ToolClass.Axe, WOODEN), 30],
+    ['原木持石斧', BlockType.OakLog, tool(ToolClass.Axe, STONE), 15],
+    ['石头持木镐', BlockType.Stone, tool(ToolClass.Pickaxe, WOODEN), 23],
+    ['石头持石镐', BlockType.Stone, tool(ToolClass.Pickaxe, STONE), 12],
+  ];
+
+  for (const [name, block, held, ticks] of TIMINGS) {
+    it(`${name}要 ${ticks} tick`, () => {
+      expect(miningTicks(block, held)).toBe(ticks);
+    });
+  }
+
+  it('拿错工具与空手一样慢', () => {
+    // 铲挖原木、镐挖泥土都不对口，倍率不起作用
+    expect(miningTicks(BlockType.OakLog, tool(ToolClass.Shovel, STONE))).toBe(
+      miningTicks(BlockType.OakLog, BARE_HAND),
+    );
+    expect(miningTicks(BlockType.Dirt, tool(ToolClass.Pickaxe, STONE))).toBe(
+      miningTicks(BlockType.Dirt, BARE_HAND),
+    );
+  });
+
+  it('需要工具的方块，拿错工具时仍按 5 倍那一档算', () => {
+    // 石头要镐：拿着斧头挖仍是 150 tick，不是 1.5 × 30 ÷ 4
+    expect(miningTicks(BlockType.Stone, tool(ToolClass.Axe, STONE))).toBe(150);
+  });
+
+  it('正确工具是「无」的方块谁也加不了速', () => {
+    // 树叶那一行的正确工具是「无」，斧头对它不起作用
+    const bare = miningTicks(BlockType.OakLeaves, BARE_HAND);
+    for (const toolClass of Object.values(ToolClass)) {
+      const held = tool(toolClass, STONE);
+      expect(miningTicks(BlockType.OakLeaves, held), `持 ${toolClass}`).toBe(bare);
+    }
   });
 });

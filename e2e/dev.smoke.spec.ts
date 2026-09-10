@@ -9,7 +9,7 @@ import {
 } from '../src/core/constants';
 import { PICKUP_DELAY_TICKS } from '../src/core/drop';
 import { HOTBAR_SIZE, INVENTORY_SIZE } from '../src/core/inventory';
-import { ItemType, type ItemStack } from '../src/core/item';
+import { BARE_HAND, ItemType, type ItemStack } from '../src/core/item';
 import {
   MAX_PITCH,
   PLAYER_EYE_HEIGHT,
@@ -448,7 +448,7 @@ test('走远到区块卸载再走回来，挖过的洞还在，网格也还带�
         withHole: renderer.chunkMeshVertexCount(0, 0),
       };
     },
-    { pitch: MAX_PITCH, ticksToBreak: miningTicks(BlockType.Grass) },
+    { pitch: MAX_PITCH, ticksToBreak: miningTicks(BlockType.Grass, BARE_HAND) },
   );
 
   expect(dug.block).toBe(BlockType.Air);
@@ -673,7 +673,7 @@ test('瞄准脚下的方块显示选框，挖掘中出裂纹，挖穿后网格�
 
       return { at: { x, y, z }, aimed, almost, meshBefore, broken };
     },
-    { pitch: MAX_PITCH, ticksToBreak: miningTicks(BlockType.Grass) },
+    { pitch: MAX_PITCH, ticksToBreak: miningTicks(BlockType.Grass, BARE_HAND) },
   );
 
   /** 一像素的亮度。 */
@@ -905,7 +905,7 @@ test('快捷栏图标取的就是图集里泥土那一格', async ({ page }) => 
     },
     {
       pitch: MAX_PITCH,
-      grassTicks: miningTicks(BlockType.Grass),
+      grassTicks: miningTicks(BlockType.Grass, BARE_HAND),
       pickupDelay: PICKUP_DELAY_TICKS,
     },
   );
@@ -954,8 +954,8 @@ test('挖两块并进同一堆，快捷栏这才显示数量', async ({ page }) 
     },
     {
       pitch: MAX_PITCH,
-      grassTicks: miningTicks(BlockType.Grass),
-      dirtTicks: miningTicks(BlockType.Dirt),
+      grassTicks: miningTicks(BlockType.Grass, BARE_HAND),
+      dirtTicks: miningTicks(BlockType.Dirt, BARE_HAND),
       pickupDelay: PICKUP_DELAY_TICKS,
     },
   );
@@ -1023,7 +1023,7 @@ test('掉落物画成会转会漂的小方块，被捡走后从画面上消失',
     },
     {
       pitch: MAX_PITCH,
-      grassTicks: miningTicks(BlockType.Grass),
+      grassTicks: miningTicks(BlockType.Grass, BARE_HAND),
       pickupDelay: PICKUP_DELAY_TICKS,
       settleTicks: DROP_SETTLE_TICKS,
       stone: BlockType.Stone,
@@ -1135,8 +1135,8 @@ test('挖方块把等级条填起来，攒够就升级', async ({ page }) => {
     },
     {
       pitch: MAX_PITCH,
-      grassTicks: miningTicks(BlockType.Grass),
-      dirtTicks: miningTicks(BlockType.Dirt),
+      grassTicks: miningTicks(BlockType.Grass, BARE_HAND),
+      dirtTicks: miningTicks(BlockType.Dirt, BARE_HAND),
       absorbTicks: XP_ABSORB_TICKS,
     },
   );
@@ -1219,7 +1219,7 @@ test('经验球画成小方块飞向玩家，被吸收后从画面上消失', as
     },
     {
       pitch: MAX_PITCH,
-      stoneTicks: miningTicks(BlockType.Stone),
+      stoneTicks: miningTicks(BlockType.Stone, BARE_HAND),
       absorbTicks: XP_ABSORB_TICKS,
       stone: BlockType.Stone,
     },
@@ -1350,7 +1350,7 @@ async function digDirtAndAimAside(
     },
     {
       pitch: MAX_PITCH,
-      grassTicks: miningTicks(BlockType.Grass),
+      grassTicks: miningTicks(BlockType.Grass, BARE_HAND),
       pickupTicks: PICKUP_DELAY_TICKS + 2,
       eastYaw: EAST_YAW,
       asidePitch: ASIDE_PITCH,
@@ -1517,8 +1517,8 @@ test('右下角画着手上那块方块，切换选中格时跟着换', async ({
     },
     {
       pitch: MAX_PITCH,
-      grassTicks: miningTicks(BlockType.Grass),
-      logTicks: miningTicks(BlockType.OakLog),
+      grassTicks: miningTicks(BlockType.Grass, BARE_HAND),
+      logTicks: miningTicks(BlockType.OakLog, BARE_HAND),
       pickupTicks: PICKUP_DELAY_TICKS + 2,
       log: BlockType.OakLog,
     },
@@ -1701,7 +1701,7 @@ test('背包界面里点一格拿起泥土，再点空格放下', async ({ page 
     },
     {
       pitch: MAX_PITCH,
-      grassTicks: miningTicks(BlockType.Grass),
+      grassTicks: miningTicks(BlockType.Grass, BARE_HAND),
       pickupTicks: PICKUP_DELAY_TICKS + 2,
     },
   );

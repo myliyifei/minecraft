@@ -8,6 +8,7 @@ import {
 } from './block';
 import { chainConnectedBlocks } from './chain-mining';
 import type { DropSink } from './drop';
+import { BARE_HAND } from './item';
 import { PLAYER_REACH, type PlayerView } from './player';
 import { raycastBlocks, type BlockHit } from './raycast';
 import type { Vec3 } from './vec3';
@@ -76,6 +77,10 @@ const NO_CHAIN: readonly Vec3[] = Object.freeze([]);
  * 一块原木一样快。
  *
  * 时间只由 `step()` 的调用次数表达（ADR-0002），耗时表在 `miningTicks`。
+ *
+ * 耗时与掉落都要看手上拿着什么工具，而本切片手上恒是空手（`BARE_HAND`）：工具物品要等
+ * #21，挖穿那一 tick 读一次选中格里拿的是什么要等 #22。届时改的是这三处传参，公式与
+ * 掉落表不必再动。
  */
 export class Mining implements MiningView {
   private readonly blocks: BlockEdit;
@@ -106,7 +111,10 @@ export class Mining implements MiningView {
 
   get progress(): number {
     if (!this.hit) return 0;
-    const required = miningTicks(this.blocks.getBlock(this.hit.x, this.hit.y, this.hit.z));
+    const required = miningTicks(
+      this.blocks.getBlock(this.hit.x, this.hit.y, this.hit.z),
+      BARE_HAND,
+    );
     // 基岩的耗时是 Infinity，除出来是 0。耗时为 0 只在目标那一格被别处改成空气之后出现
     // （区块卸载、外部写入），那时候除出来是 NaN，得挡住。
     if (!(required > 0)) return 0;
@@ -143,7 +151,7 @@ export class Mining implements MiningView {
     }
 
     this.elapsed++;
-    if (this.elapsed < miningTicks(block)) return;
+    if (this.elapsed < miningTicks(block, BARE_HAND)) return;
 
     // 连锁集合里含目标本身，所以两条路都是「挖掉一批格子」，只是批的大小不同。
     for (const cell of this.chain ?? [this.hit]) {
@@ -167,7 +175,7 @@ export class Mining implements MiningView {
     this.blocks.setBlock(x, y, z, BlockType.Air);
     // 掉落物与经验球都落在方块原来那一格里。什么都不掉的方块（树叶、空手挖的石头）
     // 只是没有掉落物，经验照给——两样各查自己那一列。
-    const drop = blockDrop(block);
+    const drop = blockDrop(block, BARE_HAND.toolClass);
     if (drop) this.drops.spawnInBlock(drop, x, y, z);
     const experience = blockExperience(block);
     if (experience > 0) this.experience.spawnInBlock(experience, x, y, z);

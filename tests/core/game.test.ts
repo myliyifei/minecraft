@@ -14,7 +14,7 @@ import {
 } from '../../src/core/constants';
 import { PICKUP_DELAY_TICKS } from '../../src/core/drop';
 import { HOTBAR_SIZE, INVENTORY_SIZE } from '../../src/core/inventory';
-import { ItemType } from '../../src/core/item';
+import { BARE_HAND, ItemType } from '../../src/core/item';
 import { IDLE_INTENT, MAX_PITCH, WALK_SPEED, WALK_STEP } from '../../src/core/player';
 import {
   DIRT_DEPTH_MAX,
@@ -94,7 +94,7 @@ function lookingDown(): GameCore {
 function digUnderfoot(core: GameCore, block: BlockType): void {
   look(core, 0, -MAX_PITCH);
   core.setMining(true);
-  core.tick(miningTicks(block));
+  core.tick(miningTicks(block, BARE_HAND));
   core.setMining(false);
   core.tick(PICKUP_TICKS);
 }
@@ -400,7 +400,7 @@ describe('GameCore 的空手挖掘', () => {
    * 从耗时表里取而不是写 18：这一节测的是「按键 → tick → 方块消失」这条线接上了没有，
    * 耗时表本身由 tests/core/block.test.ts 与 tests/core/mining.test.ts 断言。
    */
-  const GRASS_TICKS = miningTicks(BlockType.Grass);
+  const GRASS_TICKS = miningTicks(BlockType.Grass, BARE_HAND);
 
   it('瞄着脚下那块草，目标坐标与命中面都对', () => {
     const core = lookingDown();
@@ -530,7 +530,7 @@ describe('GameCore 的空手挖掘', () => {
     it('空手挖石头，方块碎了但什么都拿不到', () => {
       const core = lookingDownAt(BlockType.Stone);
       core.setMining(true);
-      core.tick(miningTicks(BlockType.Stone));
+      core.tick(miningTicks(BlockType.Stone, BARE_HAND));
       core.setMining(false);
 
       expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Air);
@@ -542,7 +542,7 @@ describe('GameCore 的空手挖掘', () => {
     it('挖树叶什么都拿不到', () => {
       const core = lookingDownAt(BlockType.OakLeaves);
       core.setMining(true);
-      core.tick(miningTicks(BlockType.OakLeaves));
+      core.tick(miningTicks(BlockType.OakLeaves, BARE_HAND));
       core.setMining(false);
 
       expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Air);
@@ -611,7 +611,7 @@ describe('GameCore 的空手挖掘', () => {
     it('挖原木给 6 点', () => {
       const core = lookingDownAt(BlockType.OakLog);
       core.setMining(true);
-      core.tick(miningTicks(BlockType.OakLog));
+      core.tick(miningTicks(BlockType.OakLog, BARE_HAND));
       core.setMining(false);
       core.tick(ABSORB_TICKS);
 
@@ -621,7 +621,7 @@ describe('GameCore 的空手挖掘', () => {
     it('空手挖石头拿不到东西，经验照给 3 点', () => {
       const core = lookingDownAt(BlockType.Stone);
       core.setMining(true);
-      core.tick(miningTicks(BlockType.Stone));
+      core.tick(miningTicks(BlockType.Stone, BARE_HAND));
       core.setMining(false);
       core.tick(ABSORB_TICKS);
 
@@ -673,7 +673,7 @@ describe('GameCore 的连锁挖掘', () => {
   const TRUNK_HEIGHT = 5;
 
   /** 原木挖满要多少 tick。连锁的耗时与它相同，耗时表本身由别处断言。 */
-  const LOG_TICKS = miningTicks(BlockType.OakLog);
+  const LOG_TICKS = miningTicks(BlockType.OakLog, BARE_HAND);
 
   /** 掉落物落定并被吸走、经验球飞完全程要的 tick 数：玩家就掉在这堆东西里。 */
   const SETTLE_TICKS = PICKUP_DELAY_TICKS + 3 * TICK_RATE;
@@ -839,7 +839,7 @@ describe('GameCore 的放置方块', () => {
     const core = holdingDirt();
     // 再挖掉对准的那块草，两个泥土并进同一堆
     core.setMining(true);
-    core.tick(miningTicks(BlockType.Grass));
+    core.tick(miningTicks(BlockType.Grass, BARE_HAND));
     core.setMining(false);
     core.tick(PICKUP_TICKS);
     expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 2 });
@@ -926,7 +926,7 @@ describe('GameCore 的放置方块', () => {
     // 把对准的那块草换成原木再挖掉：原木物品另占一格，手上因此有两种东西
     core.setBlock(...ASIDE, BlockType.OakLog);
     core.setMining(true);
-    core.tick(miningTicks(BlockType.OakLog));
+    core.tick(miningTicks(BlockType.OakLog, BARE_HAND));
     core.setMining(false);
     core.tick(PICKUP_TICKS);
     expect(core.inventory.slot(0)).toEqual({ item: ItemType.Dirt, count: 1 });
@@ -958,7 +958,7 @@ describe('GameCore 的放置方块', () => {
   it('同一个 tick 里按两次右键只放一块', () => {
     const core = holdingDirt();
     core.setMining(true);
-    core.tick(miningTicks(BlockType.Grass));
+    core.tick(miningTicks(BlockType.Grass, BARE_HAND));
     core.setMining(false);
     core.tick(PICKUP_TICKS);
     expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 2 });
@@ -1021,14 +1021,14 @@ describe('GameCore 的背包界面', () => {
   it('进入界面模式时挖掘进度归零，按住左键也挖不动', () => {
     const core = lookingDown();
     core.setMining(true);
-    core.tick(miningTicks(BlockType.Grass) - 2);
+    core.tick(miningTicks(BlockType.Grass, BARE_HAND) - 2);
     expect(core.mining.progress).toBeGreaterThan(0);
 
     openInventory(core);
     expect(core.mining.progress).toBe(0);
 
     // 挖掘键还按着，界面开着就是挖不动
-    core.tick(10 * miningTicks(BlockType.Grass));
+    core.tick(10 * miningTicks(BlockType.Grass, BARE_HAND));
     expect(core.mining.progress).toBe(0);
     expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Grass);
   });
@@ -1038,7 +1038,7 @@ describe('GameCore 的背包界面', () => {
     core.setMining(true);
     openInventory(core);
     core.toggleInventory();
-    core.tick(miningTicks(BlockType.Grass) - 1);
+    core.tick(miningTicks(BlockType.Grass, BARE_HAND) - 1);
     expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Grass);
 
     core.tick(1);
@@ -1063,7 +1063,7 @@ describe('GameCore 的背包界面', () => {
   it('界面模式只挡输入，世界照样在跑：掉落物仍被吸进背包', () => {
     const core = lookingDown();
     core.setMining(true);
-    core.tick(miningTicks(BlockType.Grass));
+    core.tick(miningTicks(BlockType.Grass, BARE_HAND));
     core.setMining(false);
     expect(core.drops.count).toBe(1);
 

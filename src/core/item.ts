@@ -18,6 +18,40 @@ export interface ItemStack {
   readonly count: number;
 }
 
+/**
+ * 工具类别（见 CONTEXT.md 的「工具」）：镐、斧、铲，加一个「无」。
+ *
+ * 两侧都用它：物品那边说某件工具属于哪一类（等 #21 落地工具物品），方块那边说挖它的
+ * 正确工具是哪一类（`BlockDef.properTool`）。「无」同时表示三件事——空手、手上那件东西
+ * 不是工具、这种方块没有正确工具（树叶）。三者对挖掘的作用相同，不必分开。
+ *
+ * 值是字符串而不是编号：它不进存档（工具类别是由物品种类查出来的，不单独存），
+ * 所以不必像 `ItemType` 那样把编号钉死，读起来还清楚些。
+ */
+export const ToolClass = {
+  None: 'none',
+  Pickaxe: 'pickaxe',
+  Axe: 'axe',
+  Shovel: 'shovel',
+} as const;
+
+export type ToolClass = (typeof ToolClass)[keyof typeof ToolClass];
+
+/**
+ * 手上那件工具在挖掘上起的作用：算不算正确工具看类别，是正确工具时快多少看倍率。
+ *
+ * 只有这两个数进得了耗时公式，所以挖掘拿到的是它而不是整堆物品——耐久与图标不参与
+ * 算耗时。哪种物品对应哪一件工具是物品表的事（#21、#22）。
+ */
+export interface HeldTool {
+  readonly toolClass: ToolClass;
+  /** 挖掘速度倍率：木 2、石 4（见 #15 的物品属性表）。空手是 1。 */
+  readonly speed: number;
+}
+
+/** 空手：没有类别，因此对任何方块都不算正确工具，倍率 1。手上拿着的不是工具时也是它。 */
+export const BARE_HAND: HeldTool = Object.freeze({ toolClass: ToolClass.None, speed: 1 });
+
 export interface ItemDef {
   /** 一格最多堆多少个。工具那类不可堆叠的物品（后续切片）是 1。 */
   readonly stackSize: number;

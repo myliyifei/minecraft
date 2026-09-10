@@ -1,5 +1,4 @@
-import { TICK_RATE } from './constants';
-import { ItemType, type ItemStack } from './item';
+import { ItemType, ToolClass, type HeldTool, type ItemStack } from './item';
 
 /**
  * 方块种类。数值直接存进区块的 Uint8Array，因此已发布的编号不可改动，新方块追加即可。
@@ -30,15 +29,24 @@ export interface BlockDef {
   /** 硬度（见 CONTEXT.md），挖掘耗时按它算。`UNBREAKABLE` 表示怎么挖都挖不掉。 */
   readonly hardness: number;
   /**
-   * 挖它要对应的工具（石头要镐）。空手照样挖得动，只是慢得多——耗时从每点硬度
-   * 1.5 秒变成 5 秒，石头因此是 150 tick 而不是 45。工具本身是后续切片的事。
+   * 挖它更快的那一类工具（见 CONTEXT.md 的「正确工具」）：石头是镐，原木是斧，
+   * 草与泥土是铲。`None` 是「没有哪种工具挖它更快」，树叶就是这一档。
+   *
+   * 与 `requiresTool` 是两件事：这一列说「哪种工具算正确工具」，那一列说「手上没有它时还能不能
+   * 拿到东西」。草方块有正确工具（铲）但空手挖也照样掉泥土。
+   */
+  readonly properTool: ToolClass;
+  /**
+   * 挖它要正确工具（石头要镐）。空手照样挖得动，只是慢得多——每点硬度从 30 tick
+   * 变成 100 tick，石头因此是 150 tick 而不是 45——而且什么都拿不到（见 `blockDrop`）。
    */
   readonly requiresTool: boolean;
   /**
    * 挖掉它掉出什么（见 CONTEXT.md 的「掉落表」），`null` 表示什么都不掉。
    *
-   * 本切片只有空手，所以「需要工具的方块空手挖没有掉落」这条规则也写在数据里：
-   * 石头记 `null`，将来加了镐要改成圆石那一行，同时 `blockDrop` 得多看一个工具参数。
+   * 这一列是「拿着正确工具时掉什么」。需要工具的方块在没有正确工具时一律什么都不掉，
+   * 那条规则在 `blockDrop` 里，不在数据里。石头这一行仍记 `null`：圆石这种物品要等
+   * #22，那时把它换成圆石，空手挖不到东西的行为自然仍然成立。
    */
   readonly drop: ItemStack | null;
   /**
@@ -61,11 +69,12 @@ const COMMON_EXPERIENCE = 3;
 
 /** 方块属性表——纯数据。加方块只加一行。 */
 export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
-  // 空气不是挖掘目标，硬度只是占位。
+  // 空气不是挖掘目标，硬度与正确工具只是占位。
   [BlockType.Air]: {
     opaque: false,
     solid: false,
     hardness: 0,
+    properTool: ToolClass.None,
     requiresTool: false,
     drop: null,
     experience: 0,
@@ -75,6 +84,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: true,
     solid: true,
     hardness: 0.6,
+    properTool: ToolClass.Shovel,
     requiresTool: false,
     drop: one(ItemType.Dirt),
     experience: COMMON_EXPERIENCE,
@@ -83,6 +93,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: true,
     solid: true,
     hardness: 0.5,
+    properTool: ToolClass.Shovel,
     requiresTool: false,
     drop: one(ItemType.Dirt),
     experience: COMMON_EXPERIENCE,
@@ -92,6 +103,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: true,
     solid: true,
     hardness: 1.5,
+    properTool: ToolClass.Pickaxe,
     requiresTool: true,
     drop: null,
     experience: COMMON_EXPERIENCE,
@@ -100,6 +112,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: true,
     solid: true,
     hardness: UNBREAKABLE,
+    // 挖不动，谈不上哪种工具算正确工具。
+    properTool: ToolClass.None,
     requiresTool: false,
     drop: null,
     // 挖不动，所以它永远碎不了，也就不会生成经验球。
@@ -109,6 +123,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: true,
     solid: true,
     hardness: 2,
+    properTool: ToolClass.Axe,
     requiresTool: false,
     drop: one(ItemType.OakLog),
     // 原木自成一档，比普通方块高一倍。
@@ -119,6 +134,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: false,
     solid: true,
     hardness: 0.2,
+    // 原版用剪刀与剑，本项目两样都还没有，所以树叶没有正确工具：拿什么挖都一样快。
+    properTool: ToolClass.None,
     requiresTool: false,
     drop: null,
     // 树叶什么都不掉，但「任何方块都给经验」（见 CONTEXT.md 的「经验球」），
@@ -146,42 +163,63 @@ export function isBreakable(block: BlockType): boolean {
   return block !== BlockType.Air && BLOCKS[block].hardness !== UNBREAKABLE;
 }
 
-/** 空手挖一点硬度要多少秒。 */
-const SECONDS_PER_HARDNESS = 1.5;
+/**
+ * 一点硬度要挖多少 tick（倍率为 1 时）。
+ * 与原版一致：20 tick/s（ADR-0002）下的 30 tick 就是 1.5 秒。
+ */
+const TICKS_PER_HARDNESS = 30;
 
-/** 需要工具而空着手时，一点硬度要多少秒。 */
-const SECONDS_PER_HARDNESS_WITHOUT_TOOL = 5;
+/**
+ * 需要工具而手上没有正确工具时，一点硬度要挖多少 tick。
+ * 是上面那一档的 5 倍，石头因此空手要 150 tick。
+ */
+const TICKS_PER_HARDNESS_WITHOUT_TOOL = 100;
 
 /**
  * 取整到 tick 时先减掉的容差。
  *
- * 硬度是 0.2、0.6 这类十进制小数，二进制存不精确：`0.2 × 1.5 × 20` 算出来是
+ * 硬度是 0.2、0.6 这类十进制小数，二进制存不精确：`0.2 × 30` 算出来是
  * 6.000000000000001，直接向上取整树叶就要挖 7 tick 而不是 6。容差比一个 tick 小得多，
  * 只抵消舍入误差，不改变任何本该取整的结果。
  */
 const TICK_EPSILON = 1e-9;
 
-/**
- * 空手挖掉一个方块要多少 tick，挖不动的返回 `Infinity`。
- *
- * 硬度换成耗时的公式在 `SECONDS_PER_HARDNESS` 那两个常量里，以 tick 计时向上取整。
- * 结果：草 18、泥土 15、树叶 6、原木 60、石头 150。
- * 持有工具时的加成要等工具落地，目前只有空手。
- */
-export function miningTicks(block: BlockType): number {
-  const { hardness, requiresTool } = BLOCKS[block];
-  const seconds = requiresTool ? SECONDS_PER_HARDNESS_WITHOUT_TOOL : SECONDS_PER_HARDNESS;
-  return Math.ceil(hardness * seconds * TICK_RATE - TICK_EPSILON);
+/** 手上那件工具对这种方块算不算正确工具。方块没有正确工具（树叶）时谁都不算。 */
+function isProperTool(def: BlockDef, toolClass: ToolClass): boolean {
+  return def.properTool !== ToolClass.None && def.properTool === toolClass;
 }
 
 /**
- * 空手挖掉一个方块掉出什么，什么都不掉时返回 `null`。
+ * 手上拿着这件工具，挖掉一个方块要多少 tick，挖不动的返回 `Infinity`。
  *
- * 与 `miningTicks` 一样，本切片只有空手：持有工具时的掉落（石头出圆石、树叶出树苗）
- * 要等工具落地，那时这里多一个工具参数。
+ * 公式：向上取整（硬度 × 30 ÷ 倍率）。倍率只在手上那件工具是正确工具时算数，否则是 1——
+ * 拿铲挖原木与空手一样慢。需要工具的方块在没有正确工具时另走一档（每点硬度 100 tick），
+ * 这条优先于倍率：拿着石斧挖石头仍是 150 tick。
+ *
+ * 空手（`BARE_HAND`）的结果：草 18、泥土 15、树叶 6、原木 60、石头 150。
  */
-export function blockDrop(block: BlockType): ItemStack | null {
-  return BLOCKS[block].drop;
+export function miningTicks(block: BlockType, tool: HeldTool): number {
+  const def = BLOCKS[block];
+  const proper = isProperTool(def, tool.toolClass);
+  if (def.requiresTool && !proper) {
+    return Math.ceil(def.hardness * TICKS_PER_HARDNESS_WITHOUT_TOOL - TICK_EPSILON);
+  }
+  const speed = proper ? tool.speed : 1;
+  return Math.ceil((def.hardness * TICKS_PER_HARDNESS) / speed - TICK_EPSILON);
+}
+
+/**
+ * 手上拿着这一类工具，挖掉一个方块掉出什么，什么都不掉时返回 `null`。
+ *
+ * 需要工具的方块只在手上拿着正确工具时掉东西——空手挖石头挖得掉，什么也拿不到。
+ * 其余方块不看工具：草方块拿镐挖照样掉泥土。
+ *
+ * 只要类别不要倍率：掉什么与挖多快无关，木镐与石镐挖石头掉的是同一样东西。
+ */
+export function blockDrop(block: BlockType, toolClass: ToolClass): ItemStack | null {
+  const def = BLOCKS[block];
+  if (def.requiresTool && !isProperTool(def, toolClass)) return null;
+  return def.drop;
 }
 
 /**

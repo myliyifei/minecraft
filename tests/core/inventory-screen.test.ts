@@ -486,7 +486,7 @@ describe('配方书：列出这块网格能做的配方，材料充足的高亮'
     return entry;
   }
 
-  it('背包里有 1 原木时，木板配方可合成、木棍配方不可合成', () => {
+  it('背包里有 1 个原木时，木板配方可合成、木棍配方不可合成', () => {
     const { screen } = opened((inv) => inv.setSlot(0, logs(1)), grid());
     expect(entryFor(screen, ItemType.OakPlanks).craftable).toBe(true);
     expect(entryFor(screen, ItemType.Stick).craftable).toBe(false);
@@ -518,7 +518,7 @@ describe('配方书：列出这块网格能做的配方，材料充足的高亮'
     return screen.crafting!.recipes.findIndex((e) => e.recipe.result.item === item);
   }
 
-  it('点木板配方：网格里出现原木、背包少 1 原木、输出格显示 4 木板', () => {
+  it('点木板配方：网格里出现原木、背包里的原木少 1 个、输出格显示 4 块木板', () => {
     const extra = grid();
     const { inventory, screen } = opened((inv) => inv.setSlot(0, logs(3)), extra);
     screen.clickRecipe(indexOf(screen, ItemType.OakPlanks));

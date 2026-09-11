@@ -36,7 +36,7 @@ import {
   tileCell,
 } from '../src/render/atlas';
 import { RECIPES } from '../src/core/recipe';
-import { ITEM_NAMES, STRINGS } from '../src/ui/strings';
+import { ITEM_NAMES, recipeLabel, STRINGS } from '../src/ui/strings';
 import {
   countCanvasColors,
   installPixelProbe,
@@ -1988,6 +1988,12 @@ async function expectRecipeBookWorks(page: Page, screenId: string): Promise<void
   );
   await expect(sticks).toHaveAttribute('data-craftable', 'false');
   await expect(sticks).toHaveAttribute('aria-disabled', 'true');
+  // 读屏文字也来自字符串表：成品名加材料够不够
+  await expect(planks).toHaveAttribute(
+    'aria-label',
+    recipeLabel(ITEM_NAMES[ItemType.OakPlanks], true),
+  );
+  await expect(sticks).toHaveAttribute('aria-label', recipeLabel(ITEM_NAMES[ItemType.Stick], false));
 
   // 点灰显的木棍配方：原木还在第一格，网格空着
   const first = page.locator(`#${screenId} .invscreen__slot[data-slot="0"]`);

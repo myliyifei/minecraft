@@ -438,6 +438,7 @@ body {
  */
 .invscreen__recipe {
   display: flex;
+  width: 100%;
   align-items: center;
   gap: calc(var(--tile) / 2);
   padding-right: calc(var(--tile) / 2);
@@ -462,8 +463,13 @@ body {
   cursor: default;
 }
 
-/* 一条配方里的成品图标：与格子同一档尺寸，让它和网格里的格子对得齐。 */
+/*
+ * 一条配方里的成品图标：与格子同一档尺寸，让它和网格里的格子对得齐。
+ * position: relative 不能省：数量标签是绝对定位的，没有这一句它会以整层覆盖层为基准，
+ * 跑到屏幕右下角去。
+ */
 .invscreen__recipe-icon {
+  position: relative;
   display: grid;
   place-items: center;
   width: var(--slot-cell);

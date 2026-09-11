@@ -318,12 +318,19 @@ function buildRecipeBook(area: CraftingView | undefined): RecipeBookHud | undefi
   };
 }
 
-/** 造配方书里的一条，追加进 `parent`。成品图标与格子同一套画法，名字来自物品名表。 */
+/**
+ * 造配方书里的一条，追加进 `parent`。成品图标与格子同一套画法，名字来自物品名表。
+ *
+ * 列表项是外面一层 div，按钮在它里面：把 role="listitem" 直接写在按钮上会盖掉按钮自己的
+ * 语义，读屏软件就把它报成列表项，按钮导航里也找不到它。
+ */
 function buildRecipeRow(parent: HTMLElement, entry: RecipeBookEntry, index: number): RecipeRow {
+  const item = document.createElement('div');
+  item.setAttribute('role', 'listitem');
+
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'invscreen__recipe';
-  button.setAttribute('role', 'listitem');
   button.dataset.recipe = String(index);
 
   // 成品图标：与格子同一套画法，只画一次——配方的成品不会变。
@@ -334,6 +341,7 @@ function buildRecipeRow(parent: HTMLElement, entry: RecipeBookEntry, index: numb
   name.textContent = ITEM_NAMES[entry.recipe.result.item];
   button.append(name);
 
-  parent.append(button);
+  item.append(button);
+  parent.append(item);
   return { button };
 }

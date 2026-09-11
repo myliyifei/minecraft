@@ -1994,7 +1994,9 @@ async function expectRecipeBookWorks(page: Page, screenId: string): Promise<void
   const gridFirst = page.locator(`#${screenId} .invscreen__grid .invscreen__slot`).first();
   const output = page.locator(`#${screenId} [data-output]`);
   await expect(first).toHaveAttribute('data-item', String(ItemType.OakLog));
-  await sticks.click();
+  // 暗着的那条带 aria-disabled，Playwright 会把它当成不可点的按钮一直等下去；这里要验的
+  // 正是「点了无事发生」，所以跳过可点性检查直接点
+  await sticks.click({ force: true });
   await page.waitForTimeout(100);
   await expect(first).toHaveAttribute('data-item', String(ItemType.OakLog));
   await expect(gridFirst).not.toHaveAttribute('data-item', /./);

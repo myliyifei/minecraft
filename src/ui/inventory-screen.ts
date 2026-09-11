@@ -1,5 +1,9 @@
 import { HOTBAR_SIZE, INVENTORY_SIZE, type InventoryView } from '../core/inventory';
-import type { CraftingView, InventoryScreenView } from '../core/inventory-screen';
+import type {
+  CraftingView,
+  InventoryScreenView,
+  RecipeBookEntry,
+} from '../core/inventory-screen';
 import {
   applyAtlasGrid,
   buildItemBox,
@@ -7,7 +11,7 @@ import {
   refreshSlot,
   type SlotCell,
 } from './item-slot';
-import { STRINGS } from './strings';
+import { ITEM_NAMES, recipeLabel, STRINGS } from './strings';
 
 /**
  * 一层界面要读核心的哪几样、往回递哪一条指令。写成窄接口，接线接错了编译期就报。
@@ -22,6 +26,8 @@ export interface InventoryScreenSource {
   clickSlot(index: number): void;
   /** 点了输出格。下一个 tick 生效（ADR-0004）。 */
   clickCraftingOutput(): void;
+  /** 点了配方书的第 index 条。下一个 tick 生效（ADR-0004）。 */
+  clickRecipe(index: number): void;
 }
 
 /** 这一层覆盖层在页面上叫什么：元素 id（端到端测试据此找它）与标题。 */
@@ -43,12 +49,13 @@ export const CRAFTING_TABLE_SCREEN_LABEL: InventoryScreenLabel = {
 };
 
 /**
- * 背包界面（见 CONTEXT.md）的那层 DOM 覆盖层：36 格、一块合成网格加输出格，以及一个
- * 跟着鼠标走的光标物品。工作台界面是同一层的另一份实例：网格 3x3，标题换成「工作台」。
+ * 背包界面（见 CONTEXT.md）的那层 DOM 覆盖层：36 格、一块合成网格加输出格、右侧那块
+ * 配方书面板，以及一个跟着鼠标走的光标物品。工作台界面是同一层的另一份实例：网格 3x3，
+ * 标题换成「工作台」。
  *
- * 开着没有、光标上拿着什么、点一格之后东西怎么搬、输出格里显示什么，全都在核心里
- * （`src/core/inventory-screen.ts`）。这里只做两件事：把核心的状态画成格子，把点击的格号
- * （或「点了输出格」）递回去。
+ * 开着没有、光标上拿着什么、点一格之后东西怎么搬、输出格里显示什么、配方书里哪条亮着，
+ * 全都在核心里（`src/core/inventory-screen.ts`）。这里只做两件事：把核心的状态画成格子，
+ * 把点击的格号（或「点了输出格」「点了第几条配方」）递回去。
  *
  * 格子与快捷栏共用 `item-slot.ts` 那套画法，所以界面里第 0 格与 HUD 底部第 0 格画出来
  * 是同一堆东西——它们本来就是背包的同一格。
@@ -88,6 +95,8 @@ export function installInventoryScreen(
 
   // 合成网格在左、输出格在右。格号由核心给（接在 36 格之后），这里只照着编。
   const crafting = buildCraftingHud(source.screen.crafting);
+  // 配方书：面板右侧一列，列的是核心报的那几条，这里只照着画。
+  const recipeBook = buildRecipeBook(source.screen.crafting);
 
   // 储物格：背包的第 9–35 格，3 行 9 列
   const storage = document.createElement('div');
@@ -108,9 +117,14 @@ export function installInventoryScreen(
     cells.push(buildSlotCell(i < HOTBAR_SIZE ? hotbar : storage, 'invscreen', i));
   }
 
-  panel.append(title);
-  if (crafting) panel.append(crafting.root);
-  panel.append(storage, hotbar);
+  // 面板分两栏：左栏自上而下是标题、合成网格、储物格、快捷栏，右栏是配方书。
+  const main = document.createElement('div');
+  main.className = 'invscreen__main';
+  main.append(title);
+  if (crafting) main.append(crafting.root);
+  main.append(storage, hotbar);
+  panel.append(main);
+  if (recipeBook) panel.append(recipeBook.root);
   root.append(panel);
 
   // 光标物品挂在面板外面：它要能盖到面板之外的地方去，鼠标移到哪儿它就在哪儿。
@@ -125,18 +139,23 @@ export function installInventoryScreen(
   };
 
   /**
-   * 点一格：把格号递给核心；点输出格递的是另一条指令。
+   * 点一格：把格号递给核心；点输出格、点配方书的一条递的是另外两条指令。
    *
-   * 事件委托挂在覆盖层上而不是 40 个格子各挂一个：格子是一次建好不再变的，但一个监听器
-   * 比 40 个好卸。点在格子之间的空隙上什么都不做。
+   * 事件委托挂在覆盖层上而不是几十个格子各挂一个：格子是一次建好不再变的，但一个监听器
+   * 比几十个好卸。点在格子之间的空隙上什么都不做。暗着的配方也照递：点了无事发生是核心
+   * 的规则，这里不重复判。
    */
   const onClick = (event: MouseEvent): void => {
     followPointer(event);
     if (!(event.target instanceof Element)) return;
-    const hit = event.target.closest('[data-slot], [data-output]');
+    const hit = event.target.closest('[data-slot], [data-output], [data-recipe]');
     if (!(hit instanceof HTMLElement)) return;
     if (hit.dataset.output !== undefined) {
       source.clickCraftingOutput();
+      return;
+    }
+    if (hit.dataset.recipe !== undefined) {
+      source.clickRecipe(Number(hit.dataset.recipe));
       return;
     }
     if (hit.dataset.slot === undefined) return;
@@ -166,6 +185,7 @@ export function installInventoryScreen(
         refreshSlot(cells[i]!, source.inventory.slot(i));
       }
       crafting?.update();
+      recipeBook?.update();
 
       refreshSlot(cursor, stack);
       const hasCursor = stack !== undefined;
@@ -234,4 +254,86 @@ function buildCraftingHud(area: CraftingView | undefined): CraftingHud | undefin
       refreshSlot(output, area.output);
     },
   };
+}
+
+/** 配方书的 DOM 与刷新。 */
+interface RecipeBookHud {
+  readonly root: HTMLElement;
+  /** 让每条配方的亮暗跟上核心。 */
+  update(): void;
+}
+
+/** 配方书里的一条：按钮，以及上次画的亮暗。 */
+interface RecipeRow {
+  readonly button: HTMLButtonElement;
+  /** 上一次画的是亮着还是暗着。与当前相同就不碰 DOM。 */
+  lastCraftable?: boolean;
+}
+
+/**
+ * 造配方书（见 CONTEXT.md）：一列按钮，每条是成品图标加名字。界面没带合成网格时不造。
+ *
+ * 配方那几条是固定的（核心按网格尺寸过滤配方表，之后不再变），所以按钮一次建好；每帧只刷
+ * 亮暗。按钮带 data-recipe，点击处理与端到端测试据此认出点的是第几条。暗着的用
+ * aria-disabled 而不是 disabled：disabled 的按钮不发 click，也没有 hover 加亮，玩家点了
+ * 得不到任何反馈；而「点了无事发生」本来就是核心的规则，界面层不重复判。
+ */
+function buildRecipeBook(area: CraftingView | undefined): RecipeBookHud | undefined {
+  if (!area) return undefined;
+
+  const root = document.createElement('section');
+  root.className = 'invscreen__recipes';
+  root.setAttribute('aria-label', STRINGS.recipeBook);
+
+  const heading = document.createElement('h3');
+  heading.className = 'invscreen__recipes-title';
+  heading.textContent = STRINGS.recipeBook;
+
+  // 标题在列表外面：列表里只放配方那几条，读屏软件报的条数才对得上。
+  const list = document.createElement('div');
+  list.className = 'invscreen__recipe-list';
+  list.setAttribute('role', 'list');
+  root.append(heading, list);
+
+  const rows: RecipeRow[] = area.recipes.map((entry, index) => buildRecipeRow(list, entry, index));
+
+  return {
+    root,
+    update(): void {
+      const entries = area.recipes;
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i]!;
+        const entry = entries[i];
+        if (!entry) continue;
+        if (entry.craftable === row.lastCraftable) continue;
+        row.lastCraftable = entry.craftable;
+        row.button.dataset.craftable = entry.craftable ? 'true' : 'false';
+        row.button.setAttribute('aria-disabled', entry.craftable ? 'false' : 'true');
+        row.button.setAttribute(
+          'aria-label',
+          recipeLabel(ITEM_NAMES[entry.recipe.result.item], entry.craftable),
+        );
+      }
+    },
+  };
+}
+
+/** 造配方书里的一条，追加进 `parent`。成品图标与格子同一套画法，名字来自物品名表。 */
+function buildRecipeRow(parent: HTMLElement, entry: RecipeBookEntry, index: number): RecipeRow {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'invscreen__recipe';
+  button.setAttribute('role', 'listitem');
+  button.dataset.recipe = String(index);
+
+  // 成品图标：与格子同一套画法，只画一次——配方的成品不会变。
+  refreshSlot(buildItemBox(button, 'invscreen', 'invscreen__recipe-icon'), entry.recipe.result);
+
+  const name = document.createElement('span');
+  name.className = 'invscreen__recipe-name';
+  name.textContent = ITEM_NAMES[entry.recipe.result.item];
+  button.append(name);
+
+  parent.append(button);
+  return { button };
 }

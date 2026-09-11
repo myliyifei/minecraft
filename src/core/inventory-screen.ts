@@ -1,6 +1,7 @@
 import type { CraftingGrid } from './crafting-grid';
 import { isSlotIndex } from './inventory';
-import { stackLimit, type ItemStack, type SlotBatch, type SlotStore } from './item';
+import { stackLimit, type ItemStack, type ItemType, type SlotBatch, type SlotStore } from './item';
+import { ingredientCounts, layoutRecipe, recipesFor, type Recipe } from './recipe';
 
 /**
  * 光标上拿着的那一堆，以及它是从哪一格拿起来的。
@@ -20,6 +21,17 @@ interface CursorHold {
    * 关闭界面时它直接走入包规则。
    */
   readonly from: number | undefined;
+}
+
+/**
+ * 配方书（见 CONTEXT.md）里的一条：哪条配方，此刻材料够不够。
+ *
+ * 「够不够」把背包 36 格与网格里的材料合计，光标物品不计入——光标上那一堆是玩家正拿着
+ * 要放到别处的，不该被配方书顺手用掉。
+ */
+export interface RecipeBookEntry {
+  readonly recipe: Recipe;
+  readonly craftable: boolean;
 }
 
 /** 界面里的一格落在哪一批格子的第几格上。 */
@@ -47,6 +59,11 @@ export interface CraftingView {
   slot(local: number): ItemStack | undefined;
   /** 输出格（见 CONTEXT.md）里显示的成品，不匹配任何配方时 undefined。 */
   readonly output: ItemStack | undefined;
+  /**
+   * 配方书：这块网格能做的全部配方，顺序固定，每条带着此刻材料够不够。点第 i 条递的是
+   * `InventoryScreen.clickRecipe(i)`。
+   */
+  readonly recipes: ReadonlyArray<RecipeBookEntry>;
 }
 
 /** 背包界面的只读视图。界面层读它画覆盖层。 */
@@ -80,6 +97,8 @@ export class InventoryScreen implements InventoryScreenView {
    * 它只是 `SlotBatch` 而不是 `SlotStore`：归还时东西一律往背包里进，网格不收入包的东西。
    */
   private readonly extra: CraftingGrid | undefined;
+  /** 配方书列的那几条：配方表里摆得进附加网格的，顺序固定。没有网格就是空的。 */
+  private readonly bookRecipes: ReadonlyArray<Recipe>;
   private isOpen = false;
   private holding: CursorHold | undefined;
 
@@ -92,7 +111,8 @@ export class InventoryScreen implements InventoryScreenView {
   constructor(slots: SlotStore, extra?: CraftingGrid) {
     this.slots = slots;
     this.extra = extra;
-    this.crafting = extra && craftingView(extra, slots.size);
+    this.bookRecipes = extra ? recipesFor(extra) : [];
+    this.crafting = extra && craftingView(extra, slots, this.bookRecipes, slots.size);
   }
 
   get open(): boolean {
@@ -196,6 +216,63 @@ export class InventoryScreen implements InventoryScreenView {
   }
 
   /**
+   * 点配方书的第 index 条：把它的材料摆进网格，输出格随即显示成品。
+   *
+   * 三步：网格里原有的东西先回背包；再按图案（贴左上角、不镜像）逐格从背包取材，每格
+   * 1 个，取材按格号从小到大；材料够不够按背包与网格合计、光标不计入（`RecipeBookEntry`），
+   * 不够的那条点了无事发生。界面关着、没有网格、下标指不到配方时同样无事发生。
+   *
+   * 网格里的东西回不完背包（36 格全满）时不摆料，回不去的留在原格：材料够是按「网格里的
+   * 也算」判的，回不去就取不到，硬摆会把两处的材料混在一起。
+   */
+  clickRecipe(index: number): void {
+    if (!this.isOpen) return;
+    const grid = this.extra;
+    const recipe = isSlotIndex(index, this.bookRecipes.length)
+      ? this.bookRecipes[index]
+      : undefined;
+    if (!grid || !recipe) return;
+    if (!hasIngredients(recipe, countItems(this.slots, grid))) return;
+    if (!this.returnGrid(grid)) return;
+
+    const layout = layoutRecipe(recipe, grid);
+    for (let i = 0; i < layout.length; i++) {
+      const item = layout[i];
+      if (item === undefined) continue;
+      this.takeOneFromSlots(item);
+      grid.setSlot(i, { item, count: 1 });
+    }
+  }
+
+  /**
+   * 网格里的东西回背包，返回是不是一件都没剩。回不去的那部分留在原格。
+   *
+   * 与关闭界面时的归还（`putEverythingBack`）不同：那边回不去的要交出去扔到脚下，这边界面
+   * 还开着，东西留在网格里玩家看得见、拿得到。
+   */
+  private returnGrid(grid: CraftingGrid): boolean {
+    let allReturned = true;
+    for (let i = 0; i < grid.size; i++) {
+      const stack = grid.slot(i);
+      if (!stack) continue;
+      const spare = this.slots.add(stack);
+      grid.setSlot(i, spare > 0 ? { item: stack.item, count: spare } : undefined);
+      if (spare > 0) allReturned = false;
+    }
+    return allReturned;
+  }
+
+  /** 从背包格号最小的那一堆这种物品里拿走 1 个。调用方已确认背包里有。 */
+  private takeOneFromSlots(item: ItemType): void {
+    for (let i = 0; i < this.slots.size; i++) {
+      const stack = this.slots.slot(i);
+      if (!stack || stack.item !== item) continue;
+      this.slots.setSlot(i, stack.count > 1 ? { item, count: stack.count - 1 } : undefined);
+      return;
+    }
+  }
+
+  /**
    * 第 index 格落在哪一批格子的第几格上，指不到格子时 undefined。
    *
    * 附加格子的格号接在背包之后：背包 36 格时第 36 格就是附加格子的第 0 格。
@@ -270,8 +347,18 @@ export class InventoryScreen implements InventoryScreenView {
   }
 }
 
-/** 给一块合成网格包一层界面层要的只读视图：格号从 `firstSlot` 起。 */
-function craftingView(grid: CraftingGrid, firstSlot: number): CraftingView {
+/**
+ * 给一块合成网格包一层界面层要的只读视图：格号从 `firstSlot` 起。
+ *
+ * 配方书那一列每次读都当场算，与输出格同一个理由：材料在背包与网格之间移动、拾取也往
+ * 背包里进，记一份就得在每处改动后去刷，而配方就那么几条，重算一次的开销很小。
+ */
+function craftingView(
+  grid: CraftingGrid,
+  slots: SlotStore,
+  recipes: ReadonlyArray<Recipe>,
+  firstSlot: number,
+): CraftingView {
   return {
     width: grid.width,
     height: grid.height,
@@ -280,5 +367,29 @@ function craftingView(grid: CraftingGrid, firstSlot: number): CraftingView {
     get output() {
       return grid.output;
     },
+    get recipes() {
+      const available = countItems(slots, grid);
+      return recipes.map((recipe) => ({ recipe, craftable: hasIngredients(recipe, available) }));
+    },
   };
+}
+
+/** 几批格子里每种物品各有多少个，合在一张表里。 */
+function countItems(...batches: ReadonlyArray<SlotBatch>): Map<ItemType, number> {
+  const counts = new Map<ItemType, number>();
+  for (const batch of batches) {
+    for (let i = 0; i < batch.size; i++) {
+      const stack = batch.slot(i);
+      if (stack) counts.set(stack.item, (counts.get(stack.item) ?? 0) + stack.count);
+    }
+  }
+  return counts;
+}
+
+/** 这些材料够做这条配方吗：每一种都不少于所需的份数。 */
+function hasIngredients(recipe: Recipe, available: ReadonlyMap<ItemType, number>): boolean {
+  for (const [item, needed] of ingredientCounts(recipe)) {
+    if ((available.get(item) ?? 0) < needed) return false;
+  }
+  return true;
 }

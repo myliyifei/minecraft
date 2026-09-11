@@ -111,6 +111,51 @@ export function matchRecipe(
   return undefined;
 }
 
+/**
+ * 配方书（见 CONTEXT.md）列出的配方：配方表里摆得进这么大网格的那些，顺序照配方表。
+ *
+ * 顺序稳定是有用的：配方书里第 i 条就是这个数组的第 i 项，点第 i 条递的就是 i。
+ */
+export function recipesFor(size: GridSize, recipes: ReadonlyArray<Recipe> = RECIPES): Recipe[] {
+  return recipes.filter((recipe) => recipeFits(recipe, size));
+}
+
+/**
+ * 一条配方要哪些材料、各几份。有序配方数图案里的非空格，无序配方数材料表。
+ *
+ * 配方书判「材料够不够」看的就是这张表：每一种都够才亮。
+ */
+export function ingredientCounts(recipe: Recipe): Map<ItemType, number> {
+  const counts = new Map<ItemType, number>();
+  const cells = recipe.kind === 'shapeless' ? recipe.ingredients : recipe.pattern.flat();
+  for (const item of cells) {
+    if (item === undefined) continue;
+    counts.set(item, (counts.get(item) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * 配方书自动摆料时网格各格摆什么：图案贴左上角、不镜像；无序配方的材料从左上角起按行
+ * 排开。每格只有种类，数量都是 1——摆料一格只放 1 个。调用方要先用 `recipeFits` 确认
+ * 摆得进去。
+ */
+export function layoutRecipe(recipe: Recipe, size: GridSize): GridContents {
+  const contents = Array<ItemType | undefined>(size.width * size.height).fill(undefined);
+  if (recipe.kind === 'shapeless') {
+    recipe.ingredients.forEach((item, i) => {
+      contents[i] = item;
+    });
+    return contents;
+  }
+  recipe.pattern.forEach((row, r) => {
+    row.forEach((item, c) => {
+      contents[r * size.width + c] = item;
+    });
+  });
+  return contents;
+}
+
 /** 图案有几列。各行等长，看第一行就够；没有行的图案是 0 列。 */
 function patternWidth(pattern: Pattern): number {
   return pattern[0]?.length ?? 0;

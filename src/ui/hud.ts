@@ -36,6 +36,7 @@ export type HudSource = Pick<
   | 'uiMode'
   | 'clickSlot'
   | 'clickCraftingOutput'
+  | 'clickRecipe'
 >;
 
 /** 给一层界面接线：视图换成它自己的，背包与点击指令是共用的那一份。 */
@@ -45,6 +46,7 @@ function screenSource(source: HudSource, screen: InventoryScreenView): Inventory
     screen,
     clickSlot: (index) => source.clickSlot(index),
     clickCraftingOutput: () => source.clickCraftingOutput(),
+    clickRecipe: (index) => source.clickRecipe(index),
   };
 }
 

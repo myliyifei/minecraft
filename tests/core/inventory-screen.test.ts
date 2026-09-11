@@ -3,6 +3,7 @@ import { CraftingGrid } from '../../src/core/crafting-grid';
 import { INVENTORY_SIZE, Inventory } from '../../src/core/inventory';
 import { InventoryScreen } from '../../src/core/inventory-screen';
 import { ItemType, type ItemStack } from '../../src/core/item';
+import { RECIPES } from '../../src/core/recipe';
 
 /** 一堆泥土。 */
 function dirt(count: number): ItemStack {
@@ -474,5 +475,146 @@ describe('输出格：网格里凑成配方就显示成品，点它拿走', () =
     // 先光标物品再网格：木板先落第 0 格，原木随后落第 1 格
     expect(inventory.slot(0)).toEqual(PLANKS_X4);
     expect(inventory.slot(1)).toEqual(logs(2));
+  });
+});
+
+describe('配方书：列出这块网格能做的配方，材料够的亮着', () => {
+  /** 配方书里成品是这种物品的那一条。 */
+  function entryFor(screen: InventoryScreen, item: ItemType) {
+    const entry = screen.crafting!.recipes.find((e) => e.recipe.result.item === item);
+    if (!entry) throw new Error(`配方书里没有成品为 ${item} 的配方`);
+    return entry;
+  }
+
+  it('背包里有 1 原木时，木板配方可合成、木棍配方不可合成', () => {
+    const { screen } = opened((inv) => inv.setSlot(0, logs(1)), grid());
+    expect(entryFor(screen, ItemType.OakPlanks).craftable).toBe(true);
+    expect(entryFor(screen, ItemType.Stick).craftable).toBe(false);
+  });
+
+  it('配方书列的就是摆得进 2x2 的那几条，工作台的 3x3 也一样', () => {
+    const { screen } = opened(() => {}, grid());
+    expect(screen.crafting!.recipes.map((e) => e.recipe)).toEqual(RECIPES);
+    const table = opened(() => {}, new CraftingGrid({ width: 3, height: 3 }));
+    expect(table.screen.crafting!.recipes.map((e) => e.recipe)).toEqual(RECIPES);
+  });
+
+  it('材料合计背包与网格：木板分在两处凑够 4 块，工作台配方就亮', () => {
+    const extra = grid();
+    extra.setSlot(3, planks(2));
+    const { screen } = opened((inv) => inv.setSlot(7, planks(2)), extra);
+    expect(entryFor(screen, ItemType.CraftingTable).craftable).toBe(true);
+  });
+
+  it('光标上的东西不算材料', () => {
+    const { screen } = opened((inv) => inv.setSlot(0, logs(1)), grid());
+    screen.clickSlot(0);
+    expect(screen.cursor).toEqual(logs(1));
+    expect(entryFor(screen, ItemType.OakPlanks).craftable).toBe(false);
+  });
+
+  /** 配方书里成品是这种物品的那一条排第几。 */
+  function indexOf(screen: InventoryScreen, item: ItemType): number {
+    return screen.crafting!.recipes.findIndex((e) => e.recipe.result.item === item);
+  }
+
+  it('点木板配方：网格里出现原木、背包少 1 原木、输出格显示 4 木板', () => {
+    const extra = grid();
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, logs(3)), extra);
+    screen.clickRecipe(indexOf(screen, ItemType.OakPlanks));
+    expect(extra.slot(0)).toEqual(logs(1));
+    expect(inventory.slot(0)).toEqual(logs(2));
+    expect(screen.crafting!.output).toEqual(PLANKS_X4);
+  });
+
+  it('有序配方贴左上角摆，按格号从小到大从背包取材', () => {
+    const extra = grid();
+    // 木棍要 2 块木板竖排：第 0 格只有 1 块，再从第 5 格拿 1 块
+    const { inventory, screen } = opened((inv) => {
+      inv.setSlot(0, planks(1));
+      inv.setSlot(5, planks(3));
+    }, extra);
+    screen.clickRecipe(indexOf(screen, ItemType.Stick));
+    expect(extra.slot(0)).toEqual(planks(1));
+    expect(extra.slot(2)).toEqual(planks(1));
+    expect(extra.slot(1)).toBeUndefined();
+    expect(inventory.slot(0)).toBeUndefined();
+    expect(inventory.slot(5)).toEqual(planks(2));
+    expect(screen.crafting!.output).toEqual({ item: ItemType.Stick, count: 4 });
+  });
+
+  it('点击时网格里原有材料先回背包，再取材', () => {
+    const extra = grid();
+    extra.setSlot(3, dirt(5));
+    const { inventory, screen } = opened((inv) => inv.setSlot(2, logs(1)), extra);
+    screen.clickRecipe(indexOf(screen, ItemType.OakPlanks));
+    // 泥土回背包落到第 0 格，原木从第 2 格取走摆进网格第 0 格
+    expect(inventory.slot(0)).toEqual(dirt(5));
+    expect(inventory.slot(2)).toBeUndefined();
+    expect(extra.slot(0)).toEqual(logs(1));
+    expect(extra.slot(3)).toBeUndefined();
+  });
+
+  it('网格里原有的材料回背包之后也算材料：原木在网格里，点木板配方照样摆', () => {
+    const extra = grid();
+    extra.setSlot(3, logs(1));
+    const { screen } = opened(() => {}, extra);
+    expect(entryFor(screen, ItemType.OakPlanks).craftable).toBe(true);
+    screen.clickRecipe(indexOf(screen, ItemType.OakPlanks));
+    expect(extra.slot(0)).toEqual(logs(1));
+    expect(extra.slot(3)).toBeUndefined();
+  });
+
+  it('点不可合成的配方无事发生', () => {
+    const extra = grid();
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, logs(1)), extra);
+    screen.clickRecipe(indexOf(screen, ItemType.Stick));
+    expect(inventory.slot(0)).toEqual(logs(1));
+    for (let i = 0; i < extra.size; i++) expect(extra.slot(i)).toBeUndefined();
+  });
+
+  it('取材不会拿光标上的东西', () => {
+    const extra = grid();
+    const { inventory, screen } = opened((inv) => {
+      inv.setSlot(0, logs(1));
+      inv.setSlot(1, logs(1));
+    }, extra);
+    screen.clickSlot(0);
+    screen.clickRecipe(indexOf(screen, ItemType.OakPlanks));
+    expect(screen.cursor).toEqual(logs(1));
+    expect(inventory.slot(1)).toBeUndefined();
+    expect(extra.slot(0)).toEqual(logs(1));
+  });
+
+  it('界面关着、下标指不到配方时什么都不发生', () => {
+    const extra = grid();
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, logs(1)), extra);
+    screen.clickRecipe(-1);
+    screen.clickRecipe(RECIPES.length);
+    screen.clickRecipe(Number.NaN);
+    expect(inventory.slot(0)).toEqual(logs(1));
+    screen.toggle();
+    screen.clickRecipe(indexOf(screen, ItemType.OakPlanks));
+    expect(inventory.slot(0)).toEqual(logs(1));
+    expect(extra.slot(0)).toBeUndefined();
+  });
+
+  it('背包全满、网格里的东西回不去时不摆料，东西留在原格', () => {
+    const extra = grid();
+    extra.setSlot(3, dirt(5));
+    const { inventory, screen } = opened((inv) => {
+      inv.add(dirt(35 * 64));
+      inv.setSlot(35, logs(1));
+    }, extra);
+    screen.clickRecipe(indexOf(screen, ItemType.OakPlanks));
+    expect(extra.slot(3)).toEqual(dirt(5));
+    expect(extra.slot(0)).toBeUndefined();
+    expect(inventory.slot(35)).toEqual(logs(1));
+  });
+
+  it('没附加网格的界面点配方什么都不发生', () => {
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, logs(1)));
+    screen.clickRecipe(0);
+    expect(inventory.slot(0)).toEqual(logs(1));
   });
 });

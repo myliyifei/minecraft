@@ -24,7 +24,20 @@ export const STRINGS = {
   craftingOutput: '输出格',
   // 工作台界面的标题：使用键对着工作台打开的那一层。
   craftingTable: '工作台',
+  // 两套合成界面右侧那块面板：列出这块网格能做的配方，点一条自动摆料。
+  recipeBook: '配方书',
+  // 读屏软件报一条配方时缀在成品名后面的状态：材料够不够。
+  recipeCraftable: '可合成',
+  recipeUncraftable: '材料不足',
 } as const;
+
+/**
+ * 读屏软件报配方书里的一条时的文字：成品名，加材料够不够。
+ * 与 `STRINGS` 同在这个文件里：中间那个顿号也是玩家可见的文字，不在别处拼。
+ */
+export function recipeLabel(itemName: string, craftable: boolean): string {
+  return `${itemName}，${craftable ? STRINGS.recipeCraftable : STRINGS.recipeUncraftable}`;
+}
 
 /**
  * 物品名。与 `STRINGS` 分开是因为它按物品种类索引，加一种物品不补这张表就编译不过。

@@ -322,14 +322,24 @@ body {
   font-family: var(--font-ui);
 }
 
-/* 面板：标题在上，合成网格与输出格居中，储物格与快捷栏两片格子在下，间距仍是 --tile 的倍数。 */
+/*
+ * 面板分两栏：左栏是标题、合成网格与输出格、储物格与快捷栏，右栏是配方书。
+ * 两栏顶端对齐，间距仍是 --tile 的倍数。
+ */
 .invscreen__panel {
-  display: grid;
+  display: flex;
+  align-items: flex-start;
   gap: var(--tile);
-  justify-items: center;
   padding: var(--tile);
   background: rgb(0 0 0 / 55%);
   box-shadow: inset 0 0 0 2px rgb(255 255 255 / 20%);
+}
+
+/* 左栏：标题在上，合成网格与输出格居中，储物格与快捷栏两片格子在下。 */
+.invscreen__main {
+  display: grid;
+  gap: var(--tile);
+  justify-items: center;
 }
 
 .invscreen__title {
@@ -392,6 +402,72 @@ body {
 .invscreen__slot:hover,
 .invscreen__output:hover {
   background: rgb(255 255 255 / 30%);
+}
+
+/*
+ * 配方书：面板右栏的一列，每条是成品图标加名字。列宽随最长的名字走，高度随条数走；
+ * 条数多到超过左栏的高度时这一列自己滚动，面板高度不变。
+ */
+.invscreen__recipes {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+  max-height: calc(var(--slot-cell) * 8 + var(--tile) * 4);
+  overflow-y: auto;
+  padding: 2px;
+  background: rgb(0 0 0 / 35%);
+}
+
+.invscreen__recipe-list {
+  display: grid;
+  gap: 2px;
+}
+
+.invscreen__recipes-title {
+  padding: calc(var(--tile) / 4) calc(var(--tile) / 2);
+  font-size: var(--tile);
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  text-shadow: 1px 1px 0 var(--ink);
+}
+
+/*
+ * 一条配方：与格子同一种底色与内描边，图标在左、名字在右。写成 button 是为了键盘也能点，
+ * 浏览器给按钮的默认样式在这里全部去掉。
+ */
+.invscreen__recipe {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--tile) / 2);
+  padding-right: calc(var(--tile) / 2);
+  border: 0;
+  background: rgb(255 255 255 / 14%);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 35%);
+  font: inherit;
+  font-size: calc(var(--tile) * 0.875);
+  color: #fff;
+  text-align: left;
+  text-shadow: 1px 1px 0 var(--ink);
+  cursor: pointer;
+}
+
+.invscreen__recipe:hover {
+  background: rgb(255 255 255 / 30%);
+}
+
+/* 材料不够的那条暗着：整条半透明，图标也跟着灰。点了无事发生，那是核心的规则。 */
+.invscreen__recipe[data-craftable="false"] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 一条配方里的成品图标：与格子同一档尺寸，让它和网格里的格子对得齐。 */
+.invscreen__recipe-icon {
+  display: grid;
+  place-items: center;
+  width: var(--slot-cell);
+  height: var(--slot-cell);
 }
 
 /*

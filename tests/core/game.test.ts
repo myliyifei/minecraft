@@ -1278,6 +1278,61 @@ describe('GameCore 的合成网格与输出格', () => {
   });
 });
 
+describe('GameCore 的配方书', () => {
+  /** 手上有一个原木、背包界面开着的核心（理由见上面那组的 `openedWithOneLog`）。 */
+  function openedWithOneLog(): GameCore {
+    const core = coreOnFlatGround();
+    core.setBlock(...UNDERFOOT, BlockType.OakLog);
+    digUnderfoot(core, BlockType.OakLog);
+    core.toggleInventory();
+    core.tick();
+    return core;
+  }
+
+  /** 配方书里成品是这种物品的那一条排第几。 */
+  function recipeIndex(core: GameCore, item: ItemType): number {
+    return core.inventoryScreen.crafting!.recipes.findIndex((e) => e.recipe.result.item === item);
+  }
+
+  it('有 1 原木时木板配方亮着、木棍配方暗着', () => {
+    const core = openedWithOneLog();
+    const recipes = core.inventoryScreen.crafting!.recipes;
+    expect(recipes.find((e) => e.recipe.result.item === ItemType.OakPlanks)!.craftable).toBe(true);
+    expect(recipes.find((e) => e.recipe.result.item === ItemType.Stick)!.craftable).toBe(false);
+  });
+
+  it('点配方下一个 tick 生效（ADR-0004）：原木进网格，输出格显示木板', () => {
+    const core = openedWithOneLog();
+    core.clickRecipe(recipeIndex(core, ItemType.OakPlanks));
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.OakLog, count: 1 });
+    core.tick();
+    const crafting = core.inventoryScreen.crafting!;
+    expect(core.inventory.slot(0)).toBeUndefined();
+    expect(crafting.slot(0)).toEqual({ item: ItemType.OakLog, count: 1 });
+    expect(crafting.output).toEqual({ item: ItemType.OakPlanks, count: 4 });
+  });
+
+  it('点配方与点格子按先后顺序在同一个 tick 里处理', () => {
+    const core = openedWithOneLog();
+    // 先摆料，再点输出格拿成品，再把成品放到第 20 格：三下都在这一 tick 里
+    core.clickRecipe(recipeIndex(core, ItemType.OakPlanks));
+    core.clickCraftingOutput();
+    core.clickSlot(20);
+    core.tick();
+    expect(core.inventory.slot(20)).toEqual({ item: ItemType.OakPlanks, count: 4 });
+    expect(core.inventoryScreen.crafting!.slot(0)).toBeUndefined();
+  });
+
+  it('界面关着时点配方无事发生', () => {
+    const core = openedWithOneLog();
+    core.toggleInventory();
+    core.tick();
+    core.clickRecipe(recipeIndex(core, ItemType.OakPlanks));
+    core.tick();
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.OakLog, count: 1 });
+  });
+});
+
 describe('GameCore 的工作台', () => {
   /** 眼睛那一层：站在平地上，眼睛在脚上方约 1.6 格，落在地表之上第二格里。 */
   const EYE_LAYER_Y = FLAT_GROUND_Y + 2;

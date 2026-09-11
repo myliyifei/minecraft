@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { ItemType } from '../../src/core/item';
 import {
   RECIPES,
+  ingredientCounts,
+  layoutRecipe,
+  recipesFor,
   matchRecipe,
   recipeFits,
   type GridContents,
@@ -296,5 +299,63 @@ describe('配方摆得进哪种网格', () => {
     };
     expect(recipeFits(five, TWO_BY_TWO)).toBe(false);
     expect(recipeFits(five, THREE_BY_THREE)).toBe(true);
+  });
+});
+
+describe('配方书列出哪些配方', () => {
+  it('2x2 的配方书不列出需要 3x3 的配方，3x3 的列出，顺序照配方表', () => {
+    const table: Recipe[] = [WIDE, ...RECIPES];
+    expect(recipesFor(TWO_BY_TWO, table)).toEqual(RECIPES);
+    expect(recipesFor(THREE_BY_THREE, table)).toEqual(table);
+  });
+
+  it('默认列的是配方表', () => {
+    expect(recipesFor(TWO_BY_TWO)).toEqual(RECIPES);
+  });
+});
+
+describe('配方书自动摆料的图案', () => {
+  it('有序配方贴左上角、不镜像', () => {
+    // 右上泥土、左上原木、左下原木的镜像图案摆出来还是原图案：左上泥土
+    expect(layoutRecipe(ASYMMETRIC_MIRRORED, THREE_BY_THREE)).toEqual([
+      ItemType.Dirt, ItemType.OakLog, undefined,
+      ItemType.OakLog, undefined, undefined,
+      undefined, undefined, undefined,
+    ]);
+  });
+
+  it('无序配方的材料从左上角起按行排开', () => {
+    const pair: Recipe = {
+      kind: 'shapeless',
+      result: PLANKS_X4,
+      ingredients: [ItemType.Dirt, ItemType.OakLog, ItemType.Dirt],
+    };
+    expect(layoutRecipe(pair, TWO_BY_TWO)).toEqual([
+      ItemType.Dirt, ItemType.OakLog,
+      ItemType.Dirt, undefined,
+    ]);
+  });
+
+  it('摆出来的图案正好匹配这条配方本身', () => {
+    for (const recipe of RECIPES) {
+      expect(matchRecipe(layoutRecipe(recipe, TWO_BY_TWO), TWO_BY_TWO)).toEqual(recipe.result);
+    }
+  });
+});
+
+describe('配方要哪些材料', () => {
+  it('有序配方数图案里的非空格，同种的合计', () => {
+    expect(ingredientCounts(ASYMMETRIC)).toEqual(
+      new Map([[ItemType.Dirt, 1], [ItemType.OakLog, 2]]),
+    );
+  });
+
+  it('无序配方数材料表', () => {
+    const pair: Recipe = {
+      kind: 'shapeless',
+      result: PLANKS_X4,
+      ingredients: [ItemType.Dirt, ItemType.Dirt],
+    };
+    expect(ingredientCounts(pair)).toEqual(new Map([[ItemType.Dirt, 2]]));
   });
 });

@@ -22,13 +22,16 @@ import {
 } from './world';
 
 /**
- * 界面上的一下点击：点了第几格，或点了输出格。
+ * 界面上的一下点击：点了第几格、点了输出格，或点了配方书的第几条。
  *
- * 两种点击排进同一条队列而不是两条：「放进网格、点输出格、把成品放到别处」是同一个 tick
- * 里可能连着来的三下，分成两条队列就丢了先后。点的是哪个界面不必记：同一时刻最多开
+ * 三种点击排进同一条队列而不是三条：「点配方摆料、点输出格、把成品放到别处」是同一个 tick
+ * 里可能连着来的三下，分成几条队列就丢了先后。点的是哪个界面不必记：同一时刻最多开
  * 一个界面，点击就落在开着的那个上。
  */
-type ScreenClick = { readonly kind: 'slot'; readonly index: number } | { readonly kind: 'output' };
+type ScreenClick =
+  | { readonly kind: 'slot'; readonly index: number }
+  | { readonly kind: 'output' }
+  | { readonly kind: 'recipe'; readonly index: number };
 
 const OUTPUT_CLICK: ScreenClick = Object.freeze({ kind: 'output' });
 
@@ -91,7 +94,7 @@ export class GameCore implements BlockEdit {
   private useQueued = false;
   /** 这一 tick 里按过背包键没有。 */
   private toggleQueued = false;
-  /** 这一 tick 里在界面上点过哪些地方（格子与输出格），按点击顺序。 */
+  /** 这一 tick 里在界面上点过哪些地方（格子、输出格与配方书），按点击顺序。 */
   private readonly screenClicks: ScreenClick[] = [];
 
   constructor(options: GameCoreOptions = {}) {
@@ -280,6 +283,14 @@ export class GameCore implements BlockEdit {
     this.screenClicks.push(OUTPUT_CLICK);
   }
 
+  /**
+   * 点开着的那个界面的配方书第 index 条，下一个 tick 生效（ADR-0004）。与点格子、点输出格
+   * 排在同一条队列里。摆料的规则在 `InventoryScreen.clickRecipe` 里。
+   */
+  clickRecipe(index: number): void {
+    this.screenClicks.push({ kind: 'recipe', index });
+  }
+
   /** 本世界的种子。地形完全由它决定，端到端测试用它断言「同一种子同一个世界」。 */
   get seed(): number {
     return this.worldSeed;
@@ -418,6 +429,7 @@ export class GameCore implements BlockEdit {
     if (active) {
       for (const click of this.screenClicks) {
         if (click.kind === 'slot') active.clickSlot(click.index);
+        else if (click.kind === 'recipe') active.clickRecipe(click.index);
         else active.clickOutput();
       }
     }

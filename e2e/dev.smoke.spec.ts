@@ -35,6 +35,7 @@ import {
   TILE_PX,
   tileCell,
 } from '../src/render/atlas';
+import { RECIPES } from '../src/core/recipe';
 import { ITEM_NAMES, STRINGS } from '../src/ui/strings';
 import {
   countCanvasColors,
@@ -251,6 +252,40 @@ async function walkWhileHolding(
   }, ticks);
   await page.keyboard.up(code);
   return walk;
+}
+
+/**
+ * 通过调试句柄往背包里放 1 个原木：脚下那块换成原木再挖来。核心没有直接往背包里塞物品的
+ * 入口，「放进背包」走的就是这条路。配方书那两条测试共用。
+ */
+async function giveOneLog(page: Page): Promise<void> {
+  await page.evaluate(
+    ({ pitch, logTicks, pickupTicks, oakLog }) => {
+      const core = window.__VOXEL__!.core;
+      const { x, y, z } = core.player.position;
+      core.setBlock(Math.floor(x), Math.floor(y) - 1, Math.floor(z), oakLog);
+      core.turn(0, -pitch);
+      core.setMining(true);
+      core.tick(logTicks);
+      core.setMining(false);
+      core.tick(pickupTicks);
+    },
+    {
+      pitch: MAX_PITCH,
+      logTicks: miningTicks(BlockType.OakLog, BARE_HAND),
+      pickupTicks: PICKUP_DELAY_TICKS + 2,
+      oakLog: BlockType.OakLog,
+    },
+  );
+}
+
+/** 打开背包界面：开合直接给核心，下一个 tick 生效。 */
+async function openInventoryScreen(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const core = window.__VOXEL__!.core;
+    core.toggleInventory();
+    core.tick();
+  });
 }
 
 const errors: string[] = [];
@@ -1741,26 +1776,8 @@ test('背包界面里点一格拿起泥土，再点空格放下', async ({ page 
 test('背包界面里有 2x2 合成网格与输出格，放进原木后输出格出现木板，点它拿走', async ({ page }) => {
   // 脚下那块换成原木再挖来：东西只能挖来，核心没有往背包里塞物品的入口。挖掘与开合都
   // 直接给核心，理由同上一条。
-  await page.evaluate(
-    ({ pitch, logTicks, pickupTicks, oakLog }) => {
-      const core = window.__VOXEL__!.core;
-      const { x, y, z } = core.player.position;
-      core.setBlock(Math.floor(x), Math.floor(y) - 1, Math.floor(z), oakLog);
-      core.turn(0, -pitch);
-      core.setMining(true);
-      core.tick(logTicks);
-      core.setMining(false);
-      core.tick(pickupTicks);
-      core.toggleInventory();
-      core.tick();
-    },
-    {
-      pitch: MAX_PITCH,
-      logTicks: miningTicks(BlockType.OakLog, BARE_HAND),
-      pickupTicks: PICKUP_DELAY_TICKS + 2,
-      oakLog: BlockType.OakLog,
-    },
-  );
+  await giveOneLog(page);
+  await openInventoryScreen(page);
 
   const screen = page.locator('#inventory-screen');
   await expect(screen).toBeVisible();
@@ -1935,6 +1952,83 @@ test('两堆木板竖排进合成网格，输出格出现带图标与中文名�
   await expect(icon).toBeVisible();
   await expect(icon).toHaveCSS('--tile-col', String(col));
   await expect(icon).toHaveCSS('--tile-row', String(row));
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 配方书里成品是这种物品的那一条。按成品图标定位而不是按 data-recipe 的序号：序号是核心按
+ * 网格尺寸过滤之后的下标，配方表里加进 3x3 专属配方之后，2x2 那本的序号就与配方表对不上了。
+ */
+function recipeEntry(book: Locator, item: ItemType): Locator {
+  return book.locator('[data-recipe]', {
+    has: book.page().locator(`.invscreen__recipe-icon[data-item="${item}"]`),
+  });
+}
+
+/**
+ * 在一层开着的界面里验配方书：面板在、文案来自字符串表、木板配方亮着而木棍配方暗着；
+ * 点木板配方之后原木进网格、背包那一格空了、输出格显示 4 块木板；点暗着的木棍配方无事发生。
+ */
+async function expectRecipeBookWorks(page: Page, screenId: string): Promise<void> {
+  const book = page.locator(`#${screenId} .invscreen__recipes`);
+  await expect(book).toBeVisible();
+  await expect(book).toHaveAttribute('aria-label', STRINGS.recipeBook);
+  await expect(book.locator('.invscreen__recipes-title')).toHaveText(STRINGS.recipeBook);
+  // 配方表的每一条都摆得进 2x2，两套界面因此列的都是整张表
+  await expect(book.locator('[data-recipe]')).toHaveCount(RECIPES.length);
+
+  const planks = recipeEntry(book, ItemType.OakPlanks);
+  const sticks = recipeEntry(book, ItemType.Stick);
+  await expect(planks).toHaveAttribute('data-craftable', 'true');
+  await expect(planks).toHaveAttribute('aria-disabled', 'false');
+  await expect(planks.locator('.invscreen__recipe-name')).toHaveText(ITEM_NAMES[ItemType.OakPlanks]);
+  await expect(planks.locator('.invscreen__recipe-icon')).toHaveAttribute(
+    'data-item',
+    String(ItemType.OakPlanks),
+  );
+  await expect(sticks).toHaveAttribute('data-craftable', 'false');
+  await expect(sticks).toHaveAttribute('aria-disabled', 'true');
+
+  // 点暗着的木棍配方：原木还在第一格，网格空着
+  const first = page.locator(`#${screenId} .invscreen__slot[data-slot="0"]`);
+  const gridFirst = page.locator(`#${screenId} .invscreen__grid .invscreen__slot`).first();
+  const output = page.locator(`#${screenId} [data-output]`);
+  await expect(first).toHaveAttribute('data-item', String(ItemType.OakLog));
+  await sticks.click();
+  await page.waitForTimeout(100);
+  await expect(first).toHaveAttribute('data-item', String(ItemType.OakLog));
+  await expect(gridFirst).not.toHaveAttribute('data-item', /./);
+  await expect(output).not.toHaveAttribute('data-item', /./);
+
+  // 点亮着的木板配方：原木进网格左上角，背包那一格空了，输出格图标变为木板
+  await planks.click();
+  await expect(gridFirst).toHaveAttribute('data-item', String(ItemType.OakLog));
+  await expect(first).not.toHaveAttribute('data-item', /./);
+  await expect(output).toHaveAttribute('data-item', String(ItemType.OakPlanks));
+  await expect(output.locator('.invscreen__count')).toHaveText('4');
+  // 原木进了网格，背包里没有了：木板配方仍然亮着，因为网格里的也算材料
+  await expect(planks).toHaveAttribute('data-craftable', 'true');
+}
+
+test('背包界面右侧有配方书，点木板配方自动摆料，输出格出现木板', async ({ page }) => {
+  await giveOneLog(page);
+  await openInventoryScreen(page);
+  await expect(page.locator('#inventory-screen')).toBeVisible();
+  await expectRecipeBookWorks(page, 'inventory-screen');
+  expect(errors).toEqual([]);
+});
+
+test('工作台界面右侧也有配方书，点木板配方自动摆料', async ({ page }) => {
+  await giveOneLog(page);
+  // 挖完站在一格深的坑里，工作台摆在眼前那一格，使用键直接给核心
+  await setTableAhead(page);
+  await page.evaluate(() => {
+    const core = window.__VOXEL__!.core;
+    core.use();
+    core.tick();
+  });
+  await expect(page.locator('#crafting-table-screen')).toBeVisible();
+  await expectRecipeBookWorks(page, 'crafting-table-screen');
   expect(errors).toEqual([]);
 });
 

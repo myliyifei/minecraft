@@ -1966,15 +1966,15 @@ function recipeEntry(book: Locator, item: ItemType): Locator {
 }
 
 /**
- * 在一层开着的界面里验配方书：面板在、文案来自字符串表、木板配方亮着而木棍配方暗着；
- * 点木板配方之后原木进网格、背包那一格空了、输出格显示 4 块木板；点暗着的木棍配方无事发生。
+ * 在一层开着的界面里验配方书：面板在、文案来自字符串表、木板配方高亮而木棍配方灰显；
+ * 点木板配方之后原木进网格、背包那一格空了、输出格显示 4 块木板；点灰显的木棍配方没有任何反应。
  */
 async function expectRecipeBookWorks(page: Page, screenId: string): Promise<void> {
   const book = page.locator(`#${screenId} .invscreen__recipes`);
   await expect(book).toBeVisible();
   await expect(book).toHaveAttribute('aria-label', STRINGS.recipeBook);
   await expect(book.locator('.invscreen__recipes-title')).toHaveText(STRINGS.recipeBook);
-  // 配方表的每一条都摆得进 2x2，两套界面因此列的都是整张表
+  // 配方表的每一条都摆得进 2x2，两个界面因此列的都是整张表
   await expect(book.locator('[data-recipe]')).toHaveCount(RECIPES.length);
 
   const planks = recipeEntry(book, ItemType.OakPlanks);
@@ -1989,30 +1989,30 @@ async function expectRecipeBookWorks(page: Page, screenId: string): Promise<void
   await expect(sticks).toHaveAttribute('data-craftable', 'false');
   await expect(sticks).toHaveAttribute('aria-disabled', 'true');
 
-  // 点暗着的木棍配方：原木还在第一格，网格空着
+  // 点灰显的木棍配方：原木还在第一格，网格空着
   const first = page.locator(`#${screenId} .invscreen__slot[data-slot="0"]`);
   const gridFirst = page.locator(`#${screenId} .invscreen__grid .invscreen__slot`).first();
   const output = page.locator(`#${screenId} [data-output]`);
   await expect(first).toHaveAttribute('data-item', String(ItemType.OakLog));
-  // 暗着的那条带 aria-disabled，Playwright 会把它当成不可点的按钮一直等下去；这里要验的
-  // 正是「点了无事发生」，所以跳过可点性检查直接点
+  // 灰显的那条带 aria-disabled，Playwright 会把它当成不可点的按钮一直等下去；这里要验的
+  // 正是「点了没有任何反应」，所以跳过可点性检查直接点
   await sticks.click({ force: true });
   await page.waitForTimeout(100);
   await expect(first).toHaveAttribute('data-item', String(ItemType.OakLog));
   await expect(gridFirst).not.toHaveAttribute('data-item', /./);
   await expect(output).not.toHaveAttribute('data-item', /./);
 
-  // 点亮着的木板配方：原木进网格左上角，背包那一格空了，输出格图标变为木板
+  // 点高亮的木板配方：原木进网格左上角，背包那一格空了，输出格图标变为木板
   await planks.click();
   await expect(gridFirst).toHaveAttribute('data-item', String(ItemType.OakLog));
   await expect(first).not.toHaveAttribute('data-item', /./);
   await expect(output).toHaveAttribute('data-item', String(ItemType.OakPlanks));
   await expect(output.locator('.invscreen__count')).toHaveText('4');
-  // 原木进了网格，背包里没有了：木板配方仍然亮着，因为网格里的也算材料
+  // 原木进了网格，背包里没有了：木板配方仍然高亮，因为网格里的也算材料
   await expect(planks).toHaveAttribute('data-craftable', 'true');
 }
 
-test('背包界面右侧有配方书，点木板配方自动摆料，输出格出现木板', async ({ page }) => {
+test('背包界面右侧有配方书，点木板配方自动填入材料，输出格出现木板', async ({ page }) => {
   await giveOneLog(page);
   await openInventoryScreen(page);
   await expect(page.locator('#inventory-screen')).toBeVisible();
@@ -2020,7 +2020,7 @@ test('背包界面右侧有配方书，点木板配方自动摆料，输出格�
   expect(errors).toEqual([]);
 });
 
-test('工作台界面右侧也有配方书，点木板配方自动摆料', async ({ page }) => {
+test('工作台界面右侧也有配方书，点木板配方自动填入材料', async ({ page }) => {
   await giveOneLog(page);
   // 挖完站在一格深的坑里，工作台摆在眼前那一格，使用键直接给核心
   await setTableAhead(page);

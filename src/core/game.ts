@@ -24,7 +24,7 @@ import {
 /**
  * 界面上的一下点击：点了第几格、点了输出格，或点了配方书的第几条。
  *
- * 三种点击排进同一条队列而不是三条：「点配方摆料、点输出格、把成品放到别处」是同一个 tick
+ * 三种点击排进同一条队列而不是三条：「点配方填入材料、点输出格、把成品放到别处」是同一个 tick
  * 里可能连着来的三下，分成几条队列就丢了先后。点的是哪个界面不必记：同一时刻最多开
  * 一个界面，点击就落在开着的那个上。
  */
@@ -285,7 +285,7 @@ export class GameCore implements BlockEdit {
 
   /**
    * 点开着的那个界面的配方书第 index 条，下一个 tick 生效（ADR-0004）。与点格子、点输出格
-   * 排在同一条队列里。摆料的规则在 `InventoryScreen.clickRecipe` 里。
+   * 排在同一条队列里。填入材料的规则在 `InventoryScreen.clickRecipe` 里。
    */
   clickRecipe(index: number): void {
     this.screenClicks.push({ kind: 'recipe', index });

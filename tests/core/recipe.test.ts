@@ -185,7 +185,7 @@ describe('有序配方的匹配规则（测试内构造的配方）', () => {
     expect(matchRecipe(right, TWO_BY_TWO, [TALL])).toEqual(PLANKS_X4);
   });
 
-  it('图案在 3x3 里贴左上角与贴右下角都识别', () => {
+  it('图案在 3x3 里靠左上角与靠右下角都识别', () => {
     const topLeft = grid(THREE_BY_THREE, [0, ItemType.Dirt], [3, ItemType.OakLog]);
     const bottomRight = grid(THREE_BY_THREE, [5, ItemType.Dirt], [8, ItemType.OakLog]);
     expect(matchRecipe(topLeft, THREE_BY_THREE, [TALL])).toEqual(PLANKS_X4);
@@ -314,9 +314,9 @@ describe('配方书列出哪些配方', () => {
   });
 });
 
-describe('配方书自动摆料的图案', () => {
-  it('有序配方贴左上角、不镜像', () => {
-    // 右上泥土、左上原木、左下原木的镜像图案摆出来还是原图案：左上泥土
+describe('配方书自动填入材料的图案', () => {
+  it('有序配方靠左上角对齐、不镜像', () => {
+    // 允许镜像的配方填出来的仍是原图案（左上泥土），不是它的镜像（右上泥土）
     expect(layoutRecipe(ASYMMETRIC_MIRRORED, THREE_BY_THREE)).toEqual([
       ItemType.Dirt, ItemType.OakLog, undefined,
       ItemType.OakLog, undefined, undefined,
@@ -336,7 +336,7 @@ describe('配方书自动摆料的图案', () => {
     ]);
   });
 
-  it('摆出来的图案正好匹配这条配方本身', () => {
+  it('填出来的图案正好匹配这条配方本身', () => {
     for (const recipe of RECIPES) {
       expect(matchRecipe(layoutRecipe(recipe, TWO_BY_TWO), TWO_BY_TWO)).toEqual(recipe.result);
     }

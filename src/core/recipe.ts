@@ -136,8 +136,8 @@ export function ingredientCounts(recipe: Recipe): Map<ItemType, number> {
 }
 
 /**
- * 配方书自动摆料时网格各格摆什么：图案贴左上角、不镜像；无序配方的材料从左上角起按行
- * 排开。每格只有种类，数量都是 1——摆料一格只放 1 个。调用方要先用 `recipeFits` 确认
+ * 配方书自动填入材料时网格各格放什么：图案靠左上角对齐、不镜像；无序配方的材料从左上角
+ * 起按行排开。每格只有种类，数量都是 1——每格只填 1 个。调用方要先用 `recipeFits` 确认
  * 摆得进去。
  */
 export function layoutRecipe(recipe: Recipe, size: GridSize): GridContents {

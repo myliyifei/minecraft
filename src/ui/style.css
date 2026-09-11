@@ -457,7 +457,7 @@ body {
   background: rgb(255 255 255 / 30%);
 }
 
-/* 材料不够的那条暗着：整条半透明，图标也跟着灰。点了无事发生，那是核心的规则。 */
+/* 材料不足的那条灰显：整条半透明，图标也跟着灰。点了没有任何反应，那是核心的规则。 */
 .invscreen__recipe[data-craftable="false"] {
   opacity: 0.4;
   cursor: default;

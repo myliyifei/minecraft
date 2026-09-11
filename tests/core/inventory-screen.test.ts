@@ -478,7 +478,7 @@ describe('输出格：网格里凑成配方就显示成品，点它拿走', () =
   });
 });
 
-describe('配方书：列出这块网格能做的配方，材料够的亮着', () => {
+describe('配方书：列出这块网格能做的配方，材料充足的高亮', () => {
   /** 配方书里成品是这种物品的那一条。 */
   function entryFor(screen: InventoryScreen, item: ItemType) {
     const entry = screen.crafting!.recipes.find((e) => e.recipe.result.item === item);
@@ -527,7 +527,7 @@ describe('配方书：列出这块网格能做的配方，材料够的亮着', (
     expect(screen.crafting!.output).toEqual(PLANKS_X4);
   });
 
-  it('有序配方贴左上角摆，按格号从小到大从背包取材', () => {
+  it('有序配方靠左上角对齐，按格号从小到大从背包取出材料', () => {
     const extra = grid();
     // 木棍要 2 块木板竖排：第 0 格只有 1 块，再从第 5 格拿 1 块
     const { inventory, screen } = opened((inv) => {
@@ -543,19 +543,19 @@ describe('配方书：列出这块网格能做的配方，材料够的亮着', (
     expect(screen.crafting!.output).toEqual({ item: ItemType.Stick, count: 4 });
   });
 
-  it('点击时网格里原有材料先回背包，再取材', () => {
+  it('点击时网格里原有的材料先退回背包，再取出材料', () => {
     const extra = grid();
     extra.setSlot(3, dirt(5));
     const { inventory, screen } = opened((inv) => inv.setSlot(2, logs(1)), extra);
     screen.clickRecipe(indexOf(screen, ItemType.OakPlanks));
-    // 泥土回背包落到第 0 格，原木从第 2 格取走摆进网格第 0 格
+    // 泥土退回背包落到第 0 格，原木从第 2 格取走填入网格第 0 格
     expect(inventory.slot(0)).toEqual(dirt(5));
     expect(inventory.slot(2)).toBeUndefined();
     expect(extra.slot(0)).toEqual(logs(1));
     expect(extra.slot(3)).toBeUndefined();
   });
 
-  it('网格里原有的材料回背包之后也算材料：原木在网格里，点木板配方照样摆', () => {
+  it('网格里原有的材料也算材料：原木在网格里，点木板配方照样填', () => {
     const extra = grid();
     extra.setSlot(3, logs(1));
     const { screen } = opened(() => {}, extra);
@@ -565,7 +565,7 @@ describe('配方书：列出这块网格能做的配方，材料够的亮着', (
     expect(extra.slot(3)).toBeUndefined();
   });
 
-  it('点不可合成的配方无事发生', () => {
+  it('点不可合成的配方没有任何反应', () => {
     const extra = grid();
     const { inventory, screen } = opened((inv) => inv.setSlot(0, logs(1)), extra);
     screen.clickRecipe(indexOf(screen, ItemType.Stick));
@@ -573,7 +573,7 @@ describe('配方书：列出这块网格能做的配方，材料够的亮着', (
     for (let i = 0; i < extra.size; i++) expect(extra.slot(i)).toBeUndefined();
   });
 
-  it('取材不会拿光标上的东西', () => {
+  it('取材料时不会拿光标上的物品', () => {
     const extra = grid();
     const { inventory, screen } = opened((inv) => {
       inv.setSlot(0, logs(1));
@@ -599,7 +599,7 @@ describe('配方书：列出这块网格能做的配方，材料够的亮着', (
     expect(extra.slot(0)).toBeUndefined();
   });
 
-  it('背包全满、网格里的东西回不去时不摆料，东西留在原格', () => {
+  it('背包全满、网格里的物品退不回去时不填入材料，物品留在原格', () => {
     const extra = grid();
     extra.setSlot(3, dirt(5));
     const { inventory, screen } = opened((inv) => {

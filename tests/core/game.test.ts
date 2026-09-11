@@ -1294,7 +1294,7 @@ describe('GameCore 的配方书', () => {
     return core.inventoryScreen.crafting!.recipes.findIndex((e) => e.recipe.result.item === item);
   }
 
-  it('有 1 原木时木板配方亮着、木棍配方暗着', () => {
+  it('有 1 个原木时木板配方高亮、木棍配方灰显', () => {
     const core = openedWithOneLog();
     const recipes = core.inventoryScreen.crafting!.recipes;
     expect(recipes.find((e) => e.recipe.result.item === ItemType.OakPlanks)!.craftable).toBe(true);
@@ -1314,7 +1314,7 @@ describe('GameCore 的配方书', () => {
 
   it('点配方与点格子按先后顺序在同一个 tick 里处理', () => {
     const core = openedWithOneLog();
-    // 先摆料，再点输出格拿成品，再把成品放到第 20 格：三下都在这一 tick 里
+    // 先填入材料，再点输出格拿成品，再把成品放到第 20 格：三下都在这一 tick 里
     core.clickRecipe(recipeIndex(core, ItemType.OakPlanks));
     core.clickCraftingOutput();
     core.clickSlot(20);
@@ -1323,7 +1323,7 @@ describe('GameCore 的配方书', () => {
     expect(core.inventoryScreen.crafting!.slot(0)).toBeUndefined();
   });
 
-  it('界面关着时点配方无事发生', () => {
+  it('界面关着时点配方没有任何反应', () => {
     const core = openedWithOneLog();
     core.toggleInventory();
     core.tick();

@@ -53,7 +53,7 @@ export const CRAFTING_TABLE_SCREEN_LABEL: InventoryScreenLabel = {
  * 配方书面板，以及一个跟着鼠标走的光标物品。工作台界面是同一层的另一份实例：网格 3x3，
  * 标题换成「工作台」。
  *
- * 开着没有、光标上拿着什么、点一格之后东西怎么搬、输出格里显示什么、配方书里哪条亮着，
+ * 开着没有、光标上拿着什么、点一格之后东西怎么搬、输出格里显示什么、配方书里哪条高亮，
  * 全都在核心里（`src/core/inventory-screen.ts`）。这里只做两件事：把核心的状态画成格子，
  * 把点击的格号（或「点了输出格」「点了第几条配方」）递回去。
  *
@@ -142,8 +142,8 @@ export function installInventoryScreen(
    * 点一格：把格号递给核心；点输出格、点配方书的一条递的是另外两条指令。
    *
    * 事件委托挂在覆盖层上而不是几十个格子各挂一个：格子是一次建好不再变的，但一个监听器
-   * 比几十个好卸。点在格子之间的空隙上什么都不做。暗着的配方也照递：点了无事发生是核心
-   * 的规则，这里不重复判。
+   * 比几十个好卸。点在格子之间的空隙上什么都不做。灰显的配方也照递：点了没有任何反应是
+   * 核心的规则，这里不重复判。
    */
   const onClick = (event: MouseEvent): void => {
     followPointer(event);
@@ -259,14 +259,14 @@ function buildCraftingHud(area: CraftingView | undefined): CraftingHud | undefin
 /** 配方书的 DOM 与刷新。 */
 interface RecipeBookHud {
   readonly root: HTMLElement;
-  /** 让每条配方的亮暗跟上核心。 */
+  /** 让每条配方的高亮与灰显跟上核心。 */
   update(): void;
 }
 
 /** 配方书里的一条：按钮，以及上次画的亮暗。 */
 interface RecipeRow {
   readonly button: HTMLButtonElement;
-  /** 上一次画的是亮着还是暗着。与当前相同就不碰 DOM。 */
+  /** 上一次画的是高亮还是灰显。与当前相同就不碰 DOM。 */
   lastCraftable?: boolean;
 }
 
@@ -274,9 +274,9 @@ interface RecipeRow {
  * 造配方书（见 CONTEXT.md）：一列按钮，每条是成品图标加名字。界面没带合成网格时不造。
  *
  * 配方那几条是固定的（核心按网格尺寸过滤配方表，之后不再变），所以按钮一次建好；每帧只刷
- * 亮暗。按钮带 data-recipe，点击处理与端到端测试据此认出点的是第几条。暗着的用
+ * 高亮与灰显。按钮带 data-recipe，点击处理与端到端测试据此认出点的是第几条。灰显的用
  * aria-disabled 而不是 disabled：disabled 的按钮不发 click，也没有 hover 加亮，玩家点了
- * 得不到任何反馈；而「点了无事发生」本来就是核心的规则，界面层不重复判。
+ * 得不到任何反馈；而「点了没有任何反应」本来就是核心的规则，界面层不重复判。
  */
 function buildRecipeBook(area: CraftingView | undefined): RecipeBookHud | undefined {
   if (!area) return undefined;

@@ -237,6 +237,9 @@ describe('放置表', () => {
     ['木板放下去是木板方块', ItemType.OakPlanks, BlockType.OakPlanks],
     ['工作台放下去是工作台方块', ItemType.CraftingTable, BlockType.CraftingTable],
     ['木棍放不下去', ItemType.Stick, null],
+    ['木镐放不下去', ItemType.WoodenPickaxe, null],
+    ['木斧放不下去', ItemType.WoodenAxe, null],
+    ['木铲放不下去', ItemType.WoodenShovel, null],
   ];
 
   for (const [name, item, block] of PLACED) {

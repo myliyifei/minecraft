@@ -18,6 +18,11 @@ function logs(count: number): { item: ItemType; count: number } {
   return { item: ItemType.OakLog, count };
 }
 
+/** 一把木镐。 */
+function pickaxe(): { item: ItemType; count: number } {
+  return { item: ItemType.WoodenPickaxe, count: 1 };
+}
+
 /** 非空格子的下标与内容，好写成一条断言。 */
 function filledSlots(inventory: InventoryView): Array<[number, ItemType, number]> {
   const out: Array<[number, ItemType, number]> = [];
@@ -95,7 +100,22 @@ describe('物品进背包', () => {
     ]);
   });
 
-  it('堆叠上限是 64', () => {
+  it('两把木镐各占一格：工具不可堆叠', () => {
+    const inventory = new Inventory();
+    expect(inventory.add(pickaxe())).toBe(0);
+    expect(inventory.add(pickaxe())).toBe(0);
+    expect(filledSlots(inventory)).toEqual([
+      [0, ItemType.WoodenPickaxe, 1],
+      [1, ItemType.WoodenPickaxe, 1],
+    ]);
+    // 泥土那条规则不受影响
+    expect(inventory.add(dirt(65))).toBe(0);
+    expect(inventory.slot(2)).toEqual(dirt(64));
+    expect(inventory.slot(3)).toEqual(dirt(1));
+  });
+
+  it('堆叠上限是 64，工具是 1', () => {
+    expect(stackLimit(ItemType.WoodenPickaxe)).toBe(1);
     // 上限写死在这里而不是从 stackLimit 反读：那样改坏数据表这条也照样通过
     expect(stackLimit(ItemType.Dirt)).toBe(64);
     expect(stackLimit(ItemType.OakLog)).toBe(64);

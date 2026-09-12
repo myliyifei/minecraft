@@ -145,7 +145,7 @@ export class InventoryScreen implements InventoryScreenView {
    * - 光标空、格里有东西：拿起整堆，那一格空了。
    * - 光标有东西、格是空的：整堆放下。
    * - 两边同种：并进那一格，超过堆叠上限的余量留在光标上。
-   * - 两边异种：交换。
+   * - 两边异种，或两边是同种工具（堆叠上限 1）：交换。
    *
    * 界面关着、下标指不到格子、两边都是空的时候什么都不发生。
    */
@@ -169,8 +169,10 @@ export class InventoryScreen implements InventoryScreenView {
     const cursor = holding.stack;
 
     // 异种要换手，`mergeInto` 表达不了这一种，单独一条。换来的那一堆是从这一格拿的，
-    // 所以「从哪儿拿的」跟着换。
-    if (inSlot && inSlot.item !== cursor.item) {
+    // 所以「从哪儿拿的」跟着换。同种但堆叠上限是 1 的（两把同种工具）也走这条：并不进去，
+    // 「满了所以什么都不发生」对可堆叠物品是对的，对工具玩家要的是换一把——两把工具
+    // 各有自己的耐久（#22），换与不换不是一回事。
+    if (inSlot && (inSlot.item !== cursor.item || stackLimit(cursor.item) === 1)) {
       ref.batch.setSlot(ref.local, cursor);
       this.holding = { stack: inSlot, from: index };
       return;

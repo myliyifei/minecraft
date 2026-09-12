@@ -1545,6 +1545,185 @@ describe('GameCore 的工作台', () => {
   });
 });
 
+describe('GameCore 的木制工具', () => {
+  /** 站在一格深的坑里朝 −Z 平视时，正前方两格远的那一格：工作台摆在这儿。 */
+  const TABLE_FROM_PIT: [number, number, number] = [0, FLAT_GROUND_Y + 1, -2];
+  /** 站在坑里平视时正前方紧挨着的那一格：第二根原木摆在这儿再挖来。 */
+  const AHEAD_FROM_PIT: [number, number, number] = [0, FLAT_GROUND_Y + 1, -1];
+  const PICKAXE = { item: ItemType.WoodenPickaxe, count: 1 };
+  const STICKS_X4 = { item: ItemType.Stick, count: 4 };
+
+  /** 工作台界面的配方书里成品是这种物品的那一条排第几。 */
+  function tableRecipeIndex(core: GameCore, item: ItemType): number {
+    const recipes = core.craftingTableScreen.crafting!.recipes;
+    return recipes.findIndex((e) => e.recipe.result.item === item);
+  }
+
+  /**
+   * 手上有两根原木、站在一格深的坑里、正前方两格摆着工作台并对准它的核心。
+   *
+   * 原木只能挖来（理由见 `holdingDirt`）：脚下那块换成原木挖穿，再在眼前那一格摆一根挖掉，
+   * 掉落物落在脚边拾起。工作台由 `setBlock` 摆进世界，理由见「GameCore 的工作台」那一节。
+   */
+  function withTwoLogsFacingTable(): GameCore {
+    const core = coreOnFlatGround();
+    core.setBlock(...UNDERFOOT, BlockType.OakLog);
+    digUnderfoot(core, BlockType.OakLog);
+
+    core.setBlock(...AHEAD_FROM_PIT, BlockType.OakLog);
+    look(core, 0, 0);
+    core.tick();
+    core.setMining(true);
+    core.tick(miningTicks(BlockType.OakLog, BARE_HAND));
+    core.setMining(false);
+    core.tick(PICKUP_TICKS);
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.OakLog, count: 2 });
+
+    core.setBlock(...TABLE_FROM_PIT, BlockType.CraftingTable);
+    core.tick();
+    expect(core.mining.target).toMatchObject(toVec(TABLE_FROM_PIT));
+    return core;
+  }
+
+  /**
+   * 在开着的工作台界面里，用配方书把两根原木变成 8 块木板（第 20 格）与 4 根木棍（第 21 格），
+   * 再造一把木镐放进第 `into` 格。全部点击排在同一个 tick 里（ADR-0004）。
+   */
+  function craftPickaxeInto(core: GameCore, into: number): void {
+    const planks = tableRecipeIndex(core, ItemType.OakPlanks);
+    // 每次填入 1 个原木、出 4 块木板：两次都放到第 20 格，第二次并进去
+    core.clickRecipe(planks);
+    core.clickCraftingOutput();
+    core.clickSlot(20);
+    core.clickRecipe(planks);
+    core.clickCraftingOutput();
+    core.clickSlot(20);
+    // 2 块木板出 4 根木棍，放到第 21 格
+    core.clickRecipe(tableRecipeIndex(core, ItemType.Stick));
+    core.clickCraftingOutput();
+    core.clickSlot(21);
+    // 3 块木板加 2 根木棍出木镐
+    core.clickRecipe(tableRecipeIndex(core, ItemType.WoodenPickaxe));
+    core.clickCraftingOutput();
+    core.clickSlot(into);
+    core.tick();
+  }
+
+  /** 造好一把木镐放在选中格（第 0 格）、关掉工作台界面、仍然对着工作台的核心。 */
+  function holdingPickaxe(): GameCore {
+    const core = withTwoLogsFacingTable();
+    core.use();
+    core.tick();
+    craftPickaxeInto(core, 0);
+    core.toggleInventory();
+    core.tick();
+    expect(core.craftingTableScreen.open).toBe(false);
+    return core;
+  }
+
+  it('工作台的配方书列出木镐、木斧、木铲，背包界面的不列', () => {
+    const core = withTwoLogsFacingTable();
+    core.use();
+    core.tick();
+    const table = core.craftingTableScreen.crafting!.recipes.map((e) => e.recipe.result.item);
+    expect(table).toContain(ItemType.WoodenPickaxe);
+    expect(table).toContain(ItemType.WoodenAxe);
+    expect(table).toContain(ItemType.WoodenShovel);
+    const pocket = core.inventoryScreen.crafting!.recipes.map((e) => e.recipe.result.item);
+    expect(pocket).not.toContain(ItemType.WoodenPickaxe);
+  });
+
+  it('两根原木在工作台里一路造出木镐：木板与木棍各剩几个，木镐在手上', () => {
+    const core = holdingPickaxe();
+    expect(core.inventory.held).toEqual(PICKAXE);
+    // 8 块木板用了 2 + 3，4 根木棍用了 2
+    expect(core.inventory.slot(20)).toEqual({ item: ItemType.OakPlanks, count: 3 });
+    expect(core.inventory.slot(21)).toEqual({ item: ItemType.Stick, count: 2 });
+    expect(core.craftingTableScreen.cursor).toBeUndefined();
+  });
+
+  it('造完一把还剩 3 块木板加 2 根木棍，镐、斧、铲三条都高亮；再造一把就都灰显', () => {
+    const core = withTwoLogsFacingTable();
+    core.use();
+    core.tick();
+    craftPickaxeInto(core, 0);
+    const craftable = (item: ItemType): boolean =>
+      core.craftingTableScreen.crafting!.recipes.find((e) => e.recipe.result.item === item)!
+        .craftable;
+    expect(craftable(ItemType.WoodenPickaxe)).toBe(true);
+    expect(craftable(ItemType.WoodenAxe)).toBe(true);
+    expect(craftable(ItemType.WoodenShovel)).toBe(true);
+
+    core.clickRecipe(tableRecipeIndex(core, ItemType.WoodenPickaxe));
+    core.clickCraftingOutput();
+    core.clickSlot(1);
+    core.tick();
+    expect(craftable(ItemType.WoodenPickaxe)).toBe(false);
+    expect(craftable(ItemType.WoodenAxe)).toBe(false);
+    expect(craftable(ItemType.WoodenShovel)).toBe(false);
+  });
+
+  it('再造一把木镐放到同一格，两把交换而不是并成一堆，各占一格', () => {
+    const core = withTwoLogsFacingTable();
+    core.use();
+    core.tick();
+    craftPickaxeInto(core, 0);
+    // 剩 3 块木板加 2 根木棍，再造一把；点第 0 格时那里已经有一把，两者交换，再放进第 1 格
+    core.clickRecipe(tableRecipeIndex(core, ItemType.WoodenPickaxe));
+    core.clickCraftingOutput();
+    core.clickSlot(0);
+    expect(core.craftingTableScreen.cursor).toBeUndefined();
+    core.tick();
+    expect(core.craftingTableScreen.cursor).toEqual(PICKAXE);
+    expect(core.inventory.slot(0)).toEqual(PICKAXE);
+    core.clickSlot(1);
+    core.tick();
+    expect(core.inventory.slot(0)).toEqual(PICKAXE);
+    expect(core.inventory.slot(1)).toEqual(PICKAXE);
+    expect(core.inventory.slot(20)).toBeUndefined();
+    expect(core.inventory.slot(21)).toBeUndefined();
+  });
+
+  it('木棍那一步出的是 4 根一堆：木棍可堆叠，工具才不可', () => {
+    const core = withTwoLogsFacingTable();
+    core.use();
+    core.tick();
+    core.clickRecipe(tableRecipeIndex(core, ItemType.OakPlanks));
+    core.clickCraftingOutput();
+    core.clickSlot(20);
+    core.clickRecipe(tableRecipeIndex(core, ItemType.Stick));
+    core.clickCraftingOutput();
+    core.tick();
+    expect(core.craftingTableScreen.cursor).toEqual(STICKS_X4);
+  });
+
+  it('手持木镐对着泥土按使用键不放置：泥土上方那一格仍是空气，木镐还在手上', () => {
+    const core = holdingPickaxe();
+    // 侧过去斜看旁边那一格，把它换成泥土：手上是泥土时这一下会把泥土放在它顶上
+    core.setBlock(...ASIDE, BlockType.Dirt);
+    look(core, EAST_YAW, ASIDE_PITCH);
+    core.tick();
+    expect(core.mining.target).toMatchObject(toVec(ASIDE));
+    core.takeChangedBlocks();
+
+    core.use();
+    core.tick();
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Air);
+    expect(core.inventory.held).toEqual(PICKAXE);
+    expect(core.takeChangedBlocks()).toEqual([]);
+    expect(core.uiMode).toBe(false);
+  });
+
+  it('手持木镐对着工作台按使用键照样打开工作台界面', () => {
+    const core = holdingPickaxe();
+    expect(core.mining.target).toMatchObject(toVec(TABLE_FROM_PIT));
+    core.use();
+    core.tick();
+    expect(core.craftingTableScreen.open).toBe(true);
+    expect(core.inventory.held).toEqual(PICKAXE);
+  });
+});
+
 describe('GameCore 的初始区块加载', () => {
   it('构造后已加载区块数大于 0', () => {
     expect(new GameCore().loadedChunkCount).toBeGreaterThan(0);

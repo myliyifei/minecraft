@@ -42,10 +42,54 @@ export interface ShapelessRecipe {
 
 export type Recipe = ShapedRecipe | ShapelessRecipe;
 
+/** 一件工具：配方的成品都是一把。 */
+function one(item: ItemType): ItemStack {
+  return { item, count: 1 };
+}
+
+/**
+ * 镐、斧、铲三件工具的配方，头部用 `head` 材质、柄是木棍。木制用木板，石制（#23）用圆石，
+ * 三条图案不变——所以图案只写一遍，材质当参数传进来。
+ *
+ * 镐与铲的图案左右对称，镜像与否结果相同，写 false；斧的刃只在一边，左右镜像的摆法也算。
+ */
+function toolRecipes(head: ItemType, pickaxe: ItemType, axe: ItemType, shovel: ItemType): Recipe[] {
+  const S = ItemType.Stick;
+  return [
+    {
+      kind: 'shaped',
+      result: one(pickaxe),
+      pattern: [
+        [head, head, head],
+        [undefined, S, undefined],
+        [undefined, S, undefined],
+      ],
+      mirrored: false,
+    },
+    {
+      kind: 'shaped',
+      result: one(axe),
+      pattern: [
+        [head, head],
+        [head, S],
+        [undefined, S],
+      ],
+      mirrored: true,
+    },
+    {
+      kind: 'shaped',
+      result: one(shovel),
+      pattern: [[head], [S], [S]],
+      mirrored: false,
+    },
+  ];
+}
+
 /**
  * 配方表——纯数据（见 CONTEXT.md 的「合成」）。加配方只加一条。
  *
- * 目前有原木出木板、木板出木棍、木板出工作台三条。六件工具（#21、#23）随各自的票加进来。
+ * 目前有原木出木板、木板出木棍、木板出工作台三条，加木制的镐、斧、铲三条。石制三件（#23）
+ * 再加一组 `toolRecipes`。
  */
 export const RECIPES: ReadonlyArray<Recipe> = [
   {
@@ -70,6 +114,12 @@ export const RECIPES: ReadonlyArray<Recipe> = [
     ],
     mirrored: false,
   },
+  ...toolRecipes(
+    ItemType.OakPlanks,
+    ItemType.WoodenPickaxe,
+    ItemType.WoodenAxe,
+    ItemType.WoodenShovel,
+  ),
 ];
 
 /**

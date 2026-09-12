@@ -7,7 +7,14 @@ import type { ItemType } from '../core/item';
 import { PLAYER_EYE_HEIGHT } from '../core/player';
 import type { Vec3 } from '../core/vec3';
 import { XP_ORB_SIZE } from '../core/xp-orb';
-import { CRACK_STAGES, crackStage, itemCubeUvs } from './atlas';
+import {
+  CRACK_STAGES,
+  HeldItemShape,
+  crackStage,
+  heldItemShape,
+  itemCubeUvs,
+  itemIconUvs,
+} from './atlas';
 import { dropBob, dropSpin } from './drop-motion';
 import { buildChunkMesh, type MeshData } from './mesh';
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes, staleChunksFor } from './mesh-plan';
@@ -30,6 +37,14 @@ const HELD_ITEM_DISTANCE = 0.72;
 
 /** 手持方块的边长（方块）。 */
 const HELD_ITEM_SIZE = 0.36;
+
+/**
+ * 手持平面图标（木棍、工具）的边长（方块）。
+ *
+ * 比方块大一截：立方体转过角度之后在画面上占的是它的对角线，一张同边长的平面看上去
+ * 就小了一圈，而且图标四周还留着透明边。
+ */
+const HELD_ICON_SIZE = 0.52;
 
 /**
  * 手持方块的姿态（弧度）。
@@ -166,7 +181,9 @@ export interface XpOrbRenderView {
 export interface HeldItemRenderView {
   /** 手上那种物品。 */
   readonly item: ItemType;
-  /** 小方块中心投在画布上的位置（归一化设备坐标，x 右为正、y 上为正）。 */
+  /** 画的是立方体还是平面图标（`heldItemShape`）。端到端测试据此断言工具没被画成方块。 */
+  readonly shape: HeldItemShape;
+  /** 小方块（或图标）中心投在画布上的位置（归一化设备坐标，x 右为正、y 上为正）。 */
   readonly screen: { readonly x: number; readonly y: number };
 }
 
@@ -213,6 +230,13 @@ export class WorldRenderer {
   private readonly dropMeshes = new Map<number, THREE.Mesh>();
   /** 每种物品的小方块几何体：边长 1，用的人各自缩放。建一次就一直共用。 */
   private readonly itemGeometries = new Map<ItemType, THREE.BufferGeometry>();
+  /** 每种物品的平面图标几何体：边长 1 的一张面。只有手持用它，同样建一次共用。 */
+  private readonly iconGeometries = new Map<ItemType, THREE.BufferGeometry>();
+  /**
+   * 平面图标的材质：与方块同一张图集、同样靠 alphaTest 抠掉图标四周的透明边，但两面都画
+   * ——一张面转过角度之后背面朝着相机的话，单面材质就整张不见了。
+   */
+  private readonly iconMaterial: THREE.Material;
   /**
    * 手持方块单独一个场景、单独一个相机，在世界之后再画一遍（见 `render`）。
    *
@@ -224,9 +248,9 @@ export class WorldRenderer {
   private readonly handCamera: THREE.PerspectiveCamera;
   /** 手持方块这一层只管摆位置（`placeHeldItem`），方块本身是它的子节点。 */
   private readonly handAnchor = new THREE.Group();
-  /** 手上那块方块。空手时还在场景里，只是 `visible` 为 false。 */
+  /** 手上那块方块或那张图标。空手时还在场景里，只是 `visible` 为 false。 */
   private heldItemMesh: THREE.Mesh | undefined;
-  /** 现在画的是哪种物品。与核心的手持不同就换几何体。 */
+  /** 现在画的是哪种物品。与核心的手持不同就换几何体（与材质、大小）。 */
   private heldItemType: ItemType | undefined;
   /** 场景里的经验球小方块，按核心给的编号索引。与掉落物同一套做法，见 ADR-0007。 */
   private readonly xpOrbMeshes = new Map<number, THREE.Mesh>();
@@ -250,6 +274,11 @@ export class WorldRenderer {
       map: texture,
       // 树叶贴图有镂空，用 alphaTest 剔掉透明像素，避免半透明排序问题。
       alphaTest: 0.5,
+    });
+    this.iconMaterial = new THREE.MeshLambertMaterial({
+      map: texture,
+      alphaTest: 0.5,
+      side: THREE.DoubleSide,
     });
 
     // 经验球不吃光照：它是一团光，六个面明暗一致才像发着光，而不像一小块黄绿方块。
@@ -376,7 +405,7 @@ export class WorldRenderer {
     const item = this.heldItemType;
     if (!mesh?.visible || item === undefined) return undefined;
     const { x, y } = mesh.getWorldPosition(new THREE.Vector3()).project(this.handCamera);
-    return { item, screen: { x, y } };
+    return { item, shape: heldItemShape(item), screen: { x, y } };
   }
 
   /** 这个区块的网格有多少个顶点。没建过网格、或者一个面都没有时是 0。 */
@@ -471,11 +500,14 @@ export class WorldRenderer {
   }
 
   /**
-   * 让右下角那块手持方块跟上核心里的手持物品（`InventoryView.held`）。
+   * 让右下角那块手持方块（或那张图标）跟上核心里的手持物品（`InventoryView.held`）。
    *
    * 手持是核心的状态，第一人称里的那块方块纯粹是它的表现——摆在哪儿、转多少度都在
    * 这个文件里，核心不知道画面上有这么一块东西（与掉落物同一套分工，见 ADR-0007）。
    * 只在物品换了的时候动几何体，其余帧一个属性都不碰。
+   *
+   * 方块物品画立方体，木棍与工具画一张竖着的平面图标（`heldItemShape`）：同一个 `Mesh`，
+   * 换的是几何体、材质与大小，姿态两种共用——图标也斜着拿，与方块一样从右下伸进画面。
    */
   private updateHeldItem(): void {
     const item = this.core.inventory.held?.item;
@@ -488,13 +520,22 @@ export class WorldRenderer {
     }
 
     if (!this.heldItemMesh) {
-      const mesh = this.itemMesh(item, HELD_ITEM_SIZE);
+      const mesh = new THREE.Mesh();
       mesh.rotation.set(HELD_ITEM_TILT.x, HELD_ITEM_TILT.y, HELD_ITEM_TILT.z);
       this.handAnchor.add(mesh);
       this.heldItemMesh = mesh;
     }
-    this.heldItemMesh.geometry = this.itemGeometry(item);
-    this.heldItemMesh.visible = true;
+    const mesh = this.heldItemMesh;
+    if (heldItemShape(item) === HeldItemShape.Flat) {
+      mesh.geometry = this.iconGeometry(item);
+      mesh.material = this.iconMaterial;
+      mesh.scale.setScalar(HELD_ICON_SIZE);
+    } else {
+      mesh.geometry = this.itemGeometry(item);
+      mesh.material = this.material;
+      mesh.scale.setScalar(HELD_ITEM_SIZE);
+    }
+    mesh.visible = true;
   }
 
   /**
@@ -600,6 +641,16 @@ export class WorldRenderer {
     // BoxGeometry 默认每个面都铺满整张贴图，得换成图集里那一格，见 itemCubeUvs。
     geometry.setAttribute('uv', new THREE.BufferAttribute(itemCubeUvs(item), 2));
     this.itemGeometries.set(item, geometry);
+    return geometry;
+  }
+
+  /** 某种物品的平面图标几何体：边长 1 的一张面，贴的是图集里它那一格（`itemIconUvs`）。 */
+  private iconGeometry(item: ItemType): THREE.BufferGeometry {
+    const cached = this.iconGeometries.get(item);
+    if (cached) return cached;
+    const geometry = new THREE.PlaneGeometry(1, 1);
+    geometry.setAttribute('uv', new THREE.BufferAttribute(itemIconUvs(item), 2));
+    this.iconGeometries.set(item, geometry);
     return geometry;
   }
 

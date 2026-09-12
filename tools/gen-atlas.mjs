@@ -63,6 +63,23 @@ const TABLE_IRON = [200, 200, 205];
 /** 木棍图标的两端离格子边各留几像素，免得贴到边上。 */
 const STICK_MARGIN = 2;
 
+/**
+ * 工具图标的柄：与木棍同一根斜杆（从左下到右上，沿反对角线 x + y = 15），但只画到
+ * 第 `TOOL_HANDLE_END` 列，右上那一段让给工具头。返回 null 表示这一像素不在柄上。
+ */
+const TOOL_HANDLE_END = 11;
+function toolHandle(x, y, rand) {
+  const offset = x + y - (TILE_PX - 1);
+  if (offset < -1 || offset > 1) return null;
+  if (x < STICK_MARGIN || x >= TOOL_HANDLE_END) return null;
+  return shade(offset === 1 ? STICK_SHADOW : STICK, Math.floor(rand() * 16) - 8);
+}
+
+/** 木制工具头的颜色：比柄浅一档的木色，边上一条暗色让它有厚度、与柄分得开。 */
+function woodenHead(dark, rand) {
+  return shade(dark ? PLANKS_SEAM : TABLE_TOP, Math.floor(rand() * 16) - 8);
+}
+
 /** 每个格号对应的画法：painter(x, y, rand) → [r, g, b, a]。 */
 const TILES = {
   // grass_top
@@ -139,6 +156,29 @@ const TILES = {
     if (hammerHead || sawBlade) return shade(TABLE_IRON, Math.floor(rand() * 20) - 10);
     if (hammerHandle || sawHandle) return shade(STICK_SHADOW, Math.floor(rand() * 12) - 6);
     return TILES[8](x, y, rand);
+  },
+  // wooden_pickaxe：斜柄顶上横着一条与柄垂直的镐头（沿主对角线 x − y = 7 方向），两端略垂
+  13: (x, y, rand) => {
+    const along = x - y - 7;
+    const head = along >= -1 && along <= 1 && x >= 6 && x <= 14 && y >= 0 && y <= 8;
+    if (head) return woodenHead(along === 1, rand);
+    return toolHandle(x, y, rand) ?? [0, 0, 0, 0];
+  },
+  // wooden_axe：斜柄顶端一块楔形的刃挂在柄的左上那一侧，柄的另一侧露出一小截斧背
+  14: (x, y, rand) => {
+    const offset = x + y - (TILE_PX - 1);
+    const blade = offset <= -1 && offset >= -7 && x >= 7 && x <= 11 && y >= 1 && y <= 6;
+    const poll = offset >= 1 && offset <= 2 && x >= 10 && x <= 12 && y >= 3;
+    if (blade) return woodenHead(x === 7 || y === 1, rand);
+    if (poll) return woodenHead(true, rand);
+    return toolHandle(x, y, rand) ?? [0, 0, 0, 0];
+  },
+  // wooden_shovel：斜柄顶上一块圆角的铲面，右下两边是暗面
+  15: (x, y, rand) => {
+    const inBox = x >= 9 && x <= 14 && y >= 0 && y <= 5;
+    const corner = (x === 9 || x === 14) && (y === 0 || y === 5);
+    if (inBox && !corner) return woodenHead(x === 14 || y === 5, rand);
+    return toolHandle(x, y, rand) ?? [0, 0, 0, 0];
   },
 };
 

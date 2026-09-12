@@ -8,12 +8,15 @@ import {
   ATLAS_ROWS,
   BLOCK_TILES,
   CRACK_STAGES,
+  HeldItemShape,
   ITEM_TILES,
   TILE,
   TILE_PX,
   crackStage,
   faceTile,
+  heldItemShape,
   itemCubeUvs,
+  itemIconUvs,
   tileCell,
   tileUvRect,
 } from '../../src/render/atlas';
@@ -81,6 +84,17 @@ describe('物品到贴图格号的映射表', () => {
         expect(tile).toBeGreaterThanOrEqual(0);
         expect(tile).toBeLessThan(capacity);
       }
+    }
+  });
+
+  it('木镐、木斧、木铲各有自己的一格，六面同图', () => {
+    const tools = [ItemType.WoodenPickaxe, ItemType.WoodenAxe, ItemType.WoodenShovel];
+    const icons = tools.map((item) => ITEM_TILES[item]);
+    expect(new Set(icons.map((tiles) => tiles.side)).size).toBe(3);
+    for (const tiles of icons) {
+      expect(tiles.top).toBe(tiles.side);
+      expect(tiles.bottom).toBe(tiles.side);
+      expect(faceTile(tiles, 'front')).toBe(tiles.side);
     }
   });
 
@@ -153,6 +167,46 @@ describe('掉落物小方块的 uv', () => {
         expect(value).toBeLessThanOrEqual(1);
       }
     }
+  });
+});
+
+describe('手持物品画立方体还是平面图标', () => {
+  it('放得下去的方块物品画立方体', () => {
+    for (const item of [ItemType.Dirt, ItemType.OakLog, ItemType.OakPlanks, ItemType.CraftingTable]) {
+      expect(heldItemShape(item), `物品 ${item}`).toBe(HeldItemShape.Cube);
+    }
+  });
+
+  it('木棍与工具没有对应的方块，画平面图标', () => {
+    for (const item of [
+      ItemType.Stick,
+      ItemType.WoodenPickaxe,
+      ItemType.WoodenAxe,
+      ItemType.WoodenShovel,
+    ]) {
+      expect(heldItemShape(item), `物品 ${item}`).toBe(HeldItemShape.Flat);
+    }
+  });
+});
+
+describe('手持平面图标的 uv', () => {
+  it('四个顶点正好落在木镐那一格的四个角上，顺序是左上、右上、左下、右下', () => {
+    const rect = tileUvRect(TILE.woodenPickaxe);
+    expect([...itemIconUvs(ItemType.WoodenPickaxe)]).toEqual([
+      rect.u0,
+      rect.v1,
+      rect.u1,
+      rect.v1,
+      rect.u0,
+      rect.v0,
+      rect.u1,
+      rect.v0,
+    ]);
+  });
+
+  it('取的是正面那一格，与快捷栏图标同一张：工作台是正面而不是侧面', () => {
+    const front = tileUvRect(faceTile(ITEM_TILES[ItemType.CraftingTable], 'front'));
+    expect([...itemIconUvs(ItemType.CraftingTable)].slice(0, 2)).toEqual([front.u0, front.v1]);
   });
 });
 

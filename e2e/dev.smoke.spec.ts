@@ -31,11 +31,12 @@ import {
   ATLAS_COLS,
   ATLAS_ROWS,
   CRACK_STAGES,
+  HeldItemShape,
   ITEM_TILES,
   TILE_PX,
   tileCell,
 } from '../src/render/atlas';
-import { RECIPES } from '../src/core/recipe';
+import { recipesFor, type GridSize } from '../src/core/recipe';
 import { ITEM_NAMES, recipeLabel, STRINGS } from '../src/ui/strings';
 import {
   countCanvasColors,
@@ -1588,6 +1589,117 @@ test('右下角画着手上那块方块，切换选中格时跟着换', async ({
   expect(errors).toEqual([]);
 });
 
+test('在工作台里造出木镐拿在手上：快捷栏画它的图标与中文名，右下角画平面图标而不是立方体', async ({
+  page,
+}) => {
+  await waitForFullViewDistance(page);
+
+  // 原木只能挖来，木镐只能造出来：整段在一次同步的 evaluate 里给核心，读到的就是刚断言的那一帧。
+  const hand = await page.evaluate(
+    ({ pitch, logTicks, dirtTicks, pickupTicks, oakLog, table, eyeHeight, planks, stick, pickaxe }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const pixel = window.__PIXEL_RGB__!;
+      const look = (yaw: number, to: number): void =>
+        core.turn(yaw - core.player.yaw, to - core.player.pitch);
+      const dig = (ticks: number): void => {
+        core.setMining(true);
+        core.tick(ticks);
+        core.setMining(false);
+        core.tick(pickupTicks);
+      };
+      const x = Math.floor(core.player.position.x);
+      const z = Math.floor(core.player.position.z);
+      const groundY = Math.floor(core.player.position.y) - 1;
+
+      // 脚下换成原木挖掉：1 根原木进第一格，玩家掉进一格深的坑
+      core.setBlock(x, groundY, z, oakLog);
+      look(0, -pitch);
+      dig(logTicks);
+      // 坑里平视，眼前那一格摆第二根原木挖掉，掉落物落在脚边拾起
+      const eyeY = Math.floor(core.player.position.y + eyeHeight);
+      core.setBlock(x, eyeY, z - 1, oakLog);
+      look(0, 0);
+      core.tick();
+      dig(logTicks);
+      // 再远一格摆工作台，使用键打开它
+      core.setBlock(x, eyeY, z - 2, table);
+      core.tick();
+      core.use();
+      core.tick();
+      if (!core.craftingTableScreen.open) throw new Error('对着工作台按使用键应该打开工作台界面');
+
+      // 配方书一路点下去：两根原木出 8 块木板（第 20 格），2 块木板出 4 根木棍（第 21 格），
+      // 3 块木板加 2 根木棍出木镐（放进第 0 格，也就是选中格）
+      const recipe = (item: number): number =>
+        core.craftingTableScreen.crafting!.recipes.findIndex((e) => e.recipe.result.item === item);
+      for (let i = 0; i < 2; i++) {
+        core.clickRecipe(recipe(planks));
+        core.clickCraftingOutput();
+        core.clickSlot(20);
+      }
+      core.clickRecipe(recipe(stick));
+      core.clickCraftingOutput();
+      core.clickSlot(21);
+      core.clickRecipe(recipe(pickaxe));
+      core.clickCraftingOutput();
+      core.clickSlot(0);
+      core.toggleInventory();
+      core.tick();
+
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      const tool = renderer.heldItem;
+      if (!tool) throw new Error('手上有木镐时右下角应该画着东西');
+      const toolRgb = pixel(tool.screen.x, tool.screen.y);
+
+      // 低头再挖一块泥土：进第二格，切过去手上就是泥土
+      look(0, -pitch);
+      dig(dirtTicks);
+      core.selectHotbarSlot(1);
+      core.tick();
+      renderer.render(1);
+      const dirt = renderer.heldItem;
+      window.__VOXEL__!.hud.update();
+      return { tool, toolRgb, dirt, hotbar: core.inventory.hotbar() };
+    },
+    {
+      pitch: MAX_PITCH,
+      logTicks: miningTicks(BlockType.OakLog, BARE_HAND),
+      dirtTicks: miningTicks(BlockType.Dirt, BARE_HAND),
+      pickupTicks: PICKUP_DELAY_TICKS + 2,
+      oakLog: BlockType.OakLog,
+      table: BlockType.CraftingTable,
+      eyeHeight: PLAYER_EYE_HEIGHT,
+      planks: ItemType.OakPlanks,
+      stick: ItemType.Stick,
+      pickaxe: ItemType.WoodenPickaxe,
+    },
+  );
+
+  expect(hand.hotbar[0]).toEqual({ item: ItemType.WoodenPickaxe, count: 1 });
+  expect(hand.hotbar[1]).toEqual({ item: ItemType.Dirt, count: 1 });
+
+  // 手持木镐：画的是平面图标，落在右下角，那一处是木柄的褐而不是天空的蓝
+  expect(hand.tool).toMatchObject({ item: ItemType.WoodenPickaxe, shape: HeldItemShape.Flat });
+  expect(hand.tool.screen.x).toBeGreaterThan(0.2);
+  expect(hand.tool.screen.y).toBeLessThan(-0.2);
+  expect(hand.toolRgb[0]).toBeGreaterThan(hand.toolRgb[2]);
+  // 切回泥土又是立方体
+  expect(hand.dirt).toMatchObject({ item: ItemType.Dirt, shape: HeldItemShape.Cube });
+
+  // 快捷栏第一格画的是木镐的图标与中文名；只有一把，不写数字
+  const slot = page.locator('#hotbar .hotbar__slot[data-slot="0"]');
+  await expect(slot).toHaveAttribute('data-item', String(ItemType.WoodenPickaxe));
+  await expect(slot).toHaveAttribute('title', ITEM_NAMES[ItemType.WoodenPickaxe]);
+  await expect(slot.locator('.hotbar__count')).toHaveText('');
+  const { col, row } = tileCell(ITEM_TILES[ItemType.WoodenPickaxe].side);
+  const icon = slot.locator('.hotbar__icon');
+  await expect(icon).toBeVisible();
+  await expect(icon).toHaveCSS('--tile-col', String(col));
+  await expect(icon).toHaveCSS('--tile-row', String(row));
+  expect(errors).toEqual([]);
+});
+
 test('贴着墙站着，手上那块方块不会被墙切穿', async ({ page }) => {
   await waitForFullViewDistance(page);
   // 先挖来一块泥土（顺带把东边那一条铺平）
@@ -1969,13 +2081,13 @@ function recipeEntry(book: Locator, item: ItemType): Locator {
  * 在一层开着的界面里验配方书：面板在、文案来自字符串表、木板配方高亮而木棍配方灰显；
  * 点木板配方之后原木进网格、背包那一格空了、输出格显示 4 块木板；点灰显的木棍配方没有任何反应。
  */
-async function expectRecipeBookWorks(page: Page, screenId: string): Promise<void> {
+async function expectRecipeBookWorks(page: Page, screenId: string, grid: GridSize): Promise<void> {
   const book = page.locator(`#${screenId} .invscreen__recipes`);
   await expect(book).toBeVisible();
   await expect(book).toHaveAttribute('aria-label', STRINGS.recipeBook);
   await expect(book.locator('.invscreen__recipes-title')).toHaveText(STRINGS.recipeBook);
-  // 配方表的每一条都摆得进 2x2，两个界面因此列的都是整张表
-  await expect(book.locator('[data-recipe]')).toHaveCount(RECIPES.length);
+  // 列的是摆得进这块网格的那几条：2x2 的没有工具那三条，3x3 的是整张配方表
+  await expect(book.locator('[data-recipe]')).toHaveCount(recipesFor(grid).length);
 
   const planks = recipeEntry(book, ItemType.OakPlanks);
   const sticks = recipeEntry(book, ItemType.Stick);
@@ -2022,7 +2134,7 @@ test('背包界面右侧有配方书，点木板配方自动填入材料，输�
   await giveOneLog(page);
   await openInventoryScreen(page);
   await expect(page.locator('#inventory-screen')).toBeVisible();
-  await expectRecipeBookWorks(page, 'inventory-screen');
+  await expectRecipeBookWorks(page, 'inventory-screen', INVENTORY_CRAFTING_GRID);
   expect(errors).toEqual([]);
 });
 
@@ -2036,7 +2148,7 @@ test('工作台界面右侧也有配方书，点木板配方自动填入材料',
     core.tick();
   });
   await expect(page.locator('#crafting-table-screen')).toBeVisible();
-  await expectRecipeBookWorks(page, 'crafting-table-screen');
+  await expectRecipeBookWorks(page, 'crafting-table-screen', CRAFTING_TABLE_GRID);
   expect(errors).toEqual([]);
 });
 

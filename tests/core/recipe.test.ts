@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ItemType } from '../../src/core/item';
+import { ItemType, type ItemStack } from '../../src/core/item';
 import {
   RECIPES,
   ingredientCounts,
@@ -98,9 +98,99 @@ describe('配方表里的原木出木板', () => {
     expect(matchRecipe(grid(TWO_BY_TWO, [0, ItemType.Dirt]), TWO_BY_TWO)).toBeUndefined();
   });
 
-  it('配方表的每一条都摆得进 2x2', () => {
-    // 目前只有原木出木板、木板出木棍两条；工具那几条（#21）要 3x3，进表之后这条断言要改
-    for (const recipe of RECIPES) expect(recipeFits(recipe, TWO_BY_TWO)).toBe(true);
+  it('木板、木棍、工作台三条摆得进 2x2，工具那几条要 3x3', () => {
+    const twoByTwo = RECIPES.filter((recipe) => recipeFits(recipe, TWO_BY_TWO)).map(
+      (recipe) => recipe.result.item,
+    );
+    expect(twoByTwo).toEqual([ItemType.OakPlanks, ItemType.Stick, ItemType.CraftingTable]);
+    for (const recipe of RECIPES) expect(recipeFits(recipe, THREE_BY_THREE)).toBe(true);
+  });
+});
+
+describe('配方表里的木制工具', () => {
+  const PICKAXE: ItemStack = { item: ItemType.WoodenPickaxe, count: 1 };
+  const AXE: ItemStack = { item: ItemType.WoodenAxe, count: 1 };
+  const SHOVEL: ItemStack = { item: ItemType.WoodenShovel, count: 1 };
+  const P = ItemType.OakPlanks;
+  const S = ItemType.Stick;
+
+  /** 把一个小图案贴进 3x3 的某个位置：`top`、`left` 是它左上角所在的行与列。 */
+  function placed(
+    pattern: ReadonlyArray<ReadonlyArray<ItemType | undefined>>,
+    top: number,
+    left: number,
+  ): Array<ItemType | undefined> {
+    const contents = empty(THREE_BY_THREE);
+    pattern.forEach((row, r) => {
+      row.forEach((item, c) => {
+        contents[(top + r) * THREE_BY_THREE.width + left + c] = item;
+      });
+    });
+    return contents;
+  }
+
+  /** 镐：三块木板一排，两根木棍从中间竖下来。 */
+  const PICKAXE_PATTERN = [
+    [P, P, P],
+    [undefined, S, undefined],
+    [undefined, S, undefined],
+  ];
+  /** 铲：一块木板，两根木棍竖下来。 */
+  const SHOVEL_PATTERN = [[P], [S], [S]];
+  /** 斧：两块木板在上、一块贴着柄，柄两根木棍。原图案刃在左边。 */
+  const AXE_PATTERN = [
+    [P, P],
+    [P, S],
+    [undefined, S],
+  ];
+  /** 斧的左右镜像：刃在右边。 */
+  const AXE_MIRRORED = AXE_PATTERN.map((row) => [...row].reverse());
+
+  it('3 块木板加 2 根木棍摆成镐的图案出 1 把木镐', () => {
+    expect(matchRecipe(placed(PICKAXE_PATTERN, 0, 0), THREE_BY_THREE)).toEqual(PICKAXE);
+  });
+
+  it('镐的图案占满三行三列，只有一种摆法', () => {
+    // 图案是 3x3 的，在 3x3 里没有别的位置；这里只验少一根木棍就不是镐
+    const contents = placed(PICKAXE_PATTERN, 0, 0);
+    contents[7] = undefined;
+    expect(matchRecipe(contents, THREE_BY_THREE)).toBeUndefined();
+  });
+
+  it('铲的图案在 3x3 的左列、中列、右列都出 1 把木铲', () => {
+    for (let left = 0; left < 3; left++) {
+      expect(matchRecipe(placed(SHOVEL_PATTERN, 0, left), THREE_BY_THREE), `第 ${left} 列`).toEqual(
+        SHOVEL,
+      );
+    }
+  });
+
+  it('斧的原图案与左右镜像都出 1 把木斧，贴左上角或贴右下角都行', () => {
+    expect(matchRecipe(placed(AXE_PATTERN, 0, 0), THREE_BY_THREE)).toEqual(AXE);
+    expect(matchRecipe(placed(AXE_MIRRORED, 0, 0), THREE_BY_THREE)).toEqual(AXE);
+    expect(matchRecipe(placed(AXE_PATTERN, 0, 1), THREE_BY_THREE)).toEqual(AXE);
+    expect(matchRecipe(placed(AXE_MIRRORED, 0, 1), THREE_BY_THREE)).toEqual(AXE);
+  });
+
+  it('斧的图案上下翻转不出', () => {
+    const flipped = [...AXE_PATTERN].reverse();
+    expect(matchRecipe(placed(flipped, 0, 0), THREE_BY_THREE)).toBeUndefined();
+  });
+
+  it('材料不同就不匹配：把木板换成泥土摆出同样的图案，什么都不出', () => {
+    // 圆石代替木板出石制工具要等 #23；这里用泥土验的是「同一图案、材料不同则不匹配」这条规则
+    const swap = (pattern: ReadonlyArray<ReadonlyArray<ItemType | undefined>>) =>
+      pattern.map((row) => row.map((item) => (item === P ? ItemType.Dirt : item)));
+    expect(matchRecipe(placed(swap(PICKAXE_PATTERN), 0, 0), THREE_BY_THREE)).toBeUndefined();
+    expect(matchRecipe(placed(swap(AXE_PATTERN), 0, 0), THREE_BY_THREE)).toBeUndefined();
+    expect(matchRecipe(placed(swap(SHOVEL_PATTERN), 0, 0), THREE_BY_THREE)).toBeUndefined();
+  });
+
+  it('工具的图案摆不进 2x2：背包界面里造不出工具', () => {
+    for (const result of [PICKAXE, AXE, SHOVEL]) {
+      const recipe = RECIPES.find((r) => r.result.item === result.item)!;
+      expect(recipeFits(recipe, TWO_BY_TWO), `物品 ${result.item}`).toBe(false);
+    }
   });
 });
 
@@ -304,13 +394,18 @@ describe('配方摆得进哪种网格', () => {
 
 describe('配方书列出哪些配方', () => {
   it('2x2 的配方书不列出需要 3x3 的配方，3x3 的列出，顺序照配方表', () => {
-    const table: Recipe[] = [WIDE, ...RECIPES];
-    expect(recipesFor(TWO_BY_TWO, table)).toEqual(RECIPES);
+    const table: Recipe[] = [WIDE, TALL];
+    expect(recipesFor(TWO_BY_TWO, table)).toEqual([TALL]);
     expect(recipesFor(THREE_BY_THREE, table)).toEqual(table);
   });
 
-  it('默认列的是配方表', () => {
-    expect(recipesFor(TWO_BY_TWO)).toEqual(RECIPES);
+  it('默认列的是配方表：3x3 列全表，2x2 列摆得进的那三条', () => {
+    expect(recipesFor(THREE_BY_THREE)).toEqual(RECIPES);
+    expect(recipesFor(TWO_BY_TWO).map((recipe) => recipe.result.item)).toEqual([
+      ItemType.OakPlanks,
+      ItemType.Stick,
+      ItemType.CraftingTable,
+    ]);
   });
 });
 
@@ -338,7 +433,9 @@ describe('配方书自动填入材料的图案', () => {
 
   it('填出来的图案正好匹配这条配方本身', () => {
     for (const recipe of RECIPES) {
-      expect(matchRecipe(layoutRecipe(recipe, TWO_BY_TWO), TWO_BY_TWO)).toEqual(recipe.result);
+      expect(matchRecipe(layoutRecipe(recipe, THREE_BY_THREE), THREE_BY_THREE)).toEqual(
+        recipe.result,
+      );
     }
   });
 });

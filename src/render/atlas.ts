@@ -1,4 +1,4 @@
-import { BlockType } from '../core/block';
+import { BlockType, placedBlock } from '../core/block';
 import { ItemType } from '../core/item';
 
 /** 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 4×4 格。 */
@@ -25,6 +25,9 @@ export const TILE = {
   craftingTableTop: 10,
   craftingTableSide: 11,
   craftingTableFront: 12,
+  woodenPickaxe: 13,
+  woodenAxe: 14,
+  woodenShovel: 15,
 } as const;
 
 /**
@@ -97,10 +100,42 @@ export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
     side: TILE.oakLogSide,
   },
   [ItemType.OakPlanks]: { top: TILE.oakPlanks, bottom: TILE.oakPlanks, side: TILE.oakPlanks },
-  // 木棍没有对应的方块，掉落物的小方块六面都贴同一张图标；手持画平面图标要等 #21。
-  [ItemType.Stick]: { top: TILE.stick, bottom: TILE.stick, side: TILE.stick },
+  // 木棍与工具没有对应的方块：掉落物的小方块六面都贴同一张图标，手持画的是平面图标
+  // （`heldItemShape`）。
+  [ItemType.Stick]: flat(TILE.stick),
   [ItemType.CraftingTable]: CRAFTING_TABLE_TILES,
+  [ItemType.WoodenPickaxe]: flat(TILE.woodenPickaxe),
+  [ItemType.WoodenAxe]: flat(TILE.woodenAxe),
+  [ItemType.WoodenShovel]: flat(TILE.woodenShovel),
 };
+
+/** 六面同一张图标的物品（木棍、工具）在 `ITEM_TILES` 里那一行。 */
+function flat(tile: number): FaceTiles {
+  return { top: tile, bottom: tile, side: tile };
+}
+
+/**
+ * 手持物品（见 CONTEXT.md）在第一人称右下角画成什么：方块物品画立方体，其余（木棍、工具）
+ * 画一张竖着的平面图标。
+ *
+ * 值是字符串：渲染层据此挑几何体，端到端测试据此断言画的是哪一种，不进存档。
+ */
+export const HeldItemShape = {
+  Cube: 'cube',
+  Flat: 'flat',
+} as const;
+
+export type HeldItemShape = (typeof HeldItemShape)[keyof typeof HeldItemShape];
+
+/**
+ * 这种物品手持时画立方体还是平面图标。
+ *
+ * 看的是放置表：放得下去的物品就是方块，画立方体；放不下去的（木棍、工具、将来的食物）
+ * 没有「六个面」可画，画图标。不另开一张表——「是不是方块物品」这件事放置表已经记了。
+ */
+export function heldItemShape(item: ItemType): HeldItemShape {
+  return placedBlock(item) === null ? HeldItemShape.Flat : HeldItemShape.Cube;
+}
 
 export interface UvRect {
   readonly u0: number;
@@ -173,6 +208,24 @@ const BOX_FACE_UV: readonly (readonly [number, number])[] = [
   [0, 0],
   [1, 0],
 ];
+
+/**
+ * 一张物品平面图标（手持的木棍与工具）的 uv 数组：`PlaneGeometry` 四个顶点各落在图集里
+ * 那一格的四个角上。取的是 `front`，与快捷栏的图标同一张。
+ *
+ * `PlaneGeometry` 的顶点顺序与 `BoxGeometry` 的一个面相同（左上、右上、左下、右下），
+ * 所以复用 `BOX_FACE_UV`。与 `itemCubeUvs` 一样是纯数据变换，不 import three。
+ */
+export function itemIconUvs(item: ItemType): Float32Array {
+  const rect = tileUvRect(faceTile(ITEM_TILES[item], 'front'));
+  const uvs = new Float32Array(BOX_FACE_UV.length * 2);
+  let i = 0;
+  for (const [du, dv] of BOX_FACE_UV) {
+    uvs[i++] = rect.u0 + du * (rect.u1 - rect.u0);
+    uvs[i++] = rect.v0 + dv * (rect.v1 - rect.v0);
+  }
+  return uvs;
+}
 
 /**
  * 一个物品小方块（掉落物）的 uv 数组：六个面各自映射到图集里的那一格。

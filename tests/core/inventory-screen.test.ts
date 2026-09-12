@@ -18,6 +18,11 @@ function logs(count: number): ItemStack {
 /** 四块木板：原木出木板那条配方的成品。 */
 const PLANKS_X4: ItemStack = { item: ItemType.OakPlanks, count: 4 };
 
+/** 一把木镐：不可堆叠，每把占一格。 */
+function pickaxe(): ItemStack {
+  return { item: ItemType.WoodenPickaxe, count: 1 };
+}
+
 /** 一堆木板。 */
 function planks(count: number): ItemStack {
   return { item: ItemType.OakPlanks, count };
@@ -189,6 +194,42 @@ describe('背包界面的光标物品', () => {
     screen.clickSlot(1);
     expect(inventory.slot(1)).toEqual(dirt(10));
     expect(screen.cursor).toEqual(logs(5));
+  });
+
+  it('拿着一把木镐点另一把木镐，两者交换而不是「满了所以什么都不发生」', () => {
+    // 两把同种工具此刻分不出来（耐久是 #22 的事），能看出交换发生了的是「从哪儿拿的」：
+    // 交换之后光标上那把是从第 5 格拿的，关闭界面时它回第 5 格；没交换的话回第 0 格。
+    // 把第 0 格先占上，两种结果就落在不同的格子里。
+    const { inventory, screen } = opened((inv) => {
+      inv.setSlot(0, pickaxe());
+      inv.setSlot(5, pickaxe());
+    });
+    screen.clickSlot(0);
+    screen.clickSlot(5);
+    expect(screen.cursor).toEqual(pickaxe());
+    expect(inventory.slot(5)).toEqual(pickaxe());
+    expect(inventory.slot(0)).toBeUndefined();
+
+    // 交换来的那把回第 5 格；第 5 格被占，按入包规则落到第一个空格，这时第 0 格放着泥土
+    inventory.setSlot(0, dirt(1));
+    inventory.setSlot(5, undefined);
+    expect(screen.toggle()).toEqual([]);
+    expect(inventory.slot(5)).toEqual(pickaxe());
+    expect(inventory.slot(1)).toBeUndefined();
+  });
+
+  it('拿着泥土点木镐、拿着木镐点泥土都是交换', () => {
+    const { inventory, screen } = opened((inv) => {
+      inv.setSlot(0, dirt(10));
+      inv.setSlot(1, pickaxe());
+    });
+    screen.clickSlot(0);
+    screen.clickSlot(1);
+    expect(inventory.slot(1)).toEqual(dirt(10));
+    expect(screen.cursor).toEqual(pickaxe());
+    screen.clickSlot(1);
+    expect(inventory.slot(1)).toEqual(pickaxe());
+    expect(screen.cursor).toEqual(dirt(10));
   });
 
   it('越界的下标什么都不发生', () => {
@@ -492,11 +533,46 @@ describe('配方书：列出这块网格能做的配方，材料充足的高亮'
     expect(entryFor(screen, ItemType.Stick).craftable).toBe(false);
   });
 
-  it('配方书列的就是摆得进 2x2 的那几条，工作台的 3x3 也一样', () => {
+  it('2x2 的配方书列摆得进它的三条，工作台的 3x3 列整张配方表', () => {
     const { screen } = opened(() => {}, grid());
-    expect(screen.crafting!.recipes.map((e) => e.recipe)).toEqual(RECIPES);
+    expect(screen.crafting!.recipes.map((e) => e.recipe.result.item)).toEqual([
+      ItemType.OakPlanks,
+      ItemType.Stick,
+      ItemType.CraftingTable,
+    ]);
     const table = opened(() => {}, new CraftingGrid({ width: 3, height: 3 }));
     expect(table.screen.crafting!.recipes.map((e) => e.recipe)).toEqual(RECIPES);
+  });
+
+  it('工作台里有 3 块木板加 2 根木棍时镐、斧、铲三条都高亮，木板拿到光标上就都灰显', () => {
+    const { screen } = opened((inv) => {
+      inv.setSlot(0, planks(3));
+      inv.setSlot(1, { item: ItemType.Stick, count: 2 });
+    }, new CraftingGrid({ width: 3, height: 3 }));
+    expect(entryFor(screen, ItemType.WoodenPickaxe).craftable).toBe(true);
+    expect(entryFor(screen, ItemType.WoodenShovel).craftable).toBe(true);
+    expect(entryFor(screen, ItemType.WoodenAxe).craftable).toBe(true);
+    screen.clickSlot(0);
+    // 木板拿在光标上不算材料，三条都灰显
+    expect(entryFor(screen, ItemType.WoodenPickaxe).craftable).toBe(false);
+    expect(entryFor(screen, ItemType.WoodenAxe).craftable).toBe(false);
+    expect(entryFor(screen, ItemType.WoodenShovel).craftable).toBe(false);
+  });
+
+  it('点木镐配方：3 块木板加 2 根木棍按图案填入 3x3，输出格显示 1 把木镐', () => {
+    const extra = new CraftingGrid({ width: 3, height: 3 });
+    const { inventory, screen } = opened((inv) => {
+      inv.setSlot(0, planks(3));
+      inv.setSlot(1, { item: ItemType.Stick, count: 2 });
+    }, extra);
+    screen.clickRecipe(indexOf(screen, ItemType.WoodenPickaxe));
+    expect([0, 1, 2].map((i) => extra.slot(i))).toEqual([planks(1), planks(1), planks(1)]);
+    expect(extra.slot(4)).toEqual({ item: ItemType.Stick, count: 1 });
+    expect(extra.slot(7)).toEqual({ item: ItemType.Stick, count: 1 });
+    expect([3, 5, 6, 8].map((i) => extra.slot(i))).toEqual([undefined, undefined, undefined, undefined]);
+    expect(screen.crafting!.output).toEqual({ item: ItemType.WoodenPickaxe, count: 1 });
+    expect(inventory.slot(0)).toBeUndefined();
+    expect(inventory.slot(1)).toBeUndefined();
   });
 
   it('材料合计背包与网格：木板分在两处凑够 4 块，工作台配方就亮', () => {

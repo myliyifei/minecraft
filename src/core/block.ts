@@ -308,6 +308,10 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   // 木棍只是材料，没有对应的方块。
   [ItemType.Stick]: null,
   [ItemType.CraftingTable]: BlockType.CraftingTable,
+  // 工具放不下去：手里拿着工具按使用键，对着不可使用的方块什么都不发生。
+  [ItemType.WoodenPickaxe]: null,
+  [ItemType.WoodenAxe]: null,
+  [ItemType.WoodenShovel]: null,
 };
 
 /**

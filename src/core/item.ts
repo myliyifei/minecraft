@@ -11,6 +11,9 @@ export const ItemType = {
   OakPlanks: 3,
   Stick: 4,
   CraftingTable: 5,
+  WoodenPickaxe: 6,
+  WoodenAxe: 7,
+  WoodenShovel: 8,
 } as const;
 
 export type ItemType = (typeof ItemType)[keyof typeof ItemType];
@@ -24,7 +27,7 @@ export interface ItemStack {
 /**
  * 工具类别（见 CONTEXT.md 的「工具」）：镐、斧、铲，加一个「无」。
  *
- * 两侧都用它：物品那边说某件工具属于哪一类（工具物品等 #21），方块那边说挖它的
+ * 两侧都用它：物品那边说某件工具属于哪一类（`ToolDef.toolClass`），方块那边说挖它的
  * 正确工具是哪一类（`BlockDef.properTool`）。「无」同时表示三件事——空手、手上那件东西
  * 不是工具、这种方块没有正确工具（树叶）。三者对挖掘的作用相同，不必分开。
  *
@@ -44,7 +47,7 @@ export type ToolClass = (typeof ToolClass)[keyof typeof ToolClass];
  * 手上那件工具在挖掘上起的作用：算不算正确工具看类别，是正确工具时快多少看倍率。
  *
  * 只有这两个数进得了耗时公式，所以挖掘拿到的是它而不是整堆物品——耐久与图标不参与
- * 算耗时。哪种物品对应哪一件工具是物品表的事（#21、#22）。
+ * 算耗时。哪种物品对应哪一件工具是物品表的事（`ToolDef`）；倍率那一列等 #22。
  *
  * 与 `Hand` 不是一回事，别混：`Hand` 是「选中格里那一堆物品」，这里是「那一堆在挖掘
  * 那一步算什么」。空手也有这么一个值（`BARE_HAND`），它不是一只 `Hand`。
@@ -58,26 +61,71 @@ export interface MiningTool {
 /** 空手：没有类别，因此对任何方块都不算正确工具，倍率 1。手上拿着的不是工具时也是它。 */
 export const BARE_HAND: MiningTool = Object.freeze({ toolClass: ToolClass.None, speed: 1 });
 
+/**
+ * 工具的材质档（见 CONTEXT.md 的「材质档」）：木、石。铁、金、钻石等后续切片加值。
+ *
+ * 倍率与最大耐久（#22）按材质档查，不按每件工具各记一份：同一档的镐斧铲三件数值相同，
+ * 记三遍就是三处可能对不上。值是字符串，理由同 `ToolClass`：它不进存档。
+ */
+export const ToolMaterial = {
+  Wood: 'wood',
+  Stone: 'stone',
+} as const;
+
+export type ToolMaterial = (typeof ToolMaterial)[keyof typeof ToolMaterial];
+
+/**
+ * 一件工具是哪一类、哪一档。物品表里工具那几行填它，材料与方块物品没有。
+ *
+ * 两样合成一个对象而不是物品表上的两列：「有类别却没有材质档」这种组合对不上任何物品，
+ * 合在一起类型上就不存在这种行。
+ */
+export interface ToolDef {
+  readonly toolClass: ToolClass;
+  readonly material: ToolMaterial;
+}
+
 export interface ItemDef {
-  /** 一格最多堆多少个。工具那类不可堆叠的物品（后续切片）是 1。 */
+  /** 一格最多堆多少个。工具是 1（`TOOL_STACK_SIZE`）——每把各有自己的耐久（#22）。 */
   readonly stackSize: number;
+  /** 这种物品是哪一件工具，不是工具的物品是 undefined。 */
+  readonly tool: ToolDef | undefined;
 }
 
 /** 可堆叠物品的堆叠上限。与原版一致。 */
 export const DEFAULT_STACK_SIZE = 64;
 
+/** 工具的堆叠上限：每把占一格。 */
+export const TOOL_STACK_SIZE = 1;
+
+/** 物品表里材料与方块物品那一行的形状：可堆叠、不是工具。 */
+const STACKABLE: ItemDef = Object.freeze({ stackSize: DEFAULT_STACK_SIZE, tool: undefined });
+
+/** 物品表里一件工具那一行的形状：每把占一格。 */
+function tool(toolClass: ToolClass, material: ToolMaterial): ItemDef {
+  return { stackSize: TOOL_STACK_SIZE, tool: { toolClass, material } };
+}
+
 /** 物品属性表——纯数据。耐久、食物回复量是后续切片往这里加的数据列。 */
 export const ITEMS: Readonly<Record<ItemType, ItemDef>> = {
-  [ItemType.Dirt]: { stackSize: DEFAULT_STACK_SIZE },
-  [ItemType.OakLog]: { stackSize: DEFAULT_STACK_SIZE },
-  [ItemType.OakPlanks]: { stackSize: DEFAULT_STACK_SIZE },
-  [ItemType.Stick]: { stackSize: DEFAULT_STACK_SIZE },
-  [ItemType.CraftingTable]: { stackSize: DEFAULT_STACK_SIZE },
+  [ItemType.Dirt]: STACKABLE,
+  [ItemType.OakLog]: STACKABLE,
+  [ItemType.OakPlanks]: STACKABLE,
+  [ItemType.Stick]: STACKABLE,
+  [ItemType.CraftingTable]: STACKABLE,
+  [ItemType.WoodenPickaxe]: tool(ToolClass.Pickaxe, ToolMaterial.Wood),
+  [ItemType.WoodenAxe]: tool(ToolClass.Axe, ToolMaterial.Wood),
+  [ItemType.WoodenShovel]: tool(ToolClass.Shovel, ToolMaterial.Wood),
 };
 
 /** 这种物品一格最多堆多少个。 */
 export function stackLimit(item: ItemType): number {
   return ITEMS[item].stackSize;
+}
+
+/** 这种物品是哪一件工具（类别与材质档），不是工具时 undefined。 */
+export function toolOf(item: ItemType): ToolDef | undefined {
+  return ITEMS[item].tool;
 }
 
 /**

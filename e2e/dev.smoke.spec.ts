@@ -1472,21 +1472,22 @@ test('未锁定鼠标时右键不放置', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test('锁定鼠标后右键不弹出浏览器菜单', async ({ page }) => {
-  /** 投一发可取消的 contextmenu，返回它被拦下了没有。 */
-  const menuBlocked = async (): Promise<boolean> =>
-    page.evaluate(() => {
-      const event = new MouseEvent('contextmenu', { cancelable: true });
-      document.dispatchEvent(event);
-      return event.defaultPrevented;
-    });
+/** 投一发可取消的 contextmenu，返回它被输入适配器拦下了没有。 */
+async function menuBlocked(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const event = new MouseEvent('contextmenu', { cancelable: true });
+    document.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+}
 
+test('锁定鼠标后右键不弹出浏览器菜单', async ({ page }) => {
   // 没进第一人称时右键还是浏览器的事
-  expect(await menuBlocked()).toBe(false);
+  expect(await menuBlocked(page)).toBe(false);
 
   // 锁定期间右键是放置，菜单一弹就抢走了后面的按键
   await grabPointer(page);
-  expect(await menuBlocked()).toBe(true);
+  expect(await menuBlocked(page)).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -2248,6 +2249,8 @@ test('右键对着工作台打开工作台界面并交还鼠标，按 E 关闭�
   await expect.poll(() => readLockedElementId(page)).toBe(null);
   await expect(crosshair).toBeHidden();
   await expect(page.locator('#hud')).toBeHidden();
+  // Windows 上的浏览器松开右键才发 contextmenu，这时锁定已经释放：菜单仍然不能弹出来
+  expect(await menuBlocked(page)).toBe(true);
 
   // 标题与无障碍名都是「工作台」；3x3 网格 9 格，格号接在 36 格之后；36 个背包格子也都在
   await expect(screen).toHaveAttribute('aria-label', STRINGS.craftingTable);

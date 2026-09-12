@@ -135,8 +135,13 @@ export function installPlayerControls(
   };
 
   // 锁定期间右键是使用，不该弹出浏览器菜单——菜单一弹就抢走了后面的按键。
+  //
+  // 界面开着时也拦：Windows 上的浏览器在松开右键时才发 contextmenu，而对着工作台按下
+  // 右键之后，界面在下一个 tick 打开、锁定随即被释放，松开那一刻已经不锁着了——只看锁定
+  // 的话，打开工作台界面的那一下右键会把浏览器菜单一起弹出来。界面里的右键将来是拆堆
+  // （#25），同样不该弹菜单。
   const onContextMenu = (event: MouseEvent): void => {
-    if (locked()) event.preventDefault();
+    if (locked() || uiOpen()) event.preventDefault();
   };
 
   const onWheel = (event: WheelEvent): void => {

@@ -1,6 +1,13 @@
 import type { CraftingGrid } from './crafting-grid';
 import { isSlotIndex } from './inventory';
-import { stackLimit, type ItemStack, type ItemType, type SlotBatch, type SlotStore } from './item';
+import {
+  isUnstackable,
+  stackLimit,
+  type ItemStack,
+  type ItemType,
+  type SlotBatch,
+  type SlotStore,
+} from './item';
 import { ingredientCounts, layoutRecipe, recipesFor, type Recipe } from './recipe';
 
 /**
@@ -169,10 +176,9 @@ export class InventoryScreen implements InventoryScreenView {
     const cursor = holding.stack;
 
     // 异种要换手，`mergeInto` 表达不了这一种，单独一条。换来的那一堆是从这一格拿的，
-    // 所以「从哪儿拿的」跟着换。同种但堆叠上限是 1 的（两把同种工具）也走这条：并不进去，
-    // 「满了所以什么都不发生」对可堆叠物品是对的，对工具玩家要的是换一把——两把工具
-    // 各有自己的耐久（#22），换与不换不是一回事。
-    if (inSlot && (inSlot.item !== cursor.item || stackLimit(cursor.item) === 1)) {
+    // 所以「从哪儿拿的」跟着换。两把同种工具也走这条：并不进去，「满了所以没有任何反应」
+    // 对可堆叠物品是对的，对工具玩家要的是换一把（见 `isUnstackable`）。
+    if (inSlot && (inSlot.item !== cursor.item || isUnstackable(cursor.item))) {
       ref.batch.setSlot(ref.local, cursor);
       this.holding = { stack: inSlot, from: index };
       return;

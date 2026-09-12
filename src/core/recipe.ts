@@ -42,18 +42,26 @@ export interface ShapelessRecipe {
 
 export type Recipe = ShapedRecipe | ShapelessRecipe;
 
-/** 一件工具：配方的成品都是一把。 */
+/** 成品只有一个的配方（工作台、工具）的成品那一栏。 */
 function one(item: ItemType): ItemStack {
   return { item, count: 1 };
 }
 
+/** 一档工具：头部用哪种材料，造出来的镐、斧、铲各是哪种物品。 */
+interface ToolTier {
+  readonly head: ItemType;
+  readonly pickaxe: ItemType;
+  readonly axe: ItemType;
+  readonly shovel: ItemType;
+}
+
 /**
- * 镐、斧、铲三件工具的配方，头部用 `head` 材质、柄是木棍。木制用木板，石制（#23）用圆石，
- * 三条图案不变——所以图案只写一遍，材质当参数传进来。
+ * 一档工具的三条配方：头部用 `head` 材料、柄是木棍。木制用木板，石制（#23）用圆石，
+ * 三条图案不变——所以图案只写一遍，材料当参数传进来。
  *
  * 镐与铲的图案左右对称，镜像与否结果相同，写 false；斧的刃只在一边，左右镜像的摆法也算。
  */
-function toolRecipes(head: ItemType, pickaxe: ItemType, axe: ItemType, shovel: ItemType): Recipe[] {
+function toolRecipes({ head, pickaxe, axe, shovel }: ToolTier): Recipe[] {
   const S = ItemType.Stick;
   return [
     {
@@ -107,19 +115,19 @@ export const RECIPES: ReadonlyArray<Recipe> = [
   // 四块木板摆成方形出一个工作台。方形四向对称，镜像与否结果相同，写 false。
   {
     kind: 'shaped',
-    result: { item: ItemType.CraftingTable, count: 1 },
+    result: one(ItemType.CraftingTable),
     pattern: [
       [ItemType.OakPlanks, ItemType.OakPlanks],
       [ItemType.OakPlanks, ItemType.OakPlanks],
     ],
     mirrored: false,
   },
-  ...toolRecipes(
-    ItemType.OakPlanks,
-    ItemType.WoodenPickaxe,
-    ItemType.WoodenAxe,
-    ItemType.WoodenShovel,
-  ),
+  ...toolRecipes({
+    head: ItemType.OakPlanks,
+    pickaxe: ItemType.WoodenPickaxe,
+    axe: ItemType.WoodenAxe,
+    shovel: ItemType.WoodenShovel,
+  }),
 ];
 
 /**

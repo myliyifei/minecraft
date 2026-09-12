@@ -62,14 +62,14 @@ export interface MiningTool {
 export const BARE_HAND: MiningTool = Object.freeze({ toolClass: ToolClass.None, speed: 1 });
 
 /**
- * 工具的材质档（见 CONTEXT.md 的「材质档」）：木、石。铁、金、钻石等后续切片加值。
+ * 工具的材质档（见 CONTEXT.md 的「材质档」）：目前只有木。石（#23）、铁、金、钻石随各自的
+ * 切片加值。
  *
  * 倍率与最大耐久（#22）按材质档查，不按每件工具各记一份：同一档的镐斧铲三件数值相同，
  * 记三遍就是三处可能对不上。值是字符串，理由同 `ToolClass`：它不进存档。
  */
 export const ToolMaterial = {
   Wood: 'wood',
-  Stone: 'stone',
 } as const;
 
 export type ToolMaterial = (typeof ToolMaterial)[keyof typeof ToolMaterial];
@@ -121,6 +121,16 @@ export const ITEMS: Readonly<Record<ItemType, ItemDef>> = {
 /** 这种物品一格最多堆多少个。 */
 export function stackLimit(item: ItemType): number {
   return ITEMS[item].stackSize;
+}
+
+/**
+ * 这种物品一格只放得下一个吗（工具）。
+ *
+ * 背包界面的合并规则对它退化为交换：光标与格里都是同种工具时换手，而不是「满了所以
+ * 没有任何反应」——两把工具各有自己的耐久（#22），换与不换不是一回事。
+ */
+export function isUnstackable(item: ItemType): boolean {
+  return stackLimit(item) === 1;
 }
 
 /** 这种物品是哪一件工具（类别与材质档），不是工具时 undefined。 */

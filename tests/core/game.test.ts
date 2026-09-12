@@ -1633,7 +1633,7 @@ describe('GameCore 的木制工具', () => {
     expect(pocket).not.toContain(ItemType.WoodenPickaxe);
   });
 
-  it('两根原木在工作台里一路造出木镐：木板与木棍各剩几个，木镐在手上', () => {
+  it('两根原木在工作台里三步造出木镐：木板与木棍各剩几个，木镐在手上', () => {
     const core = holdingPickaxe();
     expect(core.inventory.held).toEqual(PICKAXE);
     // 8 块木板用了 2 + 3，4 根木棍用了 2

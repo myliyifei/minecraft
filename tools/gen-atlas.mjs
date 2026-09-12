@@ -80,6 +80,14 @@ function woodenHead(dark, rand) {
   return shade(dark ? PLANKS_SEAM : TABLE_TOP, Math.floor(rand() * 16) - 8);
 }
 
+/**
+ * 一件工具的图标：先画头，头没盖到的地方画柄，其余透明。`head(x, y, rand)` 返回这一像素
+ * 的颜色，不在头上返回 null。
+ */
+function toolIcon(head) {
+  return (x, y, rand) => head(x, y, rand) ?? toolHandle(x, y, rand) ?? [0, 0, 0, 0];
+}
+
 /** 每个格号对应的画法：painter(x, y, rand) → [r, g, b, a]。 */
 const TILES = {
   // grass_top
@@ -158,28 +166,25 @@ const TILES = {
     return TILES[8](x, y, rand);
   },
   // wooden_pickaxe：斜柄顶上横着一条与柄垂直的镐头（沿主对角线 x − y = 7 方向），两端略垂
-  13: (x, y, rand) => {
+  13: toolIcon((x, y, rand) => {
     const along = x - y - 7;
     const head = along >= -1 && along <= 1 && x >= 6 && x <= 14 && y >= 0 && y <= 8;
-    if (head) return woodenHead(along === 1, rand);
-    return toolHandle(x, y, rand) ?? [0, 0, 0, 0];
-  },
+    return head ? woodenHead(along === 1, rand) : null;
+  }),
   // wooden_axe：斜柄顶端一块楔形的刃挂在柄的左上那一侧，柄的另一侧露出一小截斧背
-  14: (x, y, rand) => {
+  14: toolIcon((x, y, rand) => {
     const offset = x + y - (TILE_PX - 1);
     const blade = offset <= -1 && offset >= -7 && x >= 7 && x <= 11 && y >= 1 && y <= 6;
     const poll = offset >= 1 && offset <= 2 && x >= 10 && x <= 12 && y >= 3;
     if (blade) return woodenHead(x === 7 || y === 1, rand);
-    if (poll) return woodenHead(true, rand);
-    return toolHandle(x, y, rand) ?? [0, 0, 0, 0];
-  },
+    return poll ? woodenHead(true, rand) : null;
+  }),
   // wooden_shovel：斜柄顶上一块圆角的铲面，右下两边是暗面
-  15: (x, y, rand) => {
+  15: toolIcon((x, y, rand) => {
     const inBox = x >= 9 && x <= 14 && y >= 0 && y <= 5;
     const corner = (x === 9 || x === 14) && (y === 0 || y === 5);
-    if (inBox && !corner) return woodenHead(x === 14 || y === 5, rand);
-    return toolHandle(x, y, rand) ?? [0, 0, 0, 0];
-  },
+    return inBox && !corner ? woodenHead(x === 14 || y === 5, rand) : null;
+  }),
 };
 
 /**

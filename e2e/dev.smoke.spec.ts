@@ -1628,7 +1628,7 @@ test('在工作台里造出木镐拿在手上：快捷栏画它的图标与中�
       core.tick();
       if (!core.craftingTableScreen.open) throw new Error('对着工作台按使用键应该打开工作台界面');
 
-      // 配方书一路点下去：两根原木出 8 块木板（第 20 格），2 块木板出 4 根木棍（第 21 格），
+      // 依次点配方书：两根原木出 8 块木板（第 20 格），2 块木板出 4 根木棍（第 21 格），
       // 3 块木板加 2 根木棍出木镐（放进第 0 格，也就是选中格）
       const recipe = (item: number): number =>
         core.craftingTableScreen.crafting!.recipes.findIndex((e) => e.recipe.result.item === item);

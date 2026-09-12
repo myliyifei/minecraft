@@ -85,6 +85,11 @@ export const BLOCK_TILES: Readonly<Record<BlockType, FaceTiles | null>> = {
   [BlockType.CraftingTable]: CRAFTING_TABLE_TILES,
 };
 
+/** 六面同一张图标的物品（木棍、工具）在 `ITEM_TILES` 里那一行。 */
+function flat(tile: number): FaceTiles {
+  return { top: tile, bottom: tile, side: tile };
+}
+
 /**
  * 物品在图集里的贴图格号——纯数据。
  *
@@ -108,11 +113,6 @@ export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
   [ItemType.WoodenAxe]: flat(TILE.woodenAxe),
   [ItemType.WoodenShovel]: flat(TILE.woodenShovel),
 };
-
-/** 六面同一张图标的物品（木棍、工具）在 `ITEM_TILES` 里那一行。 */
-function flat(tile: number): FaceTiles {
-  return { top: tile, bottom: tile, side: tile };
-}
 
 /**
  * 手持物品（见 CONTEXT.md）在第一人称右下角画成什么：方块物品画立方体，其余（木棍、工具）

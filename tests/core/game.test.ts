@@ -582,7 +582,7 @@ describe('GameCore 的空手挖掘', () => {
       expect(core.xpOrbs.count).toBe(0);
     });
 
-    it('挖掉脚下那块草，原地生成一个 3 点的经验球', () => {
+    it('挖掉脚下那块草，原地生成一个 30 点的经验球', () => {
       const core = lookingDown();
       core.setMining(true);
       core.tick(GRASS_TICKS);
@@ -590,7 +590,7 @@ describe('GameCore 的空手挖掘', () => {
 
       expect(core.xpOrbs.count).toBe(1);
       const [orb] = core.xpOrbs.all();
-      expect(orb!.amount).toBe(3);
+      expect(orb!.amount).toBe(30);
       expect(Math.floor(orb!.position.x)).toBe(UNDERFOOT[0]);
       expect(Math.floor(orb!.position.y)).toBe(UNDERFOOT[1]);
       expect(Math.floor(orb!.position.z)).toBe(UNDERFOOT[2]);
@@ -605,20 +605,20 @@ describe('GameCore 的空手挖掘', () => {
 
       core.tick(ABSORB_TICKS);
       expect(core.xpOrbs.count).toBe(0);
-      expect(core.experience.total).toBe(3);
+      expect(core.experience.total).toBe(30);
     });
 
-    it('挖原木给 6 点', () => {
+    it('挖原木给 60 点', () => {
       const core = lookingDownAt(BlockType.OakLog);
       core.setMining(true);
       core.tick(miningTicks(BlockType.OakLog, BARE_HAND));
       core.setMining(false);
       core.tick(ABSORB_TICKS);
 
-      expect(core.experience.total).toBe(6);
+      expect(core.experience.total).toBe(60);
     });
 
-    it('空手挖石头拿不到东西，经验照给 3 点', () => {
+    it('空手挖石头拿不到东西，经验照给 30 点', () => {
       const core = lookingDownAt(BlockType.Stone);
       core.setMining(true);
       core.tick(miningTicks(BlockType.Stone, BARE_HAND));
@@ -626,10 +626,10 @@ describe('GameCore 的空手挖掘', () => {
       core.tick(ABSORB_TICKS);
 
       expect(core.inventory.hotbar().every((slot) => slot === undefined)).toBe(true);
-      expect(core.experience.total).toBe(3);
+      expect(core.experience.total).toBe(30);
     });
 
-    it('连着挖十几块，等级从 0 升到 1 以上', () => {
+    it('连着挖十几块，等级升到两位数', () => {
       const core = lookingDown();
       // 平地测试世界里草下面是石头（空手 150 tick 一块），把脚下这一列换成草，
       // 「挖十几块」才是十几个 GRASS_TICKS 而不是几分钟
@@ -645,10 +645,10 @@ describe('GameCore 的空手挖掘', () => {
       core.setMining(false);
       core.tick(ABSORB_TICKS);
 
-      // 一块 3 点，7 点升 1 级、16 点升 2 级
-      expect(core.experience.total).toBeGreaterThanOrEqual(16);
-      expect(core.experience.total % 3).toBe(0);
-      expect(core.experience.level).toBeGreaterThanOrEqual(2);
+      // 一块 30 点，15 块 450 点：前 16 级共需 352 点（2L+7 累加），所以已经过了 16 级
+      expect(core.experience.total).toBeGreaterThanOrEqual(450);
+      expect(core.experience.total % 30).toBe(0);
+      expect(core.experience.level).toBeGreaterThanOrEqual(16);
       expect(core.experience.progress).toBeGreaterThanOrEqual(0);
       expect(core.experience.progress).toBeLessThan(1);
     });
@@ -713,7 +713,7 @@ describe('GameCore 的连锁挖掘', () => {
     core.setMining(false);
     core.tick(SETTLE_TICKS);
     expect(core.inventory.slot(0)).toEqual({ item: ItemType.OakLog, count: TRUNK_HEIGHT });
-    expect(core.experience.total).toBe(TRUNK_HEIGHT * 6);
+    expect(core.experience.total).toBe(TRUNK_HEIGHT * 60);
   });
 
   it('不按连锁键只挖对准的那一块', () => {
@@ -1254,7 +1254,7 @@ describe('GameCore 的合成网格与输出格', () => {
     expect(core.inventory.held).toEqual({ item: ItemType.OakPlanks, count: 3 });
   });
 
-  it('空手挖掉放下的木板方块要 60 tick，掉回 1 块木板，给 3 点经验', () => {
+  it('空手挖掉放下的木板方块要 60 tick，掉回 1 块木板，给 30 点经验', () => {
     const core = holdingPlanks();
     core.use();
     core.tick();
@@ -1274,7 +1274,7 @@ describe('GameCore 的合成网格与输出格', () => {
     // 掉落物过了拾取延迟才被吸入背包，经验球飞到玩家身上并被吸收再要不到一秒
     core.tick(PICKUP_TICKS + TICK_RATE);
     expect(core.inventory.held).toEqual(PLANKS_X4);
-    expect(core.experience.total - experienceBefore).toBe(3);
+    expect(core.experience.total - experienceBefore).toBe(30);
   });
 });
 
@@ -1369,7 +1369,7 @@ describe('GameCore 的工作台', () => {
     core.tick();
   }
 
-  it('空手挖掉工作台要 75 tick，掉回 1 个工作台，给 3 点经验', () => {
+  it('空手挖掉工作台要 75 tick，掉回 1 个工作台，给 30 点经验', () => {
     const core = facingTable();
     expect(core.mining.target).toMatchObject(toVec(AHEAD));
     core.setMining(true);
@@ -1382,7 +1382,7 @@ describe('GameCore 的工作台', () => {
     // 掉落物落到脚边被吸走，经验球飞过来被吸收
     core.tick(PICKUP_TICKS + 3 * TICK_RATE);
     expect(core.inventory.held).toEqual(TABLE_X1);
-    expect(core.experience.total).toBe(3);
+    expect(core.experience.total).toBe(30);
   });
 
   it('手持工作台按使用键放置成工作台方块，手上那一格清空', () => {

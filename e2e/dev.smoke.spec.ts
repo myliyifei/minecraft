@@ -1102,7 +1102,7 @@ test('屏幕底部有等级条，压在快捷栏上方，开局 0 级、进度�
   await expect(track).toHaveAttribute('role', 'progressbar');
   await expect(track).toHaveAttribute('aria-label', STRINGS.levelProgress);
   await expect(track).toHaveAttribute('aria-valuenow', '0');
-  // 0 级升 1 级要 7 点，见 tests/core/experience.test.ts
+  // 0 级升 1 级要 7 点（见 tests/core/experience.test.ts），一块方块都没挖时进度条是空的
   await expect(track).toHaveAttribute('aria-valuemax', '7');
 
   // 等级条整条压在快捷栏之上，两者不重叠
@@ -1164,12 +1164,11 @@ test('挖方块把等级条填起来，攒够就升级', async ({ page }) => {
       };
 
       core.turn(0, -pitch);
-      // 一路往下挖：草之下是泥土，都是空手挖得动的
+      // 往下挖：草之下是泥土，都是空手挖得动的
       digOneBlock(grassTicks);
       const firstBlock = read();
 
-      // 再挖两块泥土，一块 3 点，攒过 7 点就升 1 级
-      digOneBlock(dirtTicks);
+      // 再挖一块泥土，又是 30 点，等级再往上走
       digOneBlock(dirtTicks);
       return { firstBlock, levelledUp: read() };
     },
@@ -1181,17 +1180,18 @@ test('挖方块把等级条填起来，攒够就升级', async ({ page }) => {
     },
   );
 
-  // 一块草 3 点：还是 0 级，进度条填了 3/7
-  expect(samples.firstBlock.total).toBe(3);
-  expect(samples.firstBlock.level).toBe('0');
+  // 一块草 30 点：0→1 级 7 点、1→2 级 9 点、2→3 级 11 点共 27 点，所以是 3 级，等级内 3 点，
+  // 3→4 级共需 13 点，进度条填了 3/13
+  expect(samples.firstBlock.total).toBe(30);
+  expect(samples.firstBlock.level).toBe('3');
   expect(samples.firstBlock.valueNow).toBe('3');
-  expect(samples.firstBlock.valueMax).toBe('7');
+  expect(samples.firstBlock.valueMax).toBe('13');
   const { fillPx, trackPx } = samples.firstBlock as { fillPx: number; trackPx: number };
-  expect(fillPx / trackPx).toBeCloseTo(3 / 7, 2);
+  expect(fillPx / trackPx).toBeCloseTo(3 / 13, 2);
 
-  // 攒过 7 点：数字变成 1，等级内经验重新从头算
-  expect(samples.levelledUp.total).toBeGreaterThanOrEqual(7);
-  expect(Number(samples.levelledUp.level)).toBeGreaterThanOrEqual(1);
+  // 再挖一块攒到 60 点：数字往上走，等级内经验重新从头算
+  expect(samples.levelledUp.total).toBe(60);
+  expect(Number(samples.levelledUp.level)).toBeGreaterThan(3);
   expect(samples.levelledUp.text).toBe(samples.levelledUp.level);
   expect(Number(samples.levelledUp.valueNow)).toBeLessThan(Number(samples.levelledUp.valueMax));
   expect(errors).toEqual([]);
@@ -1284,7 +1284,7 @@ test('经验球画成小方块飞向玩家，被吸收后从画面上消失', as
   expect(dug.orbCount).toBe(0);
   expect(dug.gone).toEqual([]);
   expect(isXpColored(dug.rgbAfter)).toBe(false);
-  expect(dug.total).toBe(3);
+  expect(dug.total).toBe(30);
   expect(errors).toEqual([]);
 });
 

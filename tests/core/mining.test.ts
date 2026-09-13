@@ -308,12 +308,12 @@ describe('挖穿之后掉出什么', () => {
 });
 
 describe('挖穿之后给多少经验', () => {
-  /** issue #9 给的经验值：普通方块 3、原木 6。 */
+  /** issue #26 给的经验值（#9 的数值乘 10）：普通方块 30、原木 60。 */
   const EXPERIENCE: Array<[string, BlockType, number, number]> = [
-    ['草方块', BlockType.Grass, 18, 3],
-    ['泥土', BlockType.Dirt, 15, 3],
-    ['原木', BlockType.OakLog, 60, 6],
-    ['树叶', BlockType.OakLeaves, 6, 3],
+    ['草方块', BlockType.Grass, 18, 30],
+    ['泥土', BlockType.Dirt, 15, 30],
+    ['原木', BlockType.OakLog, 60, 60],
+    ['树叶', BlockType.OakLeaves, 6, 30],
   ];
 
   for (const [name, block, ticks, amount] of EXPERIENCE) {
@@ -329,11 +329,11 @@ describe('挖穿之后给多少经验', () => {
     });
   }
 
-  it('空手挖石头什么都拿不到，经验照给 3 点', () => {
+  it('空手挖石头什么都拿不到，经验照给 30 点', () => {
     const { mining, spawned, experience } = miningTowards(BlockType.Stone);
     hold(mining, 150);
     expect(spawned).toEqual([]);
-    expect(experience).toEqual([{ amount: 3, at: TARGET }]);
+    expect(experience).toEqual([{ amount: 30, at: TARGET }]);
   });
 
   it('挖不动的基岩不给经验', () => {
@@ -349,8 +349,8 @@ describe('挖穿之后给多少经验', () => {
 
     hold(mining, 30);
     expect(spawned).toEqual([
-      { amount: 3, at: [2, LAYER_Y, 0] },
-      { amount: 3, at: TARGET },
+      { amount: 30, at: [2, LAYER_Y, 0] },
+      { amount: 30, at: TARGET },
     ]);
   });
 });
@@ -434,7 +434,7 @@ describe('连锁挖掘一次挖掉一整根树干', () => {
     expect(spawned).toEqual(
       cells.map((at) => ({ stack: { item: ItemType.OakLog, count: 1 }, at })),
     );
-    expect(experience).toEqual(cells.map((at) => ({ amount: 6, at })));
+    expect(experience).toEqual(cells.map((at) => ({ amount: 60, at })));
   });
 
   it('连锁耗时等于挖单块：第 59 tick 一块没少，第 60 tick 全没了', () => {

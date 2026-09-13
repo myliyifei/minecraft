@@ -186,17 +186,18 @@ describe('掉落看手上的工具类别', () => {
 
 describe('挖掉一块给多少经验', () => {
   /**
-   * issue #9 给的经验表：普通方块 3、原木 6。同样写死字面值，不从 `BLOCKS` 反读。
-   * 矿石那几档（煤 9 到钻石 24，见 docs/design-decisions.md）等有矿石了再往这里加行。
+   * issue #26 给的经验表（#9 的数值乘 10）：普通方块 30、原木 60。同样写死字面值，不从
+   * `BLOCKS` 反读。矿石那几档（煤 90 到钻石 240，见 docs/design-decisions.md）等有矿石了
+   * 再往这里加行。
    */
   const EXPERIENCE: Array<[string, BlockType, number]> = [
-    ['草方块', BlockType.Grass, 3],
-    ['泥土', BlockType.Dirt, 3],
-    ['石头', BlockType.Stone, 3],
-    ['树叶', BlockType.OakLeaves, 3],
-    ['木板', BlockType.OakPlanks, 3],
-    ['工作台', BlockType.CraftingTable, 3],
-    ['原木', BlockType.OakLog, 6],
+    ['草方块', BlockType.Grass, 30],
+    ['泥土', BlockType.Dirt, 30],
+    ['石头', BlockType.Stone, 30],
+    ['树叶', BlockType.OakLeaves, 30],
+    ['木板', BlockType.OakPlanks, 30],
+    ['工作台', BlockType.CraftingTable, 30],
+    ['原木', BlockType.OakLog, 60],
   ];
 
   for (const [name, block, amount] of EXPERIENCE) {

@@ -69,7 +69,7 @@ export interface BlockDef {
    * 挖掉它生成的经验球给几点经验值（见 CONTEXT.md 的「经验球」），0 表示不生成经验球。
    *
    * 与 `drop` 是两列，不是一列：任何挖得动的方块都给经验，掉落却可能是空的——空手挖
-   * 石头什么都拿不到，经验照给 3 点。矿石那几档（煤 9 到钻石 24）见
+   * 石头什么都拿不到，经验照给 30 点。矿石那几档（煤 90 到钻石 240）见
    * docs/design-decisions.md，等有矿石了往这里加行。
    */
   readonly experience: number;
@@ -85,8 +85,13 @@ function one(item: ItemType): ItemStack {
   return { item, count: 1 };
 }
 
-/** 普通方块给的经验值。原木与将来的矿石各有自己的档，见 `BlockDef.experience`。 */
-const COMMON_EXPERIENCE = 3;
+/**
+ * 普通方块给的经验值。原木与将来的矿石各有自己的档，见 `BlockDef.experience`。
+ *
+ * 是原版数值的 10 倍（#26）：第一切片按原版给 3 点，试玩觉得升级太慢，整张经验表乘了 10，
+ * 等级公式不动。
+ */
+const COMMON_EXPERIENCE = 30;
 
 /** 方块属性表——纯数据。加方块只加一行。 */
 export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
@@ -153,7 +158,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     requiresTool: false,
     drop: one(ItemType.OakLog),
     // 原木自成一档，比普通方块高一倍。
-    experience: 6,
+    experience: 60,
     use: BlockUse.None,
   },
   // 树叶什么都不掉。树苗与苹果要等树叶凋落（后续切片）。
@@ -166,7 +171,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     requiresTool: false,
     drop: null,
     // 树叶什么都不掉，但「任何方块都给经验」（见 CONTEXT.md 的「经验球」），
-    // 所以它照普通方块给 3 点。原版的树叶不给经验，这一条是本项目自己定的。
+    // 所以它照普通方块给 30 点。原版的树叶不给经验，这一条是本项目自己定的。
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
   },

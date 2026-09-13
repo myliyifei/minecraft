@@ -28,7 +28,7 @@ export function installLevelBar(parent: HTMLElement, experience: ExperienceView)
 
   const track = document.createElement('span');
   track.className = 'levelbar__track';
-  // 进度条的标准语义：读屏软件因此报的是「到下一级 3/7」，而不是一个没名字的方块。
+  // 进度条的标准语义：读屏软件因此报的是「到下一级 3/13」，而不是一个没名字的方块。
   track.setAttribute('role', 'progressbar');
   track.setAttribute('aria-label', STRINGS.levelProgress);
   track.setAttribute('aria-valuemin', '0');

@@ -1168,7 +1168,7 @@ test('挖方块把等级条填起来，攒够就升级', async ({ page }) => {
       digOneBlock(grassTicks);
       const firstBlock = read();
 
-      // 再挖一块泥土，又是 30 点，等级再往上走
+      // 再挖一块泥土，又是 30 点，等级继续上升
       digOneBlock(dirtTicks);
       return { firstBlock, levelledUp: read() };
     },
@@ -1189,7 +1189,7 @@ test('挖方块把等级条填起来，攒够就升级', async ({ page }) => {
   const { fillPx, trackPx } = samples.firstBlock as { fillPx: number; trackPx: number };
   expect(fillPx / trackPx).toBeCloseTo(3 / 13, 2);
 
-  // 再挖一块攒到 60 点：数字往上走，等级内经验重新从头算
+  // 再挖一块攒到 60 点：等级数增加，等级内经验重新从头算
   expect(samples.levelledUp.total).toBe(60);
   expect(Number(samples.levelledUp.level)).toBeGreaterThan(3);
   expect(samples.levelledUp.text).toBe(samples.levelledUp.level);

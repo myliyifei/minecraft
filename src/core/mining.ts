@@ -8,7 +8,7 @@ import {
 } from './block';
 import { chainConnectedBlocks } from './chain-mining';
 import type { DropSink } from './drop';
-import { BARE_HAND } from './item';
+import { miningToolOf, type MiningTool, type ToolHand } from './item';
 import { PLAYER_REACH, type PlayerView } from './player';
 import { raycastBlocks, type BlockHit } from './raycast';
 import type { Vec3 } from './vec3';
@@ -78,13 +78,14 @@ const NO_CHAIN: readonly Vec3[] = Object.freeze([]);
  *
  * 时间只由 `step()` 的调用次数表达（ADR-0002），耗时表在 `miningTicks`。
  *
- * 耗时与掉落都要看手上拿着什么工具，而本切片手上恒是空手（`BARE_HAND`）：工具物品要等
- * #21，挖穿那一 tick 读一次选中格里拿的是什么要等 #22。届时改的是这三处传参，公式与
- * 掉落表不必再动。
+ * 耗时与掉落都看手上拿着什么工具（`hand`）。耗时每 tick 按当时手上的工具重算——与目标方块
+ * 每 tick 重算是同一个思路（ADR-0006）：挖到一半换上木镐，已经挖的那些 tick 留着，剩下的按
+ * 木镐算。挖穿那一 tick 读一次手上的工具，用它决定掉什么、损耗几点耐久（ADR-0010）。
  */
 export class Mining implements MiningView {
   private readonly blocks: BlockEdit;
   private readonly aim: AimView;
+  private readonly hand: ToolHand;
   private readonly drops: DropSink;
   private readonly experience: XpOrbSink;
   private hit: BlockHit | undefined;
@@ -98,9 +99,16 @@ export class Mining implements MiningView {
    */
   private chain: readonly Vec3[] | undefined;
 
-  constructor(blocks: BlockEdit, aim: AimView, drops: DropSink, experience: XpOrbSink) {
+  constructor(
+    blocks: BlockEdit,
+    aim: AimView,
+    hand: ToolHand,
+    drops: DropSink,
+    experience: XpOrbSink,
+  ) {
     this.blocks = blocks;
     this.aim = aim;
+    this.hand = hand;
     this.drops = drops;
     this.experience = experience;
   }
@@ -113,7 +121,7 @@ export class Mining implements MiningView {
     if (!this.hit) return 0;
     const required = miningTicks(
       this.blocks.getBlock(this.hit.x, this.hit.y, this.hit.z),
-      BARE_HAND,
+      this.heldTool(),
     );
     // 基岩的耗时是 Infinity，除出来是 0。耗时为 0 只在目标那一格被别处改成空气之后出现
     // （区块卸载、外部写入），那时候除出来是 NaN，得挡住。
@@ -150,13 +158,20 @@ export class Mining implements MiningView {
       this.chain = undefined;
     }
 
+    // 耗时按这一 tick 手上的工具算：换了工具从下一 tick 起按新工具的耗时比，进度不归零。
+    const tool = this.heldTool();
     this.elapsed++;
-    if (this.elapsed < miningTicks(block, BARE_HAND)) return;
+    if (this.elapsed < miningTicks(block, tool)) return;
 
     // 连锁集合里含目标本身，所以两条路都是「挖掉一批格子」，只是批的大小不同。
+    // 掉落与耐久都按挖穿这一 tick 手上的工具算，整批用同一件。
+    let broken = 0;
     for (const cell of this.chain ?? [this.hit]) {
-      this.breakBlock(cell.x, cell.y, cell.z);
+      if (this.breakBlock(cell.x, cell.y, cell.z, tool)) broken++;
     }
+    // 每挖穿一块损耗 1 点，整批一次结算：损耗超过剩余耐久时那些方块照样全碎，工具随后没了
+    // （见 CONTEXT.md 的「连锁挖掘」）。空手与拿着材料时 `wearHeld` 什么都不做。
+    this.hand.wearHeld(broken);
     this.restart();
     // 挖穿了，视线随即落到后面那块上。当场重瞄一次，选框不会在这一 tick 里还套着一个
     // 已经不存在的方块；按住不放因此接着挖下一块，与原版一致。
@@ -165,20 +180,27 @@ export class Mining implements MiningView {
 
   /**
    * 挖掉一格：变成空气，掉落表里有东西就在原地掉出一个掉落物，有经验就再生成一个经验球。
+   * 返回真的挖掉了没有——耐久按挖掉的块数算。
    *
    * 方块种类当场重读而不是沿用连锁开始时记下的：那之后世界可能被别处改过（区块卸载、
-   * 外部写入），已经不在了的格子直接跳过，不会凭空掉出东西。
+   * 外部写入），已经不在了的格子直接跳过，不会凭空掉出东西，也不算一块。
    */
-  private breakBlock(x: number, y: number, z: number): void {
+  private breakBlock(x: number, y: number, z: number, tool: MiningTool): boolean {
     const block = this.blocks.getBlock(x, y, z);
-    if (!isBreakable(block)) return;
+    if (!isBreakable(block)) return false;
     this.blocks.setBlock(x, y, z, BlockType.Air);
     // 掉落物与经验球都落在方块原来那一格里。什么都不掉的方块（树叶、空手挖的石头）
-    // 只是没有掉落物，经验照给——两样各查自己那一列。
-    const drop = blockDrop(block, BARE_HAND.toolClass);
+    // 只是没有掉落物，经验照给——两样各查自己那一列。掉什么看工具类别（持镐挖石头掉圆石）。
+    const drop = blockDrop(block, tool.toolClass);
     if (drop) this.drops.spawnInBlock(drop, x, y, z);
     const experience = blockExperience(block);
     if (experience > 0) this.experience.spawnInBlock(experience, x, y, z);
+    return true;
+  }
+
+  /** 手上那一堆此刻在挖掘里算什么工具。 */
+  private heldTool(): MiningTool {
+    return miningToolOf(this.hand.held);
   }
 
   /** 这一块从头挖起：进度归零，连锁集合一并清掉（下一 tick 才可能重新判定）。 */

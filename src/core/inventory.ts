@@ -1,10 +1,12 @@
 import {
   stackLimit,
+  withCount,
+  wornTool,
   type Hand,
   type ItemSink,
   type ItemStack,
-  type ItemType,
   type SlotStore,
+  type ToolHand,
 } from './item';
 
 /** 快捷栏（见 CONTEXT.md）的格数。 */
@@ -54,7 +56,7 @@ export interface InventoryView {
  * 选中格也放在这里：快捷栏是背包的一排（见 CONTEXT.md），「手上拿着什么」就是
  * 「选中格里是什么」，两者分到两个模块里只会让它们不一致。
  */
-export class Inventory implements InventoryView, ItemSink, Hand, SlotStore {
+export class Inventory implements InventoryView, ItemSink, Hand, ToolHand, SlotStore {
   private readonly slots = Array<ItemStack | undefined>(INVENTORY_SIZE).fill(undefined);
   private selected = 0;
 
@@ -102,8 +104,15 @@ export class Inventory implements InventoryView, ItemSink, Hand, SlotStore {
   takeOne(): void {
     const stack = this.slots[this.selected];
     if (!stack) return;
-    this.slots[this.selected] =
-      stack.count > 1 ? { item: stack.item, count: stack.count - 1 } : undefined;
+    this.slots[this.selected] = stack.count > 1 ? withCount(stack, stack.count - 1) : undefined;
+  }
+
+  /**
+   * 手上那件工具损耗几点耐久，损耗到满时那一格清空。手上不是工具、空手时什么都不做。
+   * 规则在 `wornTool` 里，这里只是把结果写回选中格。
+   */
+  wearHeld(points: number): void {
+    this.slots[this.selected] = wornTool(this.slots[this.selected], points);
   }
 
   /**
@@ -115,8 +124,8 @@ export class Inventory implements InventoryView, ItemSink, Hand, SlotStore {
   add(stack: ItemStack): number {
     const limit = stackLimit(stack.item);
     let left = stack.count;
-    left = this.topUpExisting(stack.item, limit, left);
-    return this.fillEmpty(stack.item, limit, left);
+    left = this.topUpExisting(stack, limit, left);
+    return this.fillEmpty(stack, limit, left);
   }
 
   /**
@@ -126,27 +135,32 @@ export class Inventory implements InventoryView, ItemSink, Hand, SlotStore {
    * `add` 之后同一种物品最多只剩一个未满堆（先填满已有的才另起一堆），所以「快捷栏与
    * 背包各有一堆未满、看谁先被填」这种局面在本切片的接口下构造不出来。
    */
-  private topUpExisting(item: ItemType, limit: number, count: number): number {
+  private topUpExisting(stack: ItemStack, limit: number, count: number): number {
     let left = count;
     for (let i = 0; i < this.slots.length && left > 0; i++) {
       const slot = this.slots[i];
-      if (!slot || slot.item !== item) continue;
+      if (!slot || slot.item !== stack.item) continue;
       const room = limit - slot.count;
       if (room <= 0) continue;
       const moved = Math.min(room, left);
-      this.slots[i] = { item, count: slot.count + moved };
+      this.slots[i] = withCount(slot, slot.count + moved);
       left -= moved;
     }
     return left;
   }
 
-  /** 第二轮：占空格。返回还剩多少。 */
-  private fillEmpty(item: ItemType, limit: number, count: number): number {
+  /**
+   * 第二轮：占空格。返回还剩多少。
+   *
+   * 占格的是进来那一堆本身（`withCount`）而不是重造的 `{ item, count }`：工具带着损耗进来，
+   * 落进格子里损耗要还在。
+   */
+  private fillEmpty(stack: ItemStack, limit: number, count: number): number {
     let left = count;
     for (let i = 0; i < this.slots.length && left > 0; i++) {
       if (this.slots[i]) continue;
       const moved = Math.min(limit, left);
-      this.slots[i] = { item, count: moved };
+      this.slots[i] = withCount(stack, moved);
       left -= moved;
     }
     return left;

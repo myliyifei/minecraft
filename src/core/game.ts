@@ -114,9 +114,11 @@ export class GameCore implements BlockEdit {
     this.inventoryScreenState = new InventoryScreen(this.inventoryState, this.inventoryCraftingGrid);
     this.craftingTableGrid = new CraftingGrid(CRAFTING_TABLE_GRID);
     this.craftingTableState = new InventoryScreen(this.inventoryState, this.craftingTableGrid);
+    // 挖掘要看手上的工具、还要让它损耗耐久：背包既是「手」也是收物品的地方。
     this.miningState = new Mining(
       this.world,
       this.playerState,
+      this.inventoryState,
       this.dropsState,
       this.xpOrbsState,
     );

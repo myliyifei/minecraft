@@ -15,7 +15,7 @@ import { deflateSync } from 'node:zlib';
 
 const TILE_PX = 16;
 const COLS = 4;
-const ROWS = 4;
+const ROWS = 8;
 const WIDTH = COLS * TILE_PX;
 const HEIGHT = ROWS * TILE_PX;
 
@@ -47,6 +47,7 @@ const GRASS = [96, 148, 62];
 const GRASS_DARK = [74, 118, 47];
 const DIRT = [134, 96, 67];
 const STONE = [127, 127, 127];
+const COBBLE_GAP = [78, 78, 78];
 const BEDROCK = [85, 85, 85];
 const LOG_BARK = [104, 78, 46];
 const LOG_CORE = [166, 133, 86];
@@ -185,6 +186,16 @@ const TILES = {
     const corner = (x === 9 || x === 14) && (y === 0 || y === 5);
     return inBox && !corner ? woodenHead(x === 14 || y === 5, rand) : null;
   }),
+  // cobblestone：石头色的碎块，块与块之间一条深色的缝；每行的缝错开半块，像砌起来的石墙
+  16: (x, y, rand) => {
+    const row = Math.floor(y / 4);
+    const shift = row % 2 === 0 ? 0 : 2;
+    const gap = y % 4 === 3 || (x + shift) % 4 === 3;
+    if (gap) return shade(COBBLE_GAP, Math.floor(rand() * 16) - 8);
+    // 每块自己深浅不一：块的编号决定一个基调，再叠噪点
+    const block = ((row * 7 + Math.floor((x + shift) / 4) * 3) % 5) * 8 - 16;
+    return shade(STONE, block + Math.floor(rand() * 20) - 10);
+  },
 };
 
 /**

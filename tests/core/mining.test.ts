@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { CHAIN_MINING_LIMIT } from '../../src/core/chain-mining';
 import type { DropSink } from '../../src/core/drop';
-import { ItemType, type ItemStack } from '../../src/core/item';
+import { Inventory } from '../../src/core/inventory';
+import { ItemType, type ItemStack, type ToolHand } from '../../src/core/item';
 import { Mining, type AimView, type MiningInput } from '../../src/core/mining';
 import { PLAYER_REACH } from '../../src/core/player';
 import type { Vec3 } from '../../src/core/vec3';
@@ -79,19 +80,47 @@ function xpLog(): { sink: XpOrbSink; spawned: SpawnedXp[] } {
 const IGNORED_DROPS: DropSink = dropLog().sink;
 const IGNORED_XP: XpOrbSink = xpLog().sink;
 
-/** 目标为正前方那块方块的挖掘状态机。 */
-function miningTowards(block: BlockType): {
+/**
+ * 什么都不拿的手。空手挖掘的用例共用一份：它没有状态，损耗对它没有任何效果。
+ */
+const BARE: ToolHand = { held: undefined, wearHeld: () => {} };
+
+/**
+ * 手上拿着某一堆的背包：选中格里放的就是它。
+ *
+ * 用真的 `Inventory` 而不是假对象：耐久损耗到满那一格要清空，这条规则在背包里，
+ * 挖掘那一侧只管报「损耗了几点」。
+ */
+function handHolding(stack: ItemStack | undefined): Inventory {
+  const inventory = new Inventory();
+  inventory.setSlot(0, stack);
+  return inventory;
+}
+
+/** 一把新的木制工具。 */
+function wooden(item: ItemType): ItemStack {
+  return { item, count: 1 };
+}
+
+/** 目标为正前方那块方块的挖掘状态机，手上拿着 `held`（默认空手）。 */
+function miningTowards(
+  block: BlockType,
+  held?: ItemStack,
+): {
   world: World;
   mining: Mining;
+  hand: Inventory;
   spawned: SpawnedDrop[];
   experience: SpawnedXp[];
 } {
   const world = worldWith([TARGET, block]);
   const drops = dropLog();
   const xp = xpLog();
+  const hand = handHolding(held);
   return {
     world,
-    mining: new Mining(world, turntable().aim, drops.sink, xp.sink),
+    mining: new Mining(world, turntable().aim, hand, drops.sink, xp.sink),
+    hand,
     spawned: drops.spawned,
     experience: xp.spawned,
   };
@@ -157,7 +186,7 @@ describe('挖掘进度绑定目标方块', () => {
   it('把目标切到另一块，两块都从零开始', () => {
     const world = worldWith([TARGET, BlockType.Dirt], [[0, LAYER_Y, 3], BlockType.Dirt]);
     const table = turntable();
-    const mining = new Mining(world, table.aim, IGNORED_DROPS, IGNORED_XP);
+    const mining = new Mining(world, table.aim, BARE, IGNORED_DROPS, IGNORED_XP);
 
     hold(mining, 10);
     expect(mining.progress).toBeCloseTo(10 / 15, 10);
@@ -176,7 +205,7 @@ describe('挖掘进度绑定目标方块', () => {
   it('视线移开再回来，要重新挖满整份耗时', () => {
     const world = worldWith([TARGET, BlockType.Dirt]);
     const table = turntable();
-    const mining = new Mining(world, table.aim, IGNORED_DROPS, IGNORED_XP);
+    const mining = new Mining(world, table.aim, BARE, IGNORED_DROPS, IGNORED_XP);
 
     hold(mining, 14);
     table.look(LOOK_EMPTY);
@@ -216,7 +245,7 @@ describe('挖掘进度绑定目标方块', () => {
     const block: BlockCoord = [2, LAYER_Y - 1, 0];
     const world = worldWith([block, BlockType.Dirt]);
     const table = turntable(unit({ x: 1, y: -0.25, z: 0 }));
-    const mining = new Mining(world, table.aim, IGNORED_DROPS, IGNORED_XP);
+    const mining = new Mining(world, table.aim, BARE, IGNORED_DROPS, IGNORED_XP);
 
     hold(mining, 7);
     expect(mining.target).toMatchObject({ x: 2, y: LAYER_Y - 1, normal: { y: 1 } });
@@ -234,7 +263,7 @@ describe('挖掘的触及距离', () => {
   it('触及距离之内的方块挖得掉', () => {
     const near: BlockCoord = [REACHABLE_X, LAYER_Y, 0];
     const world = worldWith([near, BlockType.Dirt]);
-    const mining = new Mining(world, turntable().aim, IGNORED_DROPS, IGNORED_XP);
+    const mining = new Mining(world, turntable().aim, BARE, IGNORED_DROPS, IGNORED_XP);
     hold(mining, 15);
     expect(world.getBlock(...near)).toBe(BlockType.Air);
   });
@@ -242,7 +271,7 @@ describe('挖掘的触及距离', () => {
   it('再远一格就不是目标，按住也挖不动', () => {
     const far: BlockCoord = [REACHABLE_X + 1, LAYER_Y, 0];
     const world = worldWith([far, BlockType.Dirt]);
-    const mining = new Mining(world, turntable().aim, IGNORED_DROPS, IGNORED_XP);
+    const mining = new Mining(world, turntable().aim, BARE, IGNORED_DROPS, IGNORED_XP);
     hold(mining, 100);
     expect(mining.target).toBeUndefined();
     expect(mining.progress).toBe(0);
@@ -251,7 +280,7 @@ describe('挖掘的触及距离', () => {
 
   it('什么都没对准时按住挖掘键，没有目标、进度为 0', () => {
     const world = flatTestWorld();
-    const mining = new Mining(world, turntable(LOOK_EMPTY).aim, IGNORED_DROPS, IGNORED_XP);
+    const mining = new Mining(world, turntable(LOOK_EMPTY).aim, BARE, IGNORED_DROPS, IGNORED_XP);
     hold(mining, 100);
     expect(mining.target).toBeUndefined();
     expect(mining.progress).toBe(0);
@@ -297,7 +326,7 @@ describe('挖穿之后掉出什么', () => {
   it('连着挖两块，一块掉一个', () => {
     const world = worldWith([[2, LAYER_Y, 0], BlockType.Dirt], [TARGET, BlockType.Dirt]);
     const { sink, spawned } = dropLog();
-    const mining = new Mining(world, turntable().aim, sink, IGNORED_XP);
+    const mining = new Mining(world, turntable().aim, BARE, sink, IGNORED_XP);
 
     hold(mining, 30);
     expect(spawned).toEqual([
@@ -345,7 +374,7 @@ describe('挖穿之后给多少经验', () => {
   it('连着挖两块，一块一个经验球', () => {
     const world = worldWith([[2, LAYER_Y, 0], BlockType.Dirt], [TARGET, BlockType.Dirt]);
     const { sink, spawned } = xpLog();
-    const mining = new Mining(world, turntable().aim, IGNORED_DROPS, sink);
+    const mining = new Mining(world, turntable().aim, BARE, IGNORED_DROPS, sink);
 
     hold(mining, 30);
     expect(spawned).toEqual([
@@ -373,7 +402,7 @@ describe('挖掘的目标查询', () => {
 
   it('挖穿之后目标当场换到后面那块，按住不放接着挖', () => {
     const world = worldWith([[2, LAYER_Y, 0], BlockType.Dirt], [TARGET, BlockType.Dirt]);
-    const mining = new Mining(world, turntable().aim, IGNORED_DROPS, IGNORED_XP);
+    const mining = new Mining(world, turntable().aim, BARE, IGNORED_DROPS, IGNORED_XP);
 
     hold(mining, 15);
     expect(world.getBlock(2, LAYER_Y, 0)).toBe(BlockType.Air);
@@ -412,7 +441,7 @@ function miningTrunk(height: number): {
   return {
     world,
     cells,
-    mining: new Mining(world, turntable().aim, drops.sink, xp.sink),
+    mining: new Mining(world, turntable().aim, BARE, drops.sink, xp.sink),
     spawned: drops.spawned,
     experience: xp.spawned,
   };
@@ -466,7 +495,7 @@ describe('连锁挖掘一次挖掉一整根树干', () => {
       [corner, BlockType.OakLog],
       [neighbour, BlockType.Dirt],
     );
-    const mining = new Mining(world, turntable().aim, IGNORED_DROPS, IGNORED_XP);
+    const mining = new Mining(world, turntable().aim, BARE, IGNORED_DROPS, IGNORED_XP);
 
     hold(mining, LOG_TICKS, CHAINED);
 
@@ -574,7 +603,7 @@ describe('连锁预览', () => {
       [other, BlockType.OakLog],
     );
     const table = turntable();
-    const mining = new Mining(world, table.aim, IGNORED_DROPS, IGNORED_XP);
+    const mining = new Mining(world, table.aim, BARE, IGNORED_DROPS, IGNORED_XP);
 
     hold(mining, 1, CHAINED);
     expect(mining.chainPreview).toEqual(trunkCells(3).map(toVec));
@@ -591,5 +620,179 @@ describe('连锁预览', () => {
 
     mining.step(RELEASED);
     expect(mining.chainPreview).toEqual([]);
+  });
+});
+
+describe('手持工具挖掘：耗时按工具算，掉落看工具类别', () => {
+  it('持木镐挖石头第 22 tick 仍在，第 23 tick 变空气、掉 1 个圆石、给 30 点经验', () => {
+    const { world, mining, spawned, experience } = miningTowards(
+      BlockType.Stone,
+      wooden(ItemType.WoodenPickaxe),
+    );
+    hold(mining, 22);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Stone);
+    expect(mining.progress).toBeCloseTo(22 / 23, 10);
+
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([{ stack: { item: ItemType.Cobblestone, count: 1 }, at: TARGET }]);
+    expect(experience).toEqual([{ amount: 30, at: TARGET }]);
+  });
+
+  it('空手挖石头仍是 150 tick，什么都不掉', () => {
+    const { world, mining, spawned } = miningTowards(BlockType.Stone);
+    hold(mining, 149);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Stone);
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([]);
+  });
+
+  it('持木铲挖泥土 8 tick', () => {
+    const { world, mining } = miningTowards(BlockType.Dirt, wooden(ItemType.WoodenShovel));
+    hold(mining, 7);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Dirt);
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+  });
+
+  it('持木铲挖原木 60 tick：拿错工具与空手一样慢', () => {
+    const { world, mining } = miningTowards(BlockType.OakLog, wooden(ItemType.WoodenShovel));
+    hold(mining, 59);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.OakLog);
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+  });
+
+  it('持木斧挖原木 30 tick，掉的仍是原木', () => {
+    const { world, mining, spawned } = miningTowards(BlockType.OakLog, wooden(ItemType.WoodenAxe));
+    hold(mining, 29);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.OakLog);
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([{ stack: { item: ItemType.OakLog, count: 1 }, at: TARGET }]);
+  });
+
+  it('空手挖圆石 200 tick 什么都不掉，持木镐 30 tick 掉圆石', () => {
+    const bare = miningTowards(BlockType.Cobblestone);
+    hold(bare.mining, 199);
+    expect(bare.world.getBlock(...TARGET)).toBe(BlockType.Cobblestone);
+    hold(bare.mining, 1);
+    expect(bare.world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(bare.spawned).toEqual([]);
+
+    const picked = miningTowards(BlockType.Cobblestone, wooden(ItemType.WoodenPickaxe));
+    hold(picked.mining, 30);
+    expect(picked.world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(picked.spawned).toEqual([
+      { stack: { item: ItemType.Cobblestone, count: 1 }, at: TARGET },
+    ]);
+  });
+
+  it('拿着泥土挖与空手一样：石头 150 tick 且不掉东西', () => {
+    const { world, mining, spawned } = miningTowards(BlockType.Stone, {
+      item: ItemType.Dirt,
+      count: 5,
+    });
+    hold(mining, 150);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([]);
+  });
+});
+
+describe('挖掘中途换手上的工具', () => {
+  it('从空手换到木镐：进度不归零，剩余耗时按木镐算', () => {
+    const { world, mining, hand } = miningTowards(BlockType.Stone);
+    hold(mining, 10);
+    expect(mining.progress).toBeCloseTo(10 / 150, 10);
+
+    // 换选中格不换目标：已经挖的 10 tick 留着，木镐一共只要 23 tick
+    hand.setSlot(0, wooden(ItemType.WoodenPickaxe));
+    hold(mining, 1);
+    expect(mining.progress).toBeCloseTo(11 / 23, 10);
+    hold(mining, 11);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Stone);
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+  });
+
+  it('从木镐换回空手：进度按空手的耗时重算，剩下的要挖很久', () => {
+    const { world, mining, hand } = miningTowards(BlockType.Stone, wooden(ItemType.WoodenPickaxe));
+    hold(mining, 20);
+    hand.setSlot(0, undefined);
+    hold(mining, 1);
+    expect(mining.progress).toBeCloseTo(21 / 150, 10);
+    hold(mining, 128);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Stone);
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+  });
+
+  it('挖穿那一 tick 拿的是什么就按什么掉：最后一 tick 才换上木镐，石头掉圆石', () => {
+    const { world, mining, hand, spawned } = miningTowards(BlockType.Stone);
+    hold(mining, 149);
+    hand.setSlot(0, wooden(ItemType.WoodenPickaxe));
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([{ stack: { item: ItemType.Cobblestone, count: 1 }, at: TARGET }]);
+  });
+});
+
+describe('手持工具挖穿方块消耗耐久', () => {
+  it('挖一块泥土后木铲损耗 1 点', () => {
+    const { mining, hand } = miningTowards(BlockType.Dirt, wooden(ItemType.WoodenShovel));
+    hold(mining, 7);
+    // 还没挖穿，一点都不损耗
+    expect(hand.held).toEqual(wooden(ItemType.WoodenShovel));
+    hold(mining, 1);
+    expect(hand.held).toEqual({ item: ItemType.WoodenShovel, count: 1, damage: 1 });
+  });
+
+  it('持镐挖泥土同样损耗 1 点：不看是不是正确工具', () => {
+    const { mining, hand } = miningTowards(BlockType.Dirt, wooden(ItemType.WoodenPickaxe));
+    hold(mining, 15);
+    expect(hand.held).toEqual({ item: ItemType.WoodenPickaxe, count: 1, damage: 1 });
+  });
+
+  it('挖 59 块泥土后木铲消失，选中格为空', () => {
+    const { world, mining, hand } = miningTowards(BlockType.Dirt, wooden(ItemType.WoodenShovel));
+    // 每挖穿一块就在原地再摆一块：一直对着同一格挖满 59 块
+    for (let dug = 0; dug < 58; dug++) {
+      hold(mining, 8);
+      expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+      world.setBlock(...TARGET, BlockType.Dirt);
+    }
+    expect(hand.held).toEqual({ item: ItemType.WoodenShovel, count: 1, damage: 58 });
+
+    hold(mining, 8);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(hand.held).toBeUndefined();
+    expect(hand.slot(0)).toBeUndefined();
+  });
+
+  it('连锁挖掘按块数结算：持木斧连锁挖 5 块树干损耗 5 点，一次扣完', () => {
+    const cells = trunkCells(5);
+    const world = worldWith(...cells.map((cell) => [cell, BlockType.OakLog] as [BlockCoord, BlockType]));
+    const hand = handHolding(wooden(ItemType.WoodenAxe));
+    const mining = new Mining(world, turntable().aim, hand, IGNORED_DROPS, IGNORED_XP);
+
+    // 持木斧 30 tick 挖穿：第 29 tick 一点都没损耗，第 30 tick 5 块全碎、一次损耗 5 点
+    hold(mining, 29, CHAINED);
+    expect(hand.held).toEqual(wooden(ItemType.WoodenAxe));
+    hold(mining, 1, CHAINED);
+    expect(remaining(world, cells)).toEqual([]);
+    expect(hand.held).toEqual({ item: ItemType.WoodenAxe, count: 1, damage: 5 });
+  });
+
+  it('空手与拿着材料挖不涉及耐久：泥土那一堆一个都不少', () => {
+    const { mining, hand } = miningTowards(BlockType.Grass, { item: ItemType.Dirt, count: 5 });
+    hold(mining, 18);
+    expect(hand.held).toEqual({ item: ItemType.Dirt, count: 5 });
+  });
+
+  it('挖不动的基岩不消耗耐久', () => {
+    const { mining, hand } = miningTowards(BlockType.Bedrock, wooden(ItemType.WoodenPickaxe));
+    hold(mining, 1000);
+    expect(hand.held).toEqual(wooden(ItemType.WoodenPickaxe));
   });
 });

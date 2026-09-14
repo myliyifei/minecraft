@@ -6,7 +6,7 @@ import {
   wrapHotbarSlot,
   type InventoryView,
 } from '../../src/core/inventory';
-import { ItemType, stackLimit } from '../../src/core/item';
+import { ItemType, stackLimit, type ItemStack } from '../../src/core/item';
 
 /** 一堆泥土。 */
 function dirt(count: number): { item: ItemType; count: number } {
@@ -258,5 +258,52 @@ describe('快捷栏的选中格', () => {
     inventory.takeOne();
     expect(inventory.slot(0)).toEqual(dirt(3));
     expect(inventory.slot(1)).toEqual(logs(4));
+  });
+});
+
+describe('手上那件工具的损耗', () => {
+  /** 一把已损耗 10 点的木铲。 */
+  const WORN_SHOVEL: ItemStack = { item: ItemType.WoodenShovel, count: 1, damage: 10 };
+
+  it('损耗 1 点：选中格里的那把工具 damage 加 1', () => {
+    const inventory = new Inventory();
+    inventory.setSlot(0, pickaxe());
+    inventory.wearHeld(1);
+    expect(inventory.held).toEqual({ item: ItemType.WoodenPickaxe, count: 1, damage: 1 });
+    inventory.wearHeld(1);
+    expect(inventory.held).toEqual({ item: ItemType.WoodenPickaxe, count: 1, damage: 2 });
+  });
+
+  it('损耗到满耐久那一格清空，手上空了', () => {
+    const inventory = new Inventory();
+    inventory.setSlot(0, { item: ItemType.WoodenPickaxe, count: 1, damage: 58 });
+    inventory.wearHeld(1);
+    expect(inventory.held).toBeUndefined();
+    expect(inventory.slot(0)).toBeUndefined();
+  });
+
+  it('损耗的是选中格里的，不是第一格里的', () => {
+    const inventory = new Inventory();
+    inventory.setSlot(0, pickaxe());
+    inventory.setSlot(3, pickaxe());
+    inventory.select(3);
+    inventory.wearHeld(5);
+    expect(inventory.slot(0)).toEqual(pickaxe());
+    expect(inventory.slot(3)).toEqual({ item: ItemType.WoodenPickaxe, count: 1, damage: 5 });
+  });
+
+  it('手上是材料或空手时损耗什么都不发生', () => {
+    const inventory = new Inventory();
+    inventory.wearHeld(1);
+    expect(inventory.held).toBeUndefined();
+    inventory.setSlot(0, dirt(3));
+    inventory.wearHeld(1);
+    expect(inventory.held).toEqual(dirt(3));
+  });
+
+  it('损耗过的工具进背包时损耗跟着走：拾回来的不是一把新的', () => {
+    const inventory = new Inventory();
+    expect(inventory.add(WORN_SHOVEL)).toBe(0);
+    expect(inventory.slot(0)).toEqual(WORN_SHOVEL);
   });
 });

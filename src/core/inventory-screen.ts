@@ -3,6 +3,7 @@ import { isSlotIndex } from './inventory';
 import {
   isUnstackable,
   stackLimit,
+  withCount,
   type ItemStack,
   type ItemType,
   type SlotBatch,
@@ -188,8 +189,7 @@ export class InventoryScreen implements InventoryScreenView {
     const left = this.mergeInto(index, cursor);
     if (left === cursor.count) return;
     // 还有余量的话仍记着原来那一格：并了一部分不改变「这一堆是从哪儿拿的」。
-    this.holding =
-      left > 0 ? { stack: { item: cursor.item, count: left }, from: holding.from } : undefined;
+    this.holding = left > 0 ? { stack: withCount(cursor, left), from: holding.from } : undefined;
   }
 
   /**
@@ -217,7 +217,7 @@ export class InventoryScreen implements InventoryScreenView {
     if (cursor.item !== output.item) return;
     if (cursor.count + output.count > stackLimit(output.item)) return;
     this.holding = {
-      stack: { item: cursor.item, count: cursor.count + output.count },
+      stack: withCount(cursor, cursor.count + output.count),
       from: holding.from,
     };
     grid.consumeOne();
@@ -265,7 +265,7 @@ export class InventoryScreen implements InventoryScreenView {
       const stack = grid.slot(i);
       if (!stack) continue;
       const spare = this.slots.add(stack);
-      grid.setSlot(i, spare > 0 ? { item: stack.item, count: spare } : undefined);
+      grid.setSlot(i, spare > 0 ? withCount(stack, spare) : undefined);
       if (spare > 0) allReturned = false;
     }
     return allReturned;
@@ -276,7 +276,7 @@ export class InventoryScreen implements InventoryScreenView {
     for (let i = 0; i < this.slots.size; i++) {
       const stack = this.slots.slot(i);
       if (!stack || stack.item !== item) continue;
-      this.slots.setSlot(i, stack.count > 1 ? { item, count: stack.count - 1 } : undefined);
+      this.slots.setSlot(i, stack.count > 1 ? withCount(stack, stack.count - 1) : undefined);
       return;
     }
   }
@@ -313,7 +313,7 @@ export class InventoryScreen implements InventoryScreenView {
         if (!stack) continue;
         extra.setSlot(i, undefined);
         const spare = this.slots.add(stack);
-        if (spare > 0) leftovers.push({ item: stack.item, count: spare });
+        if (spare > 0) leftovers.push(withCount(stack, spare));
       }
     }
     return leftovers;
@@ -331,8 +331,8 @@ export class InventoryScreen implements InventoryScreenView {
     const { stack, from } = holding;
     const left = from === undefined ? stack.count : this.mergeInto(from, stack);
     if (left === 0) return undefined;
-    const spare = this.slots.add({ item: stack.item, count: left });
-    return spare > 0 ? { item: stack.item, count: spare } : undefined;
+    const spare = this.slots.add(withCount(stack, left));
+    return spare > 0 ? withCount(stack, spare) : undefined;
   }
 
   /**
@@ -351,7 +351,7 @@ export class InventoryScreen implements InventoryScreenView {
     const room = stackLimit(stack.item) - inSlot.count;
     if (room <= 0) return stack.count;
     const moved = Math.min(room, stack.count);
-    ref.batch.setSlot(ref.local, { item: stack.item, count: inSlot.count + moved });
+    ref.batch.setSlot(ref.local, withCount(inSlot, inSlot.count + moved));
     return stack.count - moved;
   }
 }

@@ -59,5 +59,5 @@ src/
 素材，不含任何《我的世界》原版资源。详见
 [`public/textures/LICENSE.md`](public/textures/LICENSE.md)。
 
-- `atlas.png`：方块图集，4×4 格，每格 16×16。
+- `atlas.png`：方块图集，4 列 8 行，每格 16×16，没画的格子留空。
 - `crack.png`：挖掘裂纹，10 阶横排成一行。渲染层按挖掘进度横向偏移 uv 取其中一阶。

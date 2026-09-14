@@ -118,6 +118,62 @@ describe('关闭界面时光标上的东西不丢', () => {
   });
 });
 
+describe('工具的损耗跟着那一堆走（ADR-0010）', () => {
+  /** 一把已损耗 20 点的木镐。 */
+  const WORN: ItemStack = { item: ItemType.WoodenPickaxe, count: 1, damage: 20 };
+
+  it('拿起再放下，损耗还在', () => {
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, WORN));
+    screen.clickSlot(0);
+    expect(screen.cursor).toEqual(WORN);
+    screen.clickSlot(5);
+    expect(inventory.slot(5)).toEqual(WORN);
+  });
+
+  it('两把损耗不同的木镐交换，各自的损耗不串', () => {
+    const fresh = pickaxe();
+    const { inventory, screen } = opened((inv) => {
+      inv.setSlot(0, WORN);
+      inv.setSlot(1, fresh);
+    });
+    screen.clickSlot(0);
+    screen.clickSlot(1);
+    expect(inventory.slot(1)).toEqual(WORN);
+    expect(screen.cursor).toEqual(fresh);
+  });
+
+  it('关闭界面时网格里那把用旧的木镐退回背包，不会变成新的', () => {
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, WORN), grid());
+    screen.clickSlot(0);
+    screen.clickSlot(FIRST_EXTRA);
+    expect(screen.toggle()).toEqual([]);
+    expect(inventory.slot(0)).toEqual(WORN);
+  });
+
+  it('背包全满时从网格交出去的那把木镐也带着损耗', () => {
+    const { inventory, screen } = opened((inv) => {
+      inv.setSlot(0, WORN);
+      for (let i = 1; i < INVENTORY_SIZE; i++) inv.setSlot(i, dirt(64));
+    }, grid());
+    // 木镐进网格；界面开着时拾取照样往背包里进，它原来那一格被一堆泥土占上：36 格全满
+    screen.clickSlot(0);
+    screen.clickSlot(FIRST_EXTRA);
+    inventory.setSlot(0, dirt(64));
+    expect(screen.toggle()).toEqual([WORN]);
+  });
+
+  it('背包全满时从光标交出去的那把木镐也带着损耗', () => {
+    const { inventory, screen } = opened((inv) => {
+      inv.setSlot(0, WORN);
+      for (let i = 1; i < INVENTORY_SIZE; i++) inv.setSlot(i, dirt(64));
+    });
+    screen.clickSlot(0);
+    // 界面开着时拾取照样往背包里进：原格被一堆泥土占上
+    inventory.setSlot(0, dirt(64));
+    expect(screen.toggle()).toEqual([WORN]);
+  });
+});
+
 describe('背包界面的光标物品', () => {
   it('点有物品的格拿起整堆，那一格空了', () => {
     const { inventory, screen } = opened((inv) => inv.add(dirt(10)));

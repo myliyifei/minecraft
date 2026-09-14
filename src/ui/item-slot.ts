@@ -1,6 +1,6 @@
-import type { ItemStack } from '../core/item';
+import { durabilityOf, type ItemStack } from '../core/item';
 import { ATLAS_COLS, ATLAS_PATH, ATLAS_ROWS, ITEM_TILES, faceTile, tileCell } from '../render/atlas';
-import { ITEM_NAMES } from './strings';
+import { ITEM_NAMES, STRINGS, durabilityLabel } from './strings';
 
 /**
  * 用这套格子的是谁：快捷栏，还是背包界面。也就是 class 名的 BEM 块名。
@@ -18,6 +18,8 @@ export interface SlotCell {
   readonly icon: HTMLElement;
   /** 显示数量的那个小标签。与 `ItemStack.count` 不是一回事，一个是元素一个是数字。 */
   readonly countLabel: HTMLElement;
+  /** 工具格底部那条耐久条（见 CONTEXT.md 的「耐久」）。满耐久与非工具时藏着。 */
+  readonly durability: HTMLElement;
   /** 上一次画的那一堆。与当前相同就跳过这一格。 */
   shown?: ItemStack;
 }
@@ -70,9 +72,21 @@ export function buildItemBox(
   const countLabel = document.createElement('span');
   countLabel.className = `${block}__count`;
 
-  slot.append(icon, countLabel);
+  // 耐久条与数量标签同级，压在图标底边上：暗色的轨道加一段亮色的填充，填充的长度由
+  // --durability（剩余比例）决定，算式在 style.css——与等级条同一套做法。
+  const durability = document.createElement('span');
+  durability.className = `${block}__durability`;
+  durability.setAttribute('role', 'progressbar');
+  durability.setAttribute('aria-label', STRINGS.durability);
+  durability.setAttribute('aria-valuemin', '0');
+  durability.hidden = true;
+  const fill = document.createElement('span');
+  fill.className = `${block}__durability-fill`;
+  durability.append(fill);
+
+  slot.append(icon, countLabel, durability);
   parent.append(slot);
-  return { slot, icon, countLabel };
+  return { slot, icon, countLabel, durability };
 }
 
 /** 内容变了才重画一格。没变就一个 DOM 属性都不碰。 */
@@ -89,6 +103,7 @@ function paintSlot(cell: SlotCell, stack: ItemStack | undefined): void {
     cell.slot.removeAttribute('title');
     cell.icon.hidden = true;
     cell.countLabel.textContent = '';
+    cell.durability.hidden = true;
     return;
   }
 
@@ -96,16 +111,37 @@ function paintSlot(cell: SlotCell, stack: ItemStack | undefined): void {
   const { col, row } = tileCell(faceTile(ITEM_TILES[stack.item], 'front'));
   // 物品种类进 data 属性：端到端测试据此认出这一格里是什么，不必去比图片像素。
   cell.slot.dataset.item = String(stack.item);
-  cell.slot.title = ITEM_NAMES[stack.item];
   cell.icon.style.setProperty('--tile-col', String(col));
   cell.icon.style.setProperty('--tile-row', String(row));
   cell.icon.hidden = false;
   // 只有一个时不写数字，与原版一致：满屏的「1」除了占地方没有信息。
   cell.countLabel.textContent = stack.count > 1 ? String(stack.count) : '';
+  paintDurability(cell, stack);
 }
 
-/** 两堆物品的种类与数量都一样吗。 */
+/**
+ * 工具格上的耐久条：损耗过才画，长度按剩余比例；满耐久与非工具不画，与原版一致。
+ * 提示文字随之带上「耐久 58/59」，读屏软件也从进度条上读到同样的数。
+ */
+function paintDurability(cell: SlotCell, stack: ItemStack): void {
+  const name = ITEM_NAMES[stack.item];
+  const durability = durabilityOf(stack);
+  if (!durability || durability.left >= durability.max) {
+    cell.slot.title = name;
+    cell.durability.hidden = true;
+    return;
+  }
+  const { left, max } = durability;
+  cell.slot.title = durabilityLabel(name, left, max);
+  cell.durability.setAttribute('aria-valuenow', String(left));
+  cell.durability.setAttribute('aria-valuemax', String(max));
+  // 只给比例，长度与颜色的算式留在 CSS 里，与等级条同一套分工。
+  cell.durability.style.setProperty('--durability', String(left / max));
+  cell.durability.hidden = false;
+}
+
+/** 两堆物品的种类、数量与损耗都一样吗。 */
 function sameStack(a: ItemStack | undefined, b: ItemStack | undefined): boolean {
   if (!a || !b) return a === b;
-  return a.item === b.item && a.count === b.count;
+  return a.item === b.item && a.count === b.count && a.damage === b.damage;
 }

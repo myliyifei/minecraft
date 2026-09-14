@@ -1,5 +1,5 @@
 import { isSlotIndex } from './inventory';
-import type { ItemStack, SlotBatch } from './item';
+import { withCount, type ItemStack, type SlotBatch } from './item';
 import { matchRecipe, type GridSize } from './recipe';
 
 /** 背包界面那块合成网格的尺寸（见 CONTEXT.md 的「合成网格」）：2x2。 */
@@ -63,7 +63,7 @@ export class CraftingGrid implements SlotBatch, GridSize {
     for (let i = 0; i < this.cells.length; i++) {
       const stack = this.cells[i];
       if (!stack) continue;
-      this.cells[i] = stack.count > 1 ? { item: stack.item, count: stack.count - 1 } : undefined;
+      this.cells[i] = stack.count > 1 ? withCount(stack, stack.count - 1) : undefined;
     }
   }
 }

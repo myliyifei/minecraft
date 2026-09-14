@@ -1,7 +1,7 @@
 import type { BlockView } from './block';
 import { TAU } from './constants';
 import { stepEntities } from './entity';
-import type { ItemSink, ItemStack, ItemType } from './item';
+import { withCount, type ItemSink, type ItemStack, type ItemType } from './item';
 import { hashCoords } from './noise';
 import {
   expand,
@@ -158,11 +158,15 @@ export class Drops implements DropsView, DropSink {
   }
 }
 
-/** 一个掉落物：位置、速度、物品与数量、存活 tick。 */
+/**
+ * 一个掉落物：位置、速度、那一堆物品、存活 tick。
+ *
+ * 存的是整堆（`ItemStack`）而不是拆开的种类与数量：工具的损耗在那一堆上（ADR-0010），
+ * 关界面时扔到脚下的一把旧镐拾回来仍是旧的。
+ */
 class Drop implements DropView {
   readonly id: number;
-  readonly item: ItemType;
-  private amount: number;
+  private stack: ItemStack;
   // 与玩家一样存成三个数而不是一个 Vec3：逐轴解算碰撞时每次只改一个分量。
   private x: number;
   private y: number;
@@ -177,8 +181,7 @@ class Drop implements DropView {
 
   constructor(id: number, stack: ItemStack, position: Vec3, velocity: Horizontal) {
     this.id = id;
-    this.item = stack.item;
-    this.amount = stack.count;
+    this.stack = stack;
     this.x = this.prevX = position.x;
     this.y = this.prevY = position.y;
     this.z = this.prevZ = position.z;
@@ -186,8 +189,12 @@ class Drop implements DropView {
     this.velocityZ = velocity.z;
   }
 
+  get item(): ItemType {
+    return this.stack.item;
+  }
+
   get count(): number {
-    return this.amount;
+    return this.stack.count;
   }
 
   get age(): number {
@@ -213,9 +220,9 @@ class Drop implements DropView {
   collectInto(pickupBox: Hitbox, into: ItemSink): boolean {
     if (this.ticks <= PICKUP_DELAY_TICKS) return false;
     if (!touches(pickupBox, this.hitbox)) return false;
-    const left = into.add({ item: this.item, count: this.amount });
+    const left = into.add(this.stack);
     if (left === 0) return true;
-    this.amount = left;
+    this.stack = withCount(this.stack, left);
     return false;
   }
 

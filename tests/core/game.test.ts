@@ -1722,6 +1722,93 @@ describe('GameCore 的木制工具', () => {
     expect(core.craftingTableScreen.open).toBe(true);
     expect(core.inventory.held).toEqual(PICKAXE);
   });
+
+  /** 木镐挖石头要多少 tick。写死 23（issue #22）：这一节验的是接线，数值本身在 mining.test.ts 里断言。 */
+  const PICKAXE_STONE_TICKS = 23;
+  const COBBLESTONE_X1 = { item: ItemType.Cobblestone, count: 1 };
+
+  /** 手持木镐、正前方紧挨着摆了一块石头并对准它的核心。 */
+  function pickaxeFacingStone(): GameCore {
+    const core = holdingPickaxe();
+    core.setBlock(...AHEAD_FROM_PIT, BlockType.Stone);
+    core.tick();
+    expect(core.mining.target).toMatchObject(toVec(AHEAD_FROM_PIT));
+    return core;
+  }
+
+  it('持木镐挖石头 23 tick 掉圆石、木镐损耗 1 点：圆石拾进第二格', () => {
+    const core = pickaxeFacingStone();
+    core.setMining(true);
+    core.tick(PICKAXE_STONE_TICKS - 1);
+    expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Stone);
+    expect(core.inventory.held).toEqual(PICKAXE);
+
+    core.tick(1);
+    expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Air);
+    expect(core.inventory.held).toEqual({ ...PICKAXE, damage: 1 });
+    core.setMining(false);
+    core.tick(PICKUP_TICKS);
+    expect(core.inventory.slot(1)).toEqual(COBBLESTONE_X1);
+  });
+
+  it('挖到一半切到空格再切回木镐：进度不归零，剩下的按木镐算', () => {
+    const core = pickaxeFacingStone();
+    // 先空着手挖 10 tick（选中格切到空的第 1 格），再切回木镐：一共 23 tick 就碎
+    core.selectHotbarSlot(1);
+    core.setMining(true);
+    core.tick(10);
+    expect(core.mining.progress).toBeCloseTo(10 / 150, 10);
+    core.selectHotbarSlot(0);
+    core.tick(PICKAXE_STONE_TICKS - 10 - 1);
+    expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Stone);
+    core.tick(1);
+    expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Air);
+  });
+
+  it('圆石放得下去，持木镐 30 tick 再挖回来；空手挖圆石 200 tick 什么都不掉', () => {
+    const core = pickaxeFacingStone();
+    core.setMining(true);
+    core.tick(PICKAXE_STONE_TICKS);
+    core.setMining(false);
+    core.tick(PICKUP_TICKS);
+    expect(core.inventory.slot(1)).toEqual(COBBLESTONE_X1);
+
+    // 手持圆石侧过去斜看旁边那块草，放在它顶上
+    core.selectHotbarSlot(1);
+    look(core, EAST_YAW, ASIDE_PITCH);
+    core.tick();
+    expect(core.mining.target).toMatchObject(toVec(ASIDE));
+    core.use();
+    core.tick();
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Cobblestone);
+    expect(core.inventory.slot(1)).toBeUndefined();
+
+    // 手持圆石（现在空了，等于空手）挖它：200 tick 才碎，什么都不掉
+    core.tick();
+    expect(core.mining.target).toMatchObject(toVec(ABOVE_ASIDE));
+    core.setMining(true);
+    core.tick(199);
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Cobblestone);
+    core.tick(1);
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Air);
+    core.setMining(false);
+    core.tick(PICKUP_TICKS);
+    expect(core.inventory.slot(1)).toBeUndefined();
+
+    // 再放一块，换回木镐挖：30 tick，圆石回到背包
+    core.setBlock(...ABOVE_ASIDE, BlockType.Cobblestone);
+    core.selectHotbarSlot(0);
+    core.tick();
+    core.setMining(true);
+    core.tick(29);
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Cobblestone);
+    core.tick(1);
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Air);
+    core.setMining(false);
+    core.tick(PICKUP_TICKS);
+    expect(core.inventory.slot(1)).toEqual(COBBLESTONE_X1);
+    expect(core.inventory.held).toEqual({ ...PICKAXE, damage: 2 });
+  });
 });
 
 describe('GameCore 的初始区块加载', () => {

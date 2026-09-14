@@ -307,6 +307,34 @@ body {
 }
 
 /*
+ * 耐久条：工具格底部一条细线，暗色轨道上一段亮色填充，填充的长度是剩余耐久的比例
+ * （--durability 由 item-slot.ts 写在轨道上，0 到 1）。满耐久时 item-slot.ts 把整条藏起来，
+ * 所以出现即表示这把工具用过。
+ *
+ * 填充的颜色随比例从绿转红：色相 120（绿）乘比例，剩一半时是黄，快用坏时是红——一眼看得出
+ * 还能用多久，与原版一致。硬边，不做渐变。
+ */
+.hotbar__durability,
+.invscreen__durability {
+  position: absolute;
+  bottom: 3px;
+  left: calc((var(--slot-cell) - var(--slot-icon)) / 2);
+  width: var(--slot-icon);
+  height: 2px;
+  background: rgb(0 0 0 / 70%);
+}
+
+.hotbar__durability-fill,
+.invscreen__durability-fill {
+  --durability-hue: calc(var(--durability, 1) * 120);
+
+  display: block;
+  width: calc(var(--durability, 1) * 100%);
+  height: 100%;
+  background: hsl(var(--durability-hue) 80% 50%);
+}
+
+/*
  * 背包界面：按 E 打开的一层覆盖层，铺满屏幕、压暗世界，正中一块面板。
  *
  * 铺满屏幕是有用的：界面开着时点哪儿都落在这一层上，不会点到画布上把鼠标又抓回

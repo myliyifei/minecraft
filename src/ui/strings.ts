@@ -29,7 +29,17 @@ export const STRINGS = {
   // 读屏软件报一条配方时缀在成品名后面的状态：材料够不够。
   recipeCraftable: '可合成',
   recipeUncraftable: '材料不足',
+  // 工具格上那条耐久条的名字，读屏软件报它时缀上还剩几点。
+  durability: '耐久',
 } as const;
+
+/**
+ * 损耗过的工具那一格的提示文字：物品名，加还剩几点耐久。满耐久的工具只报物品名，与耐久条
+ * 「满耐久不显示」同一条规则。
+ */
+export function durabilityLabel(itemName: string, left: number, max: number): string {
+  return `${itemName}，${STRINGS.durability} ${left}/${max}`;
+}
 
 /**
  * 读屏软件报配方书里的一条时的文字：成品名，加材料够不够。
@@ -51,4 +61,5 @@ export const ITEM_NAMES: Readonly<Record<ItemType, string>> = {
   [ItemType.WoodenPickaxe]: '木镐',
   [ItemType.WoodenAxe]: '木斧',
   [ItemType.WoodenShovel]: '木铲',
+  [ItemType.Cobblestone]: '圆石',
 };

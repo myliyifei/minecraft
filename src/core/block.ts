@@ -13,6 +13,7 @@ export const BlockType = {
   OakLeaves: 6,
   OakPlanks: 7,
   CraftingTable: 8,
+  Cobblestone: 9,
 } as const;
 
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
@@ -53,7 +54,7 @@ export interface BlockDef {
    */
   readonly properTool: ToolClass;
   /**
-   * 挖它要正确工具（石头要镐）。空手照样挖得动，只是慢得多——每点硬度从 30 tick
+   * 挖它要正确工具（石头与圆石要镐）。空手照样挖得动，只是慢得多——每点硬度从 30 tick
    * 变成 100 tick，石头因此是 150 tick 而不是 45——而且什么都拿不到（见 `blockDrop`）。
    */
   readonly requiresTool: boolean;
@@ -61,8 +62,7 @@ export interface BlockDef {
    * 挖掉它掉出什么（见 CONTEXT.md 的「掉落表」），`null` 表示什么都不掉。
    *
    * 这一列是「拿着正确工具时掉什么」。需要工具的方块在没有正确工具时一律什么都不掉，
-   * 那条规则在 `blockDrop` 里，不在数据里。石头这一行仍记 `null`：圆石这种物品要等
-   * #22，那时把它换成圆石，空手挖不到东西的行为自然仍然成立。
+   * 那条规则在 `blockDrop` 里，不在数据里：石头这一行记的是圆石，空手挖石头仍然什么都拿不到。
    */
   readonly drop: ItemStack | null;
   /**
@@ -127,14 +127,14 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
   },
-  // 空手挖得掉石头，但什么也拿不到（要镐）。
+  // 石头要镐：持镐挖掉掉圆石（与原版一致），空手挖得掉但什么也拿不到。
   [BlockType.Stone]: {
     opaque: true,
     solid: true,
     hardness: 1.5,
     properTool: ToolClass.Pickaxe,
     requiresTool: true,
-    drop: null,
+    drop: one(ItemType.Cobblestone),
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
   },
@@ -198,6 +198,18 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     drop: one(ItemType.CraftingTable),
     experience: COMMON_EXPERIENCE,
     use: BlockUse.CraftingTable,
+  },
+  // 圆石（issue #22）：石头持镐挖出来的建材，比石头硬半点。同样要镐，挖掉掉回圆石本身，
+  // 放下去再挖起来材料不损失。
+  [BlockType.Cobblestone]: {
+    opaque: true,
+    solid: true,
+    hardness: 2,
+    properTool: ToolClass.Pickaxe,
+    requiresTool: true,
+    drop: one(ItemType.Cobblestone),
+    experience: COMMON_EXPERIENCE,
+    use: BlockUse.None,
   },
 };
 
@@ -317,6 +329,7 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   [ItemType.WoodenPickaxe]: null,
   [ItemType.WoodenAxe]: null,
   [ItemType.WoodenShovel]: null,
+  [ItemType.Cobblestone]: BlockType.Cobblestone,
 };
 
 /**

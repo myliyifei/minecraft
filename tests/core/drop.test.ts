@@ -282,3 +282,16 @@ describe('掉落物的存活时间', () => {
     expect(drops.all()[0]!.age).toBe(7);
   });
 });
+
+describe('掉落物带着工具的损耗（ADR-0010）', () => {
+  it('扔出去的用旧的木镐拾回来还是那把：损耗不丢', () => {
+    const worn: ItemStack = { item: ItemType.WoodenPickaxe, count: 1, damage: 33 };
+    const { drops } = dropsOnFlatGround();
+    const inventory = new Inventory();
+    drops.spawnInBlock(worn, 0, FLAT_STAND_Y, 0);
+
+    nearby(drops, playerAt(0.5, 0.5), PICKUP_DELAY_TICKS + 2, inventory);
+    expect(drops.count).toBe(0);
+    expect(inventory.slot(0)).toEqual(worn);
+  });
+});

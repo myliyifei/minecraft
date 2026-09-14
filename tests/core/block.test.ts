@@ -42,6 +42,8 @@ const HAND_MINING: Array<[string, BlockType, number, number]> = [
   ['木板', BlockType.OakPlanks, 2, 60],
   // 工作台比木板硬半点（issue #19）
   ['工作台', BlockType.CraftingTable, 2.5, 75],
+  // 圆石要镐（issue #22），空着手同样是每点硬度 100 tick
+  ['圆石', BlockType.Cobblestone, 2, 200],
 ];
 
 describe('方块的硬度表', () => {
@@ -78,11 +80,43 @@ describe('方块的硬度表', () => {
     expect(isBreakable(BlockType.OakLeaves)).toBe(true);
   });
 
-  it('本切片只有石头需要工具', () => {
+  it('本切片只有石头与圆石需要工具', () => {
+    const needsTool = new Set<BlockType>([BlockType.Stone, BlockType.Cobblestone]);
     for (const block of Object.values(BlockType)) {
-      expect(BLOCKS[block].requiresTool, `方块 ${block}`).toBe(block === BlockType.Stone);
+      expect(BLOCKS[block].requiresTool, `方块 ${block}`).toBe(needsTool.has(block));
     }
   });
+});
+
+describe('手持工具时的挖掘耗时', () => {
+  /**
+   * issue #22 给的关键数值：向上取整（硬度 × 30 ÷ 倍率），倍率只在正确工具上算数；
+   * 需要工具的方块没有正确工具时每点硬度 100 tick，这条优先。写死字面值，不从公式反算。
+   */
+  const TOOL_MINING: Array<[string, BlockType, MiningTool, number]> = [
+    ['持木镐挖石头', BlockType.Stone, tool(ToolClass.Pickaxe, WOODEN), 23],
+    ['持木镐挖圆石', BlockType.Cobblestone, tool(ToolClass.Pickaxe, WOODEN), 30],
+    ['持木铲挖泥土', BlockType.Dirt, tool(ToolClass.Shovel, WOODEN), 8],
+    ['持木铲挖草方块', BlockType.Grass, tool(ToolClass.Shovel, WOODEN), 9],
+    ['持木斧挖原木', BlockType.OakLog, tool(ToolClass.Axe, WOODEN), 30],
+    ['持木斧挖工作台', BlockType.CraftingTable, tool(ToolClass.Axe, WOODEN), 38],
+    ['持石镐挖石头', BlockType.Stone, tool(ToolClass.Pickaxe, STONE), 12],
+    ['持石斧挖原木', BlockType.OakLog, tool(ToolClass.Axe, STONE), 15],
+    // 拿错工具与空手一样慢
+    ['持木铲挖原木', BlockType.OakLog, tool(ToolClass.Shovel, WOODEN), 60],
+    ['持木斧挖泥土', BlockType.Dirt, tool(ToolClass.Axe, WOODEN), 15],
+    // 需要工具的方块拿错工具仍按「需要工具」那一档算，倍率不起作用
+    ['持石斧挖石头', BlockType.Stone, tool(ToolClass.Axe, STONE), 150],
+    ['持木铲挖圆石', BlockType.Cobblestone, tool(ToolClass.Shovel, WOODEN), 200],
+    // 树叶没有正确工具，谁挖都一样
+    ['持木斧挖树叶', BlockType.OakLeaves, tool(ToolClass.Axe, WOODEN), 6],
+  ];
+
+  for (const [name, block, held, ticks] of TOOL_MINING) {
+    it(`${name}要 ${ticks} tick`, () => {
+      expect(miningTicks(block, held)).toBe(ticks);
+    });
+  }
 });
 
 describe('方块表的正确工具一列', () => {
@@ -94,6 +128,7 @@ describe('方块表的正确工具一列', () => {
     ['草方块', BlockType.Grass, ToolClass.Shovel],
     ['泥土', BlockType.Dirt, ToolClass.Shovel],
     ['石头', BlockType.Stone, ToolClass.Pickaxe],
+    ['圆石', BlockType.Cobblestone, ToolClass.Pickaxe],
     ['原木', BlockType.OakLog, ToolClass.Axe],
     ['木板', BlockType.OakPlanks, ToolClass.Axe],
     ['工作台', BlockType.CraftingTable, ToolClass.Axe],
@@ -128,8 +163,9 @@ describe('空手挖掘的掉落表', () => {
     ['橡木木板掉木板', BlockType.OakPlanks, ItemType.OakPlanks],
     ['工作台掉工作台', BlockType.CraftingTable, ItemType.CraftingTable],
     ['树叶什么都不掉', BlockType.OakLeaves, null],
-    // 石头要镐，空着手挖掉了也拿不到东西
+    // 石头与圆石要镐，空着手挖掉了也拿不到东西
     ['空手挖石头什么都不掉', BlockType.Stone, null],
+    ['空手挖圆石什么都不掉', BlockType.Cobblestone, null],
     ['基岩什么都不掉', BlockType.Bedrock, null],
   ];
 
@@ -176,6 +212,12 @@ describe('掉落看手上的工具类别', () => {
     }
   });
 
+  it('持镐挖石头掉 1 个圆石，挖圆石也掉 1 个圆石（issue #22）', () => {
+    const cobblestone = { item: ItemType.Cobblestone, count: 1 };
+    expect(blockDrop(BlockType.Stone, ToolClass.Pickaxe)).toEqual(cobblestone);
+    expect(blockDrop(BlockType.Cobblestone, ToolClass.Pickaxe)).toEqual(cobblestone);
+  });
+
   it('草方块持镐挖照样掉泥土：镐不是它的正确工具，也不影响掉落', () => {
     expect(blockDrop(BlockType.Grass, ToolClass.Pickaxe)).toEqual({
       item: ItemType.Dirt,
@@ -194,6 +236,7 @@ describe('挖掉一块给多少经验', () => {
     ['草方块', BlockType.Grass, 30],
     ['泥土', BlockType.Dirt, 30],
     ['石头', BlockType.Stone, 30],
+    ['圆石', BlockType.Cobblestone, 30],
     ['树叶', BlockType.OakLeaves, 30],
     ['木板', BlockType.OakPlanks, 30],
     ['工作台', BlockType.CraftingTable, 30],
@@ -237,6 +280,7 @@ describe('放置表', () => {
     ['原木放下去是原木方块', ItemType.OakLog, BlockType.OakLog],
     ['木板放下去是木板方块', ItemType.OakPlanks, BlockType.OakPlanks],
     ['工作台放下去是工作台方块', ItemType.CraftingTable, BlockType.CraftingTable],
+    ['圆石放下去是圆石方块', ItemType.Cobblestone, BlockType.Cobblestone],
     ['木棍放不下去', ItemType.Stick, null],
     ['木镐放不下去', ItemType.WoodenPickaxe, null],
     ['木斧放不下去', ItemType.WoodenAxe, null],
@@ -253,6 +297,11 @@ describe('放置表', () => {
     // issue #18：放下去的木板方块挖掉后掉回木板，材料不损失
     const block = placedBlock(ItemType.OakPlanks)!;
     expect(blockDrop(block, ToolClass.None)).toEqual({ item: ItemType.OakPlanks, count: 1 });
+  });
+
+  it('圆石放下去再持镐挖掉，掉回圆石：圆石是可回收的建材（issue #22）', () => {
+    const block = placedBlock(ItemType.Cobblestone)!;
+    expect(blockDrop(block, ToolClass.Pickaxe)).toEqual({ item: ItemType.Cobblestone, count: 1 });
   });
 });
 

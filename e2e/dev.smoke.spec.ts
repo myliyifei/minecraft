@@ -10,7 +10,14 @@ import {
 import { CRAFTING_TABLE_GRID, INVENTORY_CRAFTING_GRID } from '../src/core/crafting-grid';
 import { PICKUP_DELAY_TICKS } from '../src/core/drop';
 import { HOTBAR_SIZE, INVENTORY_SIZE } from '../src/core/inventory';
-import { BARE_HAND, ItemType, type ItemStack } from '../src/core/item';
+import {
+  BARE_HAND,
+  ItemType,
+  TOOL_MATERIALS,
+  ToolMaterial,
+  miningToolOf,
+  type ItemStack,
+} from '../src/core/item';
 import {
   MAX_PITCH,
   PLAYER_EYE_HEIGHT,
@@ -37,7 +44,7 @@ import {
   tileCell,
 } from '../src/render/atlas';
 import { recipesFor, type GridSize } from '../src/core/recipe';
-import { ITEM_NAMES, recipeLabel, STRINGS } from '../src/ui/strings';
+import { ITEM_NAMES, durabilityLabel, recipeLabel, STRINGS } from '../src/ui/strings';
 import {
   countCanvasColors,
   installPixelProbe,
@@ -1590,16 +1597,17 @@ test('右下角画着手上那块方块，切换选中格时跟着换', async ({
   expect(errors).toEqual([]);
 });
 
-test('在工作台里造出木镐拿在手上：快捷栏画它的图标与中文名，右下角画平面图标而不是立方体', async ({
-  page,
-}) => {
-  await waitForFullViewDistance(page);
-
-  // 原木只能挖来，木镐只能造出来：整段在一次同步的 evaluate 里给核心，读到的就是刚断言的那一帧。
-  const hand = await page.evaluate(
-    ({ pitch, logTicks, dirtTicks, pickupTicks, oakLog, table, eyeHeight, planks, stick, pickaxe }) => {
-      const { core, renderer } = window.__VOXEL__!;
-      const pixel = window.__PIXEL_RGB__!;
+/**
+ * 通过调试句柄让玩家拿到一把木镐：脚下换成原木挖穿掉进坑里，坑里眼前再摆一根原木挖来，再远一格
+ * 摆工作台，用配方书三步造出木镐放进第 0 格（选中格），最后关掉工作台界面。
+ *
+ * 原木只能挖来，木镐只能造出来：核心没有往背包里塞物品的入口。整段在一次同步的 evaluate 里
+ * 给核心，游戏循环插不进来。返回的是这段结束时玩家的整数坐标，后面几条测试据此在眼前摆方块。
+ */
+async function craftPickaxeIntoHand(page: Page): Promise<{ x: number; eyeY: number; z: number }> {
+  return page.evaluate(
+    ({ pitch, logTicks, pickupTicks, oakLog, table, eyeHeight, planks, stick, pickaxe }) => {
+      const { core } = window.__VOXEL__!;
       const look = (yaw: number, to: number): void =>
         core.turn(yaw - core.player.yaw, to - core.player.pitch);
       const dig = (ticks: number): void => {
@@ -1646,27 +1654,12 @@ test('在工作台里造出木镐拿在手上：快捷栏画它的图标与中�
       core.clickSlot(0);
       core.toggleInventory();
       core.tick();
-
-      renderer.syncChunkMeshes();
-      renderer.render(1);
-      const tool = renderer.heldItem;
-      if (!tool) throw new Error('手上有木镐时右下角应该画着东西');
-      const toolRgb = pixel(tool.screen.x, tool.screen.y);
-
-      // 低头再挖一块泥土：进第二格，切过去手上就是泥土
-      look(0, -pitch);
-      dig(dirtTicks);
-      core.selectHotbarSlot(1);
-      core.tick();
-      renderer.render(1);
-      const dirt = renderer.heldItem;
-      window.__VOXEL__!.hud.update();
-      return { tool, toolRgb, dirt, hotbar: core.inventory.hotbar() };
+      if (core.inventory.held?.item !== pickaxe) throw new Error('造完木镐应该拿在手上');
+      return { x, eyeY, z };
     },
     {
       pitch: MAX_PITCH,
       logTicks: miningTicks(BlockType.OakLog, BARE_HAND),
-      dirtTicks: miningTicks(BlockType.Dirt, BARE_HAND),
       pickupTicks: PICKUP_DELAY_TICKS + 2,
       oakLog: BlockType.OakLog,
       table: BlockType.CraftingTable,
@@ -1676,8 +1669,48 @@ test('在工作台里造出木镐拿在手上：快捷栏画它的图标与中�
       pickaxe: ItemType.WoodenPickaxe,
     },
   );
+}
 
-  expect(hand.hotbar[0]).toEqual({ item: ItemType.WoodenPickaxe, count: 1 });
+test('在工作台里造出木镐拿在手上：快捷栏画它的图标与中文名，右下角画平面图标而不是立方体', async ({
+  page,
+}) => {
+  await waitForFullViewDistance(page);
+  await craftPickaxeIntoHand(page);
+
+  // 渲染层直接调：不锁鼠标、不等游戏循环，读到的就是刚画的那一帧。
+  const hand = await page.evaluate(
+    ({ pitch, dirtTicks, pickupTicks }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const pixel = window.__PIXEL_RGB__!;
+
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      const tool = renderer.heldItem;
+      if (!tool) throw new Error('手上有木镐时右下角应该画着东西');
+      const toolRgb = pixel(tool.screen.x, tool.screen.y);
+
+      // 低头再挖一块泥土：进第二格，切过去手上就是泥土
+      core.turn(-core.player.yaw, -pitch - core.player.pitch);
+      core.setMining(true);
+      core.tick(dirtTicks);
+      core.setMining(false);
+      core.tick(pickupTicks);
+      core.selectHotbarSlot(1);
+      core.tick();
+      renderer.render(1);
+      const dirt = renderer.heldItem;
+      window.__VOXEL__!.hud.update();
+      return { tool, toolRgb, dirt, hotbar: core.inventory.hotbar() };
+    },
+    {
+      pitch: MAX_PITCH,
+      // 持镐挖泥土与空手一样慢：镐不是泥土的正确工具
+      dirtTicks: miningTicks(BlockType.Dirt, BARE_HAND),
+      pickupTicks: PICKUP_DELAY_TICKS + 2,
+    },
+  );
+
+  expect(hand.hotbar[0]).toEqual({ item: ItemType.WoodenPickaxe, count: 1, damage: 1 });
   expect(hand.hotbar[1]).toEqual({ item: ItemType.Dirt, count: 1 });
 
   // 手持木镐：画的是平面图标，落在右下角，那一处是木柄的褐而不是天空的蓝
@@ -1688,16 +1721,94 @@ test('在工作台里造出木镐拿在手上：快捷栏画它的图标与中�
   // 切回泥土又是立方体
   expect(hand.dirt).toMatchObject({ item: ItemType.Dirt, shape: HeldItemShape.Cube });
 
-  // 快捷栏第一格画的是木镐的图标与中文名；只有一把，不写数字
+  // 快捷栏第一格画的是木镐的图标；只有一把，不写数字
   const slot = page.locator('#hotbar .hotbar__slot[data-slot="0"]');
   await expect(slot).toHaveAttribute('data-item', String(ItemType.WoodenPickaxe));
-  await expect(slot).toHaveAttribute('title', ITEM_NAMES[ItemType.WoodenPickaxe]);
   await expect(slot.locator('.hotbar__count')).toHaveText('');
   const { col, row } = tileCell(ITEM_TILES[ItemType.WoodenPickaxe].side);
   const icon = slot.locator('.hotbar__icon');
   await expect(icon).toBeVisible();
   await expect(icon).toHaveCSS('--tile-col', String(col));
   await expect(icon).toHaveCSS('--tile-row', String(row));
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 在玩家眼前那一格摆一块石头，持木镐挖穿它并拾起掉出来的圆石，再刷一次 HUD。
+ * 玩家站在 `craftPickaxeIntoHand` 留下的那个坑里，眼前那一格正是第二根原木挖掉后空出来的。
+ */
+async function mineStoneAhead(page: Page, at: { x: number; eyeY: number; z: number }): Promise<void> {
+  await page.evaluate(
+    ({ x, eyeY, z, stone, stoneTicks, pickupTicks }) => {
+      const { core, hud } = window.__VOXEL__!;
+      core.setBlock(x, eyeY, z - 1, stone);
+      core.turn(-core.player.yaw, -core.player.pitch);
+      core.tick();
+      const target = core.mining.target;
+      if (!target || target.z !== z - 1) throw new Error('平视时应该对准眼前那块石头');
+      core.setMining(true);
+      core.tick(stoneTicks);
+      core.setMining(false);
+      core.tick(pickupTicks);
+      hud.update();
+    },
+    {
+      ...at,
+      stone: BlockType.Stone,
+      stoneTicks: miningTicks(BlockType.Stone, miningToolOf({ item: ItemType.WoodenPickaxe, count: 1 })),
+      pickupTicks: PICKUP_DELAY_TICKS + 2,
+    },
+  );
+}
+
+test('持木镐挖石头掉圆石，快捷栏的木镐格上出现耐久条并随挖掘缩短，背包界面里同一格也有', async ({
+  page,
+}) => {
+  await waitForFullViewDistance(page);
+  const at = await craftPickaxeIntoHand(page);
+  await page.evaluate(() => window.__VOXEL__!.hud.update());
+
+  // 新造的木镐满耐久：格子上没有耐久条，提示只有物品名
+  const slot = page.locator('#hotbar .hotbar__slot[data-slot="0"]');
+  const bar = slot.locator('.hotbar__durability');
+  await expect(slot).toHaveAttribute('data-item', String(ItemType.WoodenPickaxe));
+  await expect(slot).toHaveAttribute('title', ITEM_NAMES[ItemType.WoodenPickaxe]);
+  await expect(bar).toBeHidden();
+
+  // 挖穿一块石头：第二格拿到圆石，木镐损耗 1 点，耐久条出现，长度是 58/59
+  await mineStoneAhead(page, at);
+  const max = TOOL_MATERIALS[ToolMaterial.Wood].durability;
+  const second = page.locator('#hotbar .hotbar__slot[data-slot="1"]');
+  await expect(second).toHaveAttribute('data-item', String(ItemType.Cobblestone));
+  await expect(second).toHaveAttribute('title', ITEM_NAMES[ItemType.Cobblestone]);
+  await expect(bar).toBeVisible();
+  await expect(bar).toHaveCSS('--durability', String((max - 1) / max));
+  await expect(bar).toHaveAttribute('aria-valuenow', String(max - 1));
+  await expect(bar).toHaveAttribute('aria-valuemax', String(max));
+  await expect(slot).toHaveAttribute(
+    'title',
+    durabilityLabel(ITEM_NAMES[ItemType.WoodenPickaxe], max - 1, max),
+  );
+  // 填充占轨道的 58/59；轨道本身与图标一样宽
+  const fill = bar.locator('.hotbar__durability-fill');
+  const track = (await bar.boundingBox())!.width;
+  const width = (await fill.boundingBox())!.width;
+  expect(width).toBeCloseTo((track * (max - 1)) / max, 0);
+
+  // 再挖一块：损耗 2 点，填充更短；圆石并成 2 个
+  await mineStoneAhead(page, at);
+  await expect(bar).toHaveCSS('--durability', String((max - 2) / max));
+  expect((await fill.boundingBox())!.width).toBeLessThan(width);
+  await expect(second.locator('.hotbar__count')).toHaveText('2');
+
+  // 背包界面里的第 0 格是同一格，耐久条同样在
+  await openInventoryScreen(page);
+  await page.evaluate(() => window.__VOXEL__!.hud.update());
+  const screenBar = page.locator(
+    '#inventory-screen .invscreen__slot[data-slot="0"] .invscreen__durability',
+  );
+  await expect(screenBar).toBeVisible();
+  await expect(screenBar).toHaveCSS('--durability', String((max - 2) / max));
   expect(errors).toEqual([]);
 });
 

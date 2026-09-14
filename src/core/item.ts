@@ -98,7 +98,7 @@ export type ToolMaterial = (typeof ToolMaterial)[keyof typeof ToolMaterial];
 export interface ToolMaterialDef {
   /** 手持正确工具时挖掘耗时除的倍率（见 `miningTicks`）。 */
   readonly speed: number;
-  /** 满耐久是多少点；损耗到这么多点工具就没了（`wornTool`）。 */
+  /** 满耐久是多少点；损耗到这么多点工具消失（`wornTool`）。 */
   readonly durability: number;
 }
 
@@ -209,11 +209,11 @@ export function durabilityOf(stack: ItemStack): Durability | undefined {
 }
 
 /**
- * 这一堆损耗 `points` 点耐久之后是什么：损耗累加；累加到满耐久那一格就空了（undefined）。
+ * 这一堆损耗 `points` 点耐久之后是什么：损耗累加；累加到满耐久工具消失，那一格清空（undefined）。
  * 材料没有耐久，原样返回；空手（undefined）仍是空手。
  *
  * 一次可以损耗好几点：连锁挖掘把集合里每块各 1 点合成一次结算，损耗超过剩余耐久时工具同样
- * 只是没了（见 CONTEXT.md 的「连锁挖掘」）。
+ * 消失（见 CONTEXT.md 的「连锁挖掘」）。
  */
 export function wornTool(stack: ItemStack | undefined, points: number): ItemStack | undefined {
   if (!stack || points <= 0) return stack;

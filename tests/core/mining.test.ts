@@ -716,7 +716,7 @@ describe('挖掘中途换手上的工具', () => {
     expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
   });
 
-  it('从木镐换回空手：进度按空手的耗时重算，剩下的要挖很久', () => {
+  it('从木镐换回空手：进度按空手的 150 tick 重算，一共 150 tick 才碎', () => {
     const { world, mining, hand } = miningTowards(BlockType.Stone, wooden(ItemType.WoodenPickaxe));
     hold(mining, 20);
     hand.setSlot(0, undefined);
@@ -726,6 +726,16 @@ describe('挖掘中途换手上的工具', () => {
     expect(world.getBlock(...TARGET)).toBe(BlockType.Stone);
     hold(mining, 1);
     expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+  });
+
+  it('已挖的 tick 数超过新工具的耗时：空手挖 30 tick 再换木镐，下一 tick 就碎', () => {
+    const { world, mining, hand } = miningTowards(BlockType.Stone);
+    hold(mining, 30);
+    hand.setSlot(0, wooden(ItemType.WoodenPickaxe));
+    // 换上木镐后的第一 tick：31 ≥ 23，当场挖穿；进度不会超过 1
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(mining.progress).toBe(0);
   });
 
   it('挖穿那一 tick 拿的是什么就按什么掉：最后一 tick 才换上木镐，石头掉圆石', () => {
@@ -738,7 +748,7 @@ describe('挖掘中途换手上的工具', () => {
   });
 });
 
-describe('手持工具挖穿方块消耗耐久', () => {
+describe('手持工具挖穿方块损耗耐久', () => {
   it('挖一块泥土后木铲损耗 1 点', () => {
     const { mining, hand } = miningTowards(BlockType.Dirt, wooden(ItemType.WoodenShovel));
     hold(mining, 7);
@@ -790,7 +800,7 @@ describe('手持工具挖穿方块消耗耐久', () => {
     expect(hand.held).toEqual({ item: ItemType.Dirt, count: 5 });
   });
 
-  it('挖不动的基岩不消耗耐久', () => {
+  it('挖不动的基岩不损耗耐久', () => {
     const { mining, hand } = miningTowards(BlockType.Bedrock, wooden(ItemType.WoodenPickaxe));
     hold(mining, 1000);
     expect(hand.held).toEqual(wooden(ItemType.WoodenPickaxe));

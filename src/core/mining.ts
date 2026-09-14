@@ -121,7 +121,7 @@ export class Mining implements MiningView {
     if (!this.hit) return 0;
     const required = miningTicks(
       this.blocks.getBlock(this.hit.x, this.hit.y, this.hit.z),
-      this.heldTool(),
+      miningToolOf(this.hand.held),
     );
     // 基岩的耗时是 Infinity，除出来是 0。耗时为 0 只在目标那一格被别处改成空气之后出现
     // （区块卸载、外部写入），那时候除出来是 NaN，得挡住。
@@ -159,7 +159,7 @@ export class Mining implements MiningView {
     }
 
     // 耗时按这一 tick 手上的工具算：换了工具从下一 tick 起按新工具的耗时比，进度不归零。
-    const tool = this.heldTool();
+    const tool = miningToolOf(this.hand.held);
     this.elapsed++;
     if (this.elapsed < miningTicks(block, tool)) return;
 
@@ -169,7 +169,7 @@ export class Mining implements MiningView {
     for (const cell of this.chain ?? [this.hit]) {
       if (this.breakBlock(cell.x, cell.y, cell.z, tool)) broken++;
     }
-    // 每挖穿一块损耗 1 点，整批一次结算：损耗超过剩余耐久时那些方块照样全碎，工具随后没了
+    // 每挖穿一块损耗 1 点，整批一次结算：损耗超过剩余耐久时那些方块照样全碎，工具随后消失
     // （见 CONTEXT.md 的「连锁挖掘」）。空手与拿着材料时 `wearHeld` 什么都不做。
     this.hand.wearHeld(broken);
     this.restart();
@@ -180,7 +180,9 @@ export class Mining implements MiningView {
 
   /**
    * 挖掉一格：变成空气，掉落表里有东西就在原地掉出一个掉落物，有经验就再生成一个经验球。
-   * 返回真的挖掉了没有——耐久按挖掉的块数算。
+   * 返回真的挖掉了没有——耐久按挖掉的块数算。spec 说的是「硬度大于 0 的方块」，这里判的是
+   * `isBreakable`：方块表里硬度为 0 的只有空气，两者目前等价；将来加了硬度 0 又挖得动的方块
+   * （草丛那类）再在这里分开。
    *
    * 方块种类当场重读而不是沿用连锁开始时记下的：那之后世界可能被别处改过（区块卸载、
    * 外部写入），已经不在了的格子直接跳过，不会凭空掉出东西，也不算一块。
@@ -198,10 +200,6 @@ export class Mining implements MiningView {
     return true;
   }
 
-  /** 手上那一堆此刻在挖掘里算什么工具。 */
-  private heldTool(): MiningTool {
-    return miningToolOf(this.hand.held);
-  }
 
   /** 这一块从头挖起：进度归零，连锁集合一并清掉（下一 tick 才可能重新判定）。 */
   private restart(): void {

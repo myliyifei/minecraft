@@ -5,7 +5,7 @@ import { ItemType } from '../core/item';
  * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 4 列 8 行，目前用了前 17 格。
  *
  * 行列数都取 2 的幂：uv 是格号除以行列数，除以 4 或 8 在 float32 里是精确的，除以 5 就不是
- * ——顶点属性存的是 Float32Array，1/5 一进去就带上舍入误差，相邻两格的贴图会互相渗一条线。
+ * ——顶点属性存的是 Float32Array，1/5 一进去就带上舍入误差，一个面的边缘会取到相邻那一格的像素。
  */
 export const ATLAS_COLS = 4;
 export const ATLAS_ROWS = 8;
@@ -59,6 +59,13 @@ export function faceTile(tiles: FaceTiles, face: Face): number {
   return tiles[face] ?? tiles.side;
 }
 
+/** 圆石：六面同一张。方块与物品小方块共用这一份。 */
+const COBBLESTONE_TILES: FaceTiles = {
+  top: TILE.cobblestone,
+  bottom: TILE.cobblestone,
+  side: TILE.cobblestone,
+};
+
 /** 工作台：顶面是台面，底面是木板，侧面与正面各一张。方块与物品小方块共用这一份。 */
 const CRAFTING_TABLE_TILES: FaceTiles = {
   top: TILE.craftingTableTop,
@@ -89,7 +96,7 @@ export const BLOCK_TILES: Readonly<Record<BlockType, FaceTiles | null>> = {
   },
   [BlockType.OakPlanks]: { top: TILE.oakPlanks, bottom: TILE.oakPlanks, side: TILE.oakPlanks },
   [BlockType.CraftingTable]: CRAFTING_TABLE_TILES,
-  [BlockType.Cobblestone]: { top: TILE.cobblestone, bottom: TILE.cobblestone, side: TILE.cobblestone },
+  [BlockType.Cobblestone]: COBBLESTONE_TILES,
 };
 
 /** 六面同一张图标的物品（木棍、工具）在 `ITEM_TILES` 里那一行。 */
@@ -119,7 +126,7 @@ export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
   [ItemType.WoodenPickaxe]: flat(TILE.woodenPickaxe),
   [ItemType.WoodenAxe]: flat(TILE.woodenAxe),
   [ItemType.WoodenShovel]: flat(TILE.woodenShovel),
-  [ItemType.Cobblestone]: { top: TILE.cobblestone, bottom: TILE.cobblestone, side: TILE.cobblestone },
+  [ItemType.Cobblestone]: COBBLESTONE_TILES,
 };
 
 /**

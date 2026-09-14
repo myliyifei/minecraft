@@ -1597,14 +1597,21 @@ test('右下角画着手上那块方块，切换选中格时跟着换', async ({
   expect(errors).toEqual([]);
 });
 
+/** 玩家站在一格深的坑里时的整数坐标：所在列的 x 与 z，加眼睛那一层的 y。眼前那一格就是 (x, eyeY, z − 1)。 */
+interface PitSpot {
+  readonly x: number;
+  readonly eyeY: number;
+  readonly z: number;
+}
+
 /**
  * 通过调试句柄让玩家拿到一把木镐：脚下换成原木挖穿掉进坑里，坑里眼前再摆一根原木挖来，再远一格
  * 摆工作台，用配方书三步造出木镐放进第 0 格（选中格），最后关掉工作台界面。
  *
- * 原木只能挖来，木镐只能造出来：核心没有往背包里塞物品的入口。整段在一次同步的 evaluate 里
- * 给核心，游戏循环插不进来。返回的是这段结束时玩家的整数坐标，后面几条测试据此在眼前摆方块。
+ * 原木只能挖来，木镐只能造出来：核心没有直接往背包里放物品的入口。整段在一次同步的 evaluate 里
+ * 给核心，游戏循环插不进来。返回玩家站的那个坑的位置，后面几条测试据此在眼前摆方块。
  */
-async function craftPickaxeIntoHand(page: Page): Promise<{ x: number; eyeY: number; z: number }> {
+async function craftPickaxeIntoHand(page: Page): Promise<PitSpot> {
   return page.evaluate(
     ({ pitch, logTicks, pickupTicks, oakLog, table, eyeHeight, planks, stick, pickaxe }) => {
       const { core } = window.__VOXEL__!;
@@ -1737,7 +1744,7 @@ test('在工作台里造出木镐拿在手上：快捷栏画它的图标与中�
  * 在玩家眼前那一格摆一块石头，持木镐挖穿它并拾起掉出来的圆石，再刷一次 HUD。
  * 玩家站在 `craftPickaxeIntoHand` 留下的那个坑里，眼前那一格正是第二根原木挖掉后空出来的。
  */
-async function mineStoneAhead(page: Page, at: { x: number; eyeY: number; z: number }): Promise<void> {
+async function mineStoneAhead(page: Page, at: PitSpot): Promise<void> {
   await page.evaluate(
     ({ x, eyeY, z, stone, stoneTicks, pickupTicks }) => {
       const { core, hud } = window.__VOXEL__!;

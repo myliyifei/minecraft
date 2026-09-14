@@ -130,7 +130,7 @@ describe('工具的损耗跟着那一堆走（ADR-0010）', () => {
     expect(inventory.slot(5)).toEqual(WORN);
   });
 
-  it('两把损耗不同的木镐交换，各自的损耗不串', () => {
+  it('两把损耗不同的木镐交换，各自的损耗跟着各自那一把', () => {
     const fresh = pickaxe();
     const { inventory, screen } = opened((inv) => {
       inv.setSlot(0, WORN);

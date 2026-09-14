@@ -186,7 +186,7 @@ const TILES = {
     const corner = (x === 9 || x === 14) && (y === 0 || y === 5);
     return inBox && !corner ? woodenHead(x === 14 || y === 5, rand) : null;
   }),
-  // cobblestone：石头色的碎块，块与块之间一条深色的缝；每行的缝错开半块，像砌起来的石墙
+  // cobblestone：石头色的碎块，块与块之间一条深色的缝；每行的竖缝错开半块
   16: (x, y, rand) => {
     const row = Math.floor(y / 4);
     const shift = row % 2 === 0 ? 0 : 2;

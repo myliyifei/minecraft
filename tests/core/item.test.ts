@@ -125,12 +125,12 @@ describe('耐久是格子里那一堆的状态（ADR-0010）', () => {
     expect(wornTool({ ...FRESH, damage: 10 }, 5)).toEqual({ ...FRESH, damage: 15 });
   });
 
-  it('损耗到 59 点工具就没了：返回 undefined，那一格因此清空', () => {
+  it('损耗到 59 点工具消失：返回 undefined，那一格因此清空', () => {
     expect(wornTool({ ...FRESH, damage: 58 }, 1)).toBeUndefined();
     expect(wornTool(FRESH, 59)).toBeUndefined();
   });
 
-  it('损耗超过剩余耐久也只是没了，不会出负数', () => {
+  it('损耗超过剩余耐久同样是消失，不会出负数', () => {
     expect(wornTool({ ...FRESH, damage: 50 }, 20)).toBeUndefined();
   });
 

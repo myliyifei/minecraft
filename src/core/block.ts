@@ -330,6 +330,9 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   [ItemType.WoodenAxe]: null,
   [ItemType.WoodenShovel]: null,
   [ItemType.Cobblestone]: BlockType.Cobblestone,
+  [ItemType.StonePickaxe]: null,
+  [ItemType.StoneAxe]: null,
+  [ItemType.StoneShovel]: null,
 };
 
 /**

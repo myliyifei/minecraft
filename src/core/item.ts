@@ -15,6 +15,9 @@ export const ItemType = {
   WoodenAxe: 7,
   WoodenShovel: 8,
   Cobblestone: 9,
+  StonePickaxe: 10,
+  StoneAxe: 11,
+  StoneShovel: 12,
 } as const;
 
 export type ItemType = (typeof ItemType)[keyof typeof ItemType];
@@ -82,14 +85,14 @@ export interface MiningTool {
 export const BARE_HAND: MiningTool = Object.freeze({ toolClass: ToolClass.None, speed: 1 });
 
 /**
- * 工具的材质档（见 CONTEXT.md 的「材质档」）：目前只有木。石（#23）、铁、金、钻石随各自的
- * 切片加值。
+ * 工具的材质档（见 CONTEXT.md 的「材质档」）：目前有木与石。铁、金、钻石在各自的切片里各加一行。
  *
  * 倍率与最大耐久按材质档查（`TOOL_MATERIALS`），不按每件工具各记一份：同一档的镐斧铲三件数值相同，
  * 记三遍就是三处可能对不上。值是字符串，理由同 `ToolClass`：它不进存档。
  */
 export const ToolMaterial = {
   Wood: 'wood',
+  Stone: 'stone',
 } as const;
 
 export type ToolMaterial = (typeof ToolMaterial)[keyof typeof ToolMaterial];
@@ -103,10 +106,11 @@ export interface ToolMaterialDef {
 }
 
 /**
- * 材质档属性表——纯数据，数值与原版一致（#15 的物品属性表）。石档（#23）加一行：倍率 4、耐久 131。
+ * 材质档属性表——纯数据，数值与原版一致（#15 的物品属性表）。铁、金、钻石各加一行。
  */
 export const TOOL_MATERIALS: Readonly<Record<ToolMaterial, ToolMaterialDef>> = {
   [ToolMaterial.Wood]: { speed: 2, durability: 59 },
+  [ToolMaterial.Stone]: { speed: 4, durability: 131 },
 };
 
 /**
@@ -152,6 +156,9 @@ export const ITEMS: Readonly<Record<ItemType, ItemDef>> = {
   [ItemType.WoodenAxe]: tool(ToolClass.Axe, ToolMaterial.Wood),
   [ItemType.WoodenShovel]: tool(ToolClass.Shovel, ToolMaterial.Wood),
   [ItemType.Cobblestone]: STACKABLE,
+  [ItemType.StonePickaxe]: tool(ToolClass.Pickaxe, ToolMaterial.Stone),
+  [ItemType.StoneAxe]: tool(ToolClass.Axe, ToolMaterial.Stone),
+  [ItemType.StoneShovel]: tool(ToolClass.Shovel, ToolMaterial.Stone),
 };
 
 /** 这种物品一格最多堆多少个。 */

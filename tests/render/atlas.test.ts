@@ -87,10 +87,18 @@ describe('物品到贴图格号的映射表', () => {
     }
   });
 
-  it('木镐、木斧、木铲各有自己的一格，六面同图', () => {
-    const tools = [ItemType.WoodenPickaxe, ItemType.WoodenAxe, ItemType.WoodenShovel];
+  it('六件工具各有自己的一格，六面同图', () => {
+    const tools = [
+      ItemType.WoodenPickaxe,
+      ItemType.WoodenAxe,
+      ItemType.WoodenShovel,
+      ItemType.StonePickaxe,
+      ItemType.StoneAxe,
+      ItemType.StoneShovel,
+    ];
     const icons = tools.map((item) => ITEM_TILES[item]);
-    expect(new Set(icons.map((tiles) => tiles.side)).size).toBe(3);
+    // 六张互不相同：石镐与木镐是两件物品，图标不能共用一格
+    expect(new Set(icons.map((tiles) => tiles.side)).size).toBe(tools.length);
     for (const tiles of icons) {
       expect(tiles.top).toBe(tiles.side);
       expect(tiles.bottom).toBe(tiles.side);
@@ -183,6 +191,9 @@ describe('手持物品画立方体还是平面图标', () => {
       ItemType.WoodenPickaxe,
       ItemType.WoodenAxe,
       ItemType.WoodenShovel,
+      ItemType.StonePickaxe,
+      ItemType.StoneAxe,
+      ItemType.StoneShovel,
     ]) {
       expect(heldItemShape(item), `物品 ${item}`).toBe(HeldItemShape.Flat);
     }

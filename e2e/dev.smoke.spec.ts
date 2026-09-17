@@ -1819,6 +1819,84 @@ test('持木镐挖石头掉圆石，快捷栏的木镐格上出现耐久条并�
   expect(errors).toEqual([]);
 });
 
+test('攒 3 个圆石在工作台造出石镐：快捷栏画石镐的图标与中文名，挖石头 12 tick 而不是 23 tick', async ({
+  page,
+}) => {
+  await waitForFullViewDistance(page);
+  const at = await craftPickaxeIntoHand(page);
+  // 持木镐挖三块石头，攒够一把石镐的头
+  for (let dug = 0; dug < 3; dug++) await mineStoneAhead(page, at);
+
+  const crafted = await page.evaluate(
+    ({ x, eyeY, z, stone, stonePickaxe, stoneTicks, pickupTicks }) => {
+      const { core, hud } = window.__VOXEL__!;
+      // 眼前那块石头挖掉了，目标落回工作台上：使用键打开界面
+      core.tick();
+      core.use();
+      core.tick();
+      if (!core.craftingTableScreen.open) throw new Error('对着工作台按使用键应该打开工作台界面');
+
+      const entries = core.craftingTableScreen.crafting!.recipes;
+      const index = entries.findIndex((e) => e.recipe.result.item === stonePickaxe);
+      if (!entries[index]!.craftable) throw new Error('3 个圆石加 2 根木棍应该够造一把石镐');
+      // 配方书填料、拿走成品，放进第 2 格再切过去
+      core.clickRecipe(index);
+      core.clickCraftingOutput();
+      core.clickSlot(2);
+      core.toggleInventory();
+      core.selectHotbarSlot(2);
+      core.tick();
+      if (core.inventory.held?.item !== stonePickaxe) throw new Error('造完石镐应该拿在手上');
+
+      // 持石镐挖眼前那块石头：12 tick 就碎，石镐损耗 1 点
+      core.setBlock(x, eyeY, z - 1, stone);
+      core.tick();
+      core.setMining(true);
+      core.tick(stoneTicks - 1);
+      const standing = core.getBlock(x, eyeY, z - 1) === stone;
+      core.tick(1);
+      const broken = core.getBlock(x, eyeY, z - 1) !== stone;
+      core.setMining(false);
+      core.tick(pickupTicks);
+      hud.update();
+      return { standing, broken, damage: core.inventory.held?.damage };
+    },
+    {
+      ...at,
+      stone: BlockType.Stone,
+      stonePickaxe: ItemType.StonePickaxe,
+      stoneTicks: miningTicks(
+        BlockType.Stone,
+        miningToolOf({ item: ItemType.StonePickaxe, count: 1 }),
+      ),
+      pickupTicks: PICKUP_DELAY_TICKS + 2,
+    },
+  );
+
+  // 木镐要 23 tick，石镐 12 tick：第 11 tick 石头还在，第 12 tick 碎
+  expect(crafted).toEqual({ standing: true, broken: true, damage: 1 });
+
+  // 快捷栏第三格是石镐：图集里石镐那一格、简体中文名、损耗 1 点的耐久条
+  const max = TOOL_MATERIALS[ToolMaterial.Stone].durability;
+  const slot = page.locator('#hotbar .hotbar__slot[data-slot="2"]');
+  await expect(slot).toHaveAttribute('data-item', String(ItemType.StonePickaxe));
+  await expect(slot).toHaveAttribute(
+    'title',
+    durabilityLabel(ITEM_NAMES[ItemType.StonePickaxe], max - 1, max),
+  );
+  const bar = slot.locator('.hotbar__durability');
+  await expect(bar).toBeVisible();
+  await expect(bar).toHaveCSS('--durability', String((max - 1) / max));
+
+  const icon = slot.locator('.hotbar__icon');
+  const { col, row } = tileCell(ITEM_TILES[ItemType.StonePickaxe].side);
+  const iconPx = Number.parseFloat(
+    await icon.evaluate((element) => getComputedStyle(element).width),
+  );
+  await expect(icon).toHaveCSS('background-position', `${-col * iconPx}px ${-row * iconPx}px`);
+  expect(errors).toEqual([]);
+});
+
 test('贴着墙站着，手上那块方块不会被墙切穿', async ({ page }) => {
   await waitForFullViewDistance(page);
   // 先挖来一块泥土（顺带把东边那一条铺平）

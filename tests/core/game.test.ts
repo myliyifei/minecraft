@@ -1545,7 +1545,7 @@ describe('GameCore 的工作台', () => {
   });
 });
 
-describe('GameCore 的木制工具', () => {
+describe('GameCore 的木石两档工具', () => {
   /** 站在一格深的坑里朝 −Z 平视时，正前方两格远的那一格：工作台摆在这儿。 */
   const TABLE_FROM_PIT: [number, number, number] = [0, FLAT_GROUND_Y + 1, -2];
   /** 站在坑里平视时正前方紧挨着的那一格：第二根原木摆在这儿再挖来。 */
@@ -1808,6 +1808,105 @@ describe('GameCore 的木制工具', () => {
     core.tick(PICKUP_TICKS);
     expect(core.inventory.slot(1)).toEqual(COBBLESTONE_X1);
     expect(core.inventory.held).toEqual({ ...PICKAXE, damage: 2 });
+  });
+
+  describe('圆石造出石制工具（issue #23）', () => {
+    const STONE_PICKAXE = { item: ItemType.StonePickaxe, count: 1 };
+    /** 石镐挖石头要多少 tick。写死 12（issue #23）：数值本身在 block.test.ts 与 mining.test.ts 里断言。 */
+    const STONE_PICKAXE_STONE_TICKS = 12;
+
+    /** 在正前方摆一块石头，持手上那把镐挖穿它，掉出来的圆石拾进背包。 */
+    function digStoneAhead(core: GameCore, ticks: number): void {
+      core.setBlock(...AHEAD_FROM_PIT, BlockType.Stone);
+      core.tick();
+      expect(core.mining.target).toMatchObject(toVec(AHEAD_FROM_PIT));
+      core.setMining(true);
+      core.tick(ticks);
+      expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Air);
+      core.setMining(false);
+      core.tick(PICKUP_TICKS);
+    }
+
+    it('持木镐挖三块石头攒够圆石，在工作台造出石镐，石镐挖石头 12 tick 掉圆石', () => {
+      const core = holdingPickaxe();
+      // 造完木镐还剩 2 根木棍（第 21 格）：再攒 3 个圆石就够一把石镐
+      for (let dug = 0; dug < 3; dug++) digStoneAhead(core, PICKAXE_STONE_TICKS);
+      expect(core.inventory.slot(1)).toEqual({ item: ItemType.Cobblestone, count: 3 });
+      expect(core.inventory.held).toEqual({ ...PICKAXE, damage: 3 });
+
+      // 前方那块石头挖掉了，目标又落回工作台上
+      core.tick();
+      expect(core.mining.target).toMatchObject(toVec(TABLE_FROM_PIT));
+      core.use();
+      core.tick();
+      const stonePickaxe = tableRecipeIndex(core, ItemType.StonePickaxe);
+      expect(core.craftingTableScreen.crafting!.recipes[stonePickaxe]!.craftable).toBe(true);
+
+      core.clickRecipe(stonePickaxe);
+      core.clickCraftingOutput();
+      core.clickSlot(2);
+      core.tick();
+      expect(core.inventory.slot(2)).toEqual(STONE_PICKAXE);
+      // 3 个圆石与 2 根木棍都用光了
+      expect(core.inventory.slot(1)).toBeUndefined();
+      expect(core.inventory.slot(21)).toBeUndefined();
+
+      // 换到石镐那一格：挖石头 12 tick 而不是 23，圆石照掉，石镐损耗 1 点
+      core.toggleInventory();
+      core.selectHotbarSlot(2);
+      core.tick();
+      core.setBlock(...AHEAD_FROM_PIT, BlockType.Stone);
+      core.tick();
+      core.setMining(true);
+      core.tick(STONE_PICKAXE_STONE_TICKS - 1);
+      expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Stone);
+      core.tick(1);
+      expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Air);
+      expect(core.inventory.held).toEqual({ ...STONE_PICKAXE, damage: 1 });
+      core.setMining(false);
+      core.tick(PICKUP_TICKS);
+      expect(core.inventory.slot(1)).toEqual(COBBLESTONE_X1);
+    });
+
+    it('工作台的配方书列出六件工具：木石两档的镐、斧、铲', () => {
+      const core = holdingPickaxe();
+      core.use();
+      core.tick();
+      const listed = core.craftingTableScreen.crafting!.recipes.map((e) => e.recipe.result.item);
+      for (const tool of [
+        ItemType.WoodenPickaxe,
+        ItemType.WoodenAxe,
+        ItemType.WoodenShovel,
+        ItemType.StonePickaxe,
+        ItemType.StoneAxe,
+        ItemType.StoneShovel,
+      ]) {
+        expect(listed, `物品 ${tool}`).toContain(tool);
+      }
+    });
+
+    it('只有 3 个圆石没有木棍时石镐这一条灰显，点了没有反应', () => {
+      const core = holdingPickaxe();
+      for (let dug = 0; dug < 3; dug++) digStoneAhead(core, PICKAXE_STONE_TICKS);
+      core.tick();
+      core.use();
+      core.tick();
+      // 造一把木铲把剩下的 2 根木棍用光：石镐因此缺柄，圆石够也造不了
+      const shovel = tableRecipeIndex(core, ItemType.WoodenShovel);
+      core.clickRecipe(shovel);
+      core.clickCraftingOutput();
+      core.clickSlot(3);
+      core.tick();
+      expect(core.inventory.slot(3)).toEqual({ item: ItemType.WoodenShovel, count: 1 });
+
+      const stonePickaxe = tableRecipeIndex(core, ItemType.StonePickaxe);
+      expect(core.craftingTableScreen.crafting!.recipes[stonePickaxe]!.craftable).toBe(false);
+      core.clickRecipe(stonePickaxe);
+      core.tick();
+      // 灰显的配方点了不填材料：3 个圆石还在背包里，网格是空的
+      expect(core.inventory.slot(1)).toEqual({ item: ItemType.Cobblestone, count: 3 });
+      expect(core.craftingTableScreen.crafting!.slot(0)).toBeUndefined();
+    });
   });
 });
 

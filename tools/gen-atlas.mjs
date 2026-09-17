@@ -76,17 +76,55 @@ function toolHandle(x, y, rand) {
   return shade(offset === 1 ? STICK_SHADOW : STICK, Math.floor(rand() * 16) - 8);
 }
 
-/** 木制工具头的颜色：比柄浅一档的木色，边上一条暗色让它有厚度、与柄分得开。 */
-function woodenHead(dark, rand) {
-  return shade(dark ? PLANKS_SEAM : TABLE_TOP, Math.floor(rand() * 16) - 8);
+/**
+ * 一档材质的工具头用哪两种颜色：亮面与暗面。暗的那一条边让头看着有厚度、与柄分得开。
+ *
+ * 木制那两色沿用木板与工作台面的色号，石制沿用石头与圆石缝的色号——那几个常量是按方块
+ * 取的名字，工具头借用它们的色值，所以在这里另起一对名字，用的时候读到的是「亮面/暗面」。
+ */
+const WOOD_HEAD = { light: TABLE_TOP, dark: PLANKS_SEAM };
+const STONE_HEAD = { light: STONE, dark: COBBLE_GAP };
+
+/**
+ * 镐头：横着一条与柄垂直的头（沿主对角线 x − y = 7 方向），两端略垂。
+ *
+ * 三个形状函数返回这一像素落在头的亮面还是暗面，不在头上返回 undefined。形状按工具类别、
+ * 颜色按材质档，`toolIcon` 把形状与颜色组合起来：石镐与木镐是同一个形状的两种颜色，
+ * 形状因此只写一遍。
+ */
+function pickaxeHead(x, y) {
+  const along = x - y - 7;
+  if (along < -1 || along > 1 || x < 6 || x > 14 || y < 0 || y > 8) return undefined;
+  return along === 1 ? 'dark' : 'light';
+}
+
+/** 斧头：斜柄顶端一块楔形的刃挂在柄的左上那一侧，柄的另一侧露出一小截斧背。 */
+function axeHead(x, y) {
+  const offset = x + y - (TILE_PX - 1);
+  const blade = offset <= -1 && offset >= -7 && x >= 7 && x <= 11 && y >= 1 && y <= 6;
+  if (blade) return x === 7 || y === 1 ? 'dark' : 'light';
+  const poll = offset >= 1 && offset <= 2 && x >= 10 && x <= 12 && y >= 3;
+  return poll ? 'dark' : undefined;
+}
+
+/** 铲面：一块圆角的方板，右下两边是暗面。 */
+function shovelHead(x, y) {
+  const inBox = x >= 9 && x <= 14 && y >= 0 && y <= 5;
+  const corner = (x === 9 || x === 14) && (y === 0 || y === 5);
+  if (!inBox || corner) return undefined;
+  return x === 14 || y === 5 ? 'dark' : 'light';
 }
 
 /**
- * 一件工具的图标：先画头，头没盖到的地方画柄，其余透明。`head(x, y, rand)` 返回这一像素
- * 的颜色，不在头上返回 null。
+ * 一件工具的图标：先画头，头没盖到的地方画柄，其余透明。`head(x, y)` 给出这一像素落在头的
+ * 哪一面，`colors` 是这一档材质头的亮暗两色。
  */
-function toolIcon(head) {
-  return (x, y, rand) => head(x, y, rand) ?? toolHandle(x, y, rand) ?? [0, 0, 0, 0];
+function toolIcon(head, colors) {
+  return (x, y, rand) => {
+    const face = head(x, y);
+    if (face) return shade(colors[face], Math.floor(rand() * 16) - 8);
+    return toolHandle(x, y, rand) ?? [0, 0, 0, 0];
+  };
 }
 
 /** 每个格号对应的画法：painter(x, y, rand) → [r, g, b, a]。 */
@@ -166,26 +204,10 @@ const TILES = {
     if (hammerHandle || sawHandle) return shade(STICK_SHADOW, Math.floor(rand() * 12) - 6);
     return TILES[8](x, y, rand);
   },
-  // wooden_pickaxe：斜柄顶上横着一条与柄垂直的镐头（沿主对角线 x − y = 7 方向），两端略垂
-  13: toolIcon((x, y, rand) => {
-    const along = x - y - 7;
-    const head = along >= -1 && along <= 1 && x >= 6 && x <= 14 && y >= 0 && y <= 8;
-    return head ? woodenHead(along === 1, rand) : null;
-  }),
-  // wooden_axe：斜柄顶端一块楔形的刃挂在柄的左上那一侧，柄的另一侧露出一小截斧背
-  14: toolIcon((x, y, rand) => {
-    const offset = x + y - (TILE_PX - 1);
-    const blade = offset <= -1 && offset >= -7 && x >= 7 && x <= 11 && y >= 1 && y <= 6;
-    const poll = offset >= 1 && offset <= 2 && x >= 10 && x <= 12 && y >= 3;
-    if (blade) return woodenHead(x === 7 || y === 1, rand);
-    return poll ? woodenHead(true, rand) : null;
-  }),
-  // wooden_shovel：斜柄顶上一块圆角的铲面，右下两边是暗面
-  15: toolIcon((x, y, rand) => {
-    const inBox = x >= 9 && x <= 14 && y >= 0 && y <= 5;
-    const corner = (x === 9 || x === 14) && (y === 0 || y === 5);
-    return inBox && !corner ? woodenHead(x === 14 || y === 5, rand) : null;
-  }),
+  // wooden_pickaxe、wooden_axe、wooden_shovel：木色的头装在同一根斜木柄上
+  13: toolIcon(pickaxeHead, WOOD_HEAD),
+  14: toolIcon(axeHead, WOOD_HEAD),
+  15: toolIcon(shovelHead, WOOD_HEAD),
   // cobblestone：石头色的碎块，块与块之间一条深色的缝；每行的竖缝错开半块
   16: (x, y, rand) => {
     const row = Math.floor(y / 4);
@@ -196,6 +218,10 @@ const TILES = {
     const block = ((row * 7 + Math.floor((x + shift) / 4) * 3) % 5) * 8 - 16;
     return shade(STONE, block + Math.floor(rand() * 20) - 10);
   },
+  // stone_pickaxe、stone_axe、stone_shovel：与木制三件同形状，头换成石头的灰
+  17: toolIcon(pickaxeHead, STONE_HEAD),
+  18: toolIcon(axeHead, STONE_HEAD),
+  19: toolIcon(shovelHead, STONE_HEAD),
 };
 
 /**

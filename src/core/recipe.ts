@@ -56,7 +56,7 @@ interface ToolTier {
 }
 
 /**
- * 一档工具的三条配方：头部用 `head` 材料、柄是木棍。木制用木板，石制（#23）用圆石，
+ * 一档工具的三条配方：头部用 `head` 材料、柄是木棍。木制用木板，石制用圆石，
  * 三条图案不变——所以图案只写一遍，材料当参数传进来。
  *
  * 镐与铲的图案左右对称，镜像与否结果相同，写 false；斧的刃只在一边，左右镜像的摆法也算。
@@ -96,8 +96,8 @@ function toolRecipes({ head, pickaxe, axe, shovel }: ToolTier): Recipe[] {
 /**
  * 配方表——纯数据（见 CONTEXT.md 的「合成」）。加配方只加一条。
  *
- * 目前有原木出木板、木板出木棍、木板出工作台三条，加木制的镐、斧、铲三条。石制三件（#23）
- * 再加一组 `toolRecipes`。
+ * 目前有原木出木板、木板出木棍、木板出工作台三条，加木制与石制各三件工具。铁、金、钻石
+ * 那几档各再加一组 `toolRecipes`。
  */
 export const RECIPES: ReadonlyArray<Recipe> = [
   {
@@ -127,6 +127,13 @@ export const RECIPES: ReadonlyArray<Recipe> = [
     pickaxe: ItemType.WoodenPickaxe,
     axe: ItemType.WoodenAxe,
     shovel: ItemType.WoodenShovel,
+  }),
+  // 石制三件：图案与木制那三条一模一样，头部的木板换成圆石（#23）。
+  ...toolRecipes({
+    head: ItemType.Cobblestone,
+    pickaxe: ItemType.StonePickaxe,
+    axe: ItemType.StoneAxe,
+    shovel: ItemType.StoneShovel,
   }),
 ];
 

@@ -20,30 +20,48 @@ import {
 
 describe('物品表里的工具', () => {
   /**
-   * issue #21 的三件木制工具：哪一类、哪一档。写死字面值，不从 `ITEMS` 反读——
-   * 改坏数据表这条也照样通过的测试等于没写。
+   * issue #21 的三件木制工具与 issue #23 的三件石制工具：哪一类、哪一档。写死字面值，
+   * 不从 `ITEMS` 反读——改坏数据表这条也照样通过的测试等于没写。
    */
-  const WOODEN_TOOLS: Array<[string, ItemType, ToolClass]> = [
-    ['木镐是木档的镐', ItemType.WoodenPickaxe, ToolClass.Pickaxe],
-    ['木斧是木档的斧', ItemType.WoodenAxe, ToolClass.Axe],
-    ['木铲是木档的铲', ItemType.WoodenShovel, ToolClass.Shovel],
+  const TOOLS: Array<[string, ItemType, ToolClass, ToolMaterial]> = [
+    ['木镐是木档的镐', ItemType.WoodenPickaxe, ToolClass.Pickaxe, ToolMaterial.Wood],
+    ['木斧是木档的斧', ItemType.WoodenAxe, ToolClass.Axe, ToolMaterial.Wood],
+    ['木铲是木档的铲', ItemType.WoodenShovel, ToolClass.Shovel, ToolMaterial.Wood],
+    ['石镐是石档的镐', ItemType.StonePickaxe, ToolClass.Pickaxe, ToolMaterial.Stone],
+    ['石斧是石档的斧', ItemType.StoneAxe, ToolClass.Axe, ToolMaterial.Stone],
+    ['石铲是石档的铲', ItemType.StoneShovel, ToolClass.Shovel, ToolMaterial.Stone],
   ];
 
-  for (const [name, item, toolClass] of WOODEN_TOOLS) {
+  for (const [name, item, toolClass, material] of TOOLS) {
     it(name, () => {
-      expect(toolOf(item)).toEqual({ toolClass, material: ToolMaterial.Wood });
+      expect(toolOf(item)).toEqual({ toolClass, material });
     });
   }
 
+  it('同一档的镐斧铲三件是三个类别、一个材质档', () => {
+    // 类别与材质档是两回事（见 CONTEXT.md 的「材质档」）：木镐与石镐同类不同档，
+    // 木镐与木斧同档不同类
+    expect(toolOf(ItemType.WoodenPickaxe)!.toolClass).toBe(toolOf(ItemType.StonePickaxe)!.toolClass);
+    expect(toolOf(ItemType.WoodenPickaxe)!.material).not.toBe(toolOf(ItemType.StonePickaxe)!.material);
+    expect(toolOf(ItemType.StonePickaxe)!.material).toBe(toolOf(ItemType.StoneAxe)!.material);
+    expect(toolOf(ItemType.StonePickaxe)!.toolClass).not.toBe(toolOf(ItemType.StoneAxe)!.toolClass);
+  });
+
   it('工具不可堆叠：每把占一格', () => {
     expect(TOOL_STACK_SIZE).toBe(1);
-    for (const [, item] of WOODEN_TOOLS) {
+    for (const [, item] of TOOLS) {
       expect(stackLimit(item), `物品 ${item}`).toBe(1);
     }
   });
 
   it('材料与方块物品不是工具，堆叠上限 64', () => {
-    for (const item of [ItemType.Dirt, ItemType.OakLog, ItemType.OakPlanks, ItemType.Stick]) {
+    for (const item of [
+      ItemType.Dirt,
+      ItemType.OakLog,
+      ItemType.OakPlanks,
+      ItemType.Stick,
+      ItemType.Cobblestone,
+    ]) {
       expect(toolOf(item), `物品 ${item}`).toBeUndefined();
       expect(stackLimit(item)).toBe(DEFAULT_STACK_SIZE);
     }
@@ -68,6 +86,10 @@ describe('材质档的倍率与最大耐久', () => {
     expect(TOOL_MATERIALS[ToolMaterial.Wood]).toEqual({ speed: 2, durability: 59 });
   });
 
+  it('石档倍率 4、耐久 131：同一张表的石制那一行（issue #23）', () => {
+    expect(TOOL_MATERIALS[ToolMaterial.Stone]).toEqual({ speed: 4, durability: 131 });
+  });
+
   it('每一档都填了正的倍率与耐久', () => {
     for (const material of Object.values(ToolMaterial)) {
       const def = TOOL_MATERIALS[material];
@@ -82,6 +104,13 @@ describe('材质档的倍率与最大耐久', () => {
     expect(maxDurability(ItemType.WoodenShovel)).toBe(59);
     expect(maxDurability(ItemType.Dirt)).toBeUndefined();
     expect(maxDurability(ItemType.Stick)).toBeUndefined();
+  });
+
+  it('三件石制工具都是 131：同一档的镐斧铲数值相同', () => {
+    expect(maxDurability(ItemType.StonePickaxe)).toBe(131);
+    expect(maxDurability(ItemType.StoneAxe)).toBe(131);
+    expect(maxDurability(ItemType.StoneShovel)).toBe(131);
+    expect(maxDurability(ItemType.Cobblestone)).toBeUndefined();
   });
 });
 
@@ -103,6 +132,17 @@ describe('手上那一堆在挖掘里算什么工具', () => {
     expect(miningToolOf({ item: ItemType.WoodenShovel, count: 1, damage: 40 })).toEqual({
       toolClass: ToolClass.Shovel,
       speed: 2,
+    });
+  });
+
+  it('石镐是倍率 4 的镐，石斧是倍率 4 的斧', () => {
+    expect(miningToolOf({ item: ItemType.StonePickaxe, count: 1 })).toEqual({
+      toolClass: ToolClass.Pickaxe,
+      speed: 4,
+    });
+    expect(miningToolOf({ item: ItemType.StoneAxe, count: 1, damage: 130 })).toEqual({
+      toolClass: ToolClass.Axe,
+      speed: 4,
     });
   });
 });
@@ -128,6 +168,13 @@ describe('耐久是格子里那一堆的状态（ADR-0010）', () => {
   it('损耗到 59 点工具消失：返回 undefined，那一格因此清空', () => {
     expect(wornTool({ ...FRESH, damage: 58 }, 1)).toBeUndefined();
     expect(wornTool(FRESH, 59)).toBeUndefined();
+  });
+
+  it('石制满耐久 131、木制 59：石镐损耗 130 点还剩 1/131，第 131 点才消失', () => {
+    const pickaxe: ItemStack = { item: ItemType.StonePickaxe, count: 1 };
+    expect(durabilityOf({ ...pickaxe, damage: 130 })).toEqual({ left: 1, max: 131 });
+    expect(wornTool(pickaxe, 130)).toEqual({ ...pickaxe, damage: 130 });
+    expect(wornTool(pickaxe, 131)).toBeUndefined();
   });
 
   it('损耗超过剩余耐久同样是消失，不会出负数', () => {

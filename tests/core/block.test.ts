@@ -285,7 +285,16 @@ describe('放置表', () => {
     ['木镐放不下去', ItemType.WoodenPickaxe, null],
     ['木斧放不下去', ItemType.WoodenAxe, null],
     ['木铲放不下去', ItemType.WoodenShovel, null],
+    ['石镐放不下去', ItemType.StonePickaxe, null],
+    ['石斧放不下去', ItemType.StoneAxe, null],
+    ['石铲放不下去', ItemType.StoneShovel, null],
   ];
+
+  it('上面这张表覆盖了物品表的每一行：加一种物品就得在这里补一条', () => {
+    for (const item of Object.values(ItemType)) {
+      expect(PLACED.some(([, listed]) => listed === item), `物品 ${item} 不在这张表里`).toBe(true);
+    }
+  });
 
   for (const [name, item, block] of PLACED) {
     it(name, () => {

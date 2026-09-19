@@ -35,6 +35,7 @@ export type HudSource = Pick<
   | 'craftingTableScreen'
   | 'uiMode'
   | 'clickSlot'
+  | 'splitSlot'
   | 'clickCraftingOutput'
   | 'clickRecipe'
 >;
@@ -45,6 +46,7 @@ function screenSource(source: HudSource, screen: InventoryScreenView): Inventory
     inventory: source.inventory,
     screen,
     clickSlot: (index) => source.clickSlot(index),
+    splitSlot: (index) => source.splitSlot(index),
     clickCraftingOutput: () => source.clickCraftingOutput(),
     clickRecipe: (index) => source.clickRecipe(index),
   };

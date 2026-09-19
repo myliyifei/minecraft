@@ -750,3 +750,181 @@ describe('配方书：列出这块网格能做的配方，材料充足的高亮'
     expect(inventory.slot(0)).toEqual(logs(1));
   });
 });
+
+describe('拆堆点击：光标空着拿起半堆，光标有物品逐个放下', () => {
+  it('一格 4 块木板，光标空着按拆堆键：光标上 2 块、格里 2 块', () => {
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, planks(4)));
+    screen.splitSlot(0);
+    expect(screen.cursor).toEqual(planks(2));
+    expect(inventory.slot(0)).toEqual(planks(2));
+  });
+
+  it('一格 3 块时向上取整：光标上 2 块、格里 1 块', () => {
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, planks(3)));
+    screen.splitSlot(0);
+    expect(screen.cursor).toEqual(planks(2));
+    expect(inventory.slot(0)).toEqual(planks(1));
+  });
+
+  it('一格 1 块时整堆到光标上，那一格空了', () => {
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, planks(1)));
+    screen.splitSlot(0);
+    expect(screen.cursor).toEqual(planks(1));
+    expect(inventory.slot(0)).toBeUndefined();
+  });
+
+  it('光标空着对空格按拆堆键什么都不改变', () => {
+    const { inventory, screen } = opened();
+    screen.splitSlot(0);
+    expect(screen.cursor).toBeUndefined();
+    expect(inventory.slot(0)).toBeUndefined();
+  });
+
+  it('光标上 4 块木板，对空格按拆堆键放下 1 块，光标剩 3 块', () => {
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, planks(4)));
+    screen.clickSlot(0);
+    screen.splitSlot(20);
+    expect(inventory.slot(20)).toEqual(planks(1));
+    expect(screen.cursor).toEqual(planks(3));
+  });
+
+  it('对同一类型未满的格再按一次，并进 1 个', () => {
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, planks(4)));
+    screen.clickSlot(0);
+    screen.splitSlot(20);
+    screen.splitSlot(20);
+    expect(inventory.slot(20)).toEqual(planks(2));
+    expect(screen.cursor).toEqual(planks(2));
+  });
+
+  it('对同一类型已满的格什么都不改变', () => {
+    const { inventory, screen } = opened((inv) => {
+      inv.setSlot(0, planks(4));
+      inv.setSlot(20, planks(64));
+    });
+    screen.clickSlot(0);
+    screen.splitSlot(20);
+    expect(inventory.slot(20)).toEqual(planks(64));
+    expect(screen.cursor).toEqual(planks(4));
+  });
+
+  it('对不同类型的格什么都不改变，两边都不交换', () => {
+    const { inventory, screen } = opened((inv) => {
+      inv.setSlot(0, planks(4));
+      inv.setSlot(20, dirt(5));
+    });
+    screen.clickSlot(0);
+    screen.splitSlot(20);
+    expect(inventory.slot(20)).toEqual(dirt(5));
+    expect(screen.cursor).toEqual(planks(4));
+  });
+
+  it('光标上只剩 1 块时放下后光标清空', () => {
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, planks(1)));
+    screen.clickSlot(0);
+    screen.splitSlot(20);
+    expect(inventory.slot(20)).toEqual(planks(1));
+    expect(screen.cursor).toBeUndefined();
+  });
+
+  it('界面关着时拆堆点击什么都不改变', () => {
+    const inventory = new Inventory();
+    inventory.setSlot(0, planks(4));
+    const screen = new InventoryScreen(inventory);
+    screen.splitSlot(0);
+    expect(screen.cursor).toBeUndefined();
+    expect(inventory.slot(0)).toEqual(planks(4));
+  });
+
+  it('越界或不是整数的下标什么都不改变，光标上的东西还在', () => {
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, planks(4)));
+    screen.clickSlot(0);
+    screen.splitSlot(INVENTORY_SIZE);
+    screen.splitSlot(-1);
+    screen.splitSlot(0.5);
+    expect(screen.cursor).toEqual(planks(4));
+    expect(inventory.slot(0)).toBeUndefined();
+  });
+
+  it('工具的堆叠上限是 1：光标空着按拆堆键拿起整把，损耗随堆转移', () => {
+    const worn: ItemStack = { ...pickaxe(), damage: 7 };
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, worn));
+    screen.splitSlot(0);
+    expect(screen.cursor).toEqual(worn);
+    expect(inventory.slot(0)).toBeUndefined();
+  });
+
+  it('光标上有工具时对空格按拆堆键放下这一把；对同一类型的工具因为该格已满，什么都不改变', () => {
+    const { inventory, screen } = opened((inv) => {
+      inv.setSlot(0, { ...pickaxe(), damage: 3 });
+      inv.setSlot(1, { ...pickaxe(), damage: 9 });
+    });
+    screen.clickSlot(0);
+    screen.splitSlot(1);
+    expect(inventory.slot(1)).toEqual({ ...pickaxe(), damage: 9 });
+    expect(screen.cursor).toEqual({ ...pickaxe(), damage: 3 });
+    screen.splitSlot(20);
+    expect(inventory.slot(20)).toEqual({ ...pickaxe(), damage: 3 });
+    expect(screen.cursor).toBeUndefined();
+  });
+
+  it('拿起半堆后光标物品记的来源格是那一格：关闭界面时回到那里', () => {
+    const { inventory, screen } = opened((inv) => inv.setSlot(5, planks(4)));
+    screen.splitSlot(5);
+    screen.toggle();
+    expect(inventory.slot(5)).toEqual(planks(4));
+    expect(inventory.slot(0)).toBeUndefined();
+  });
+
+  it('放下 1 个之后来源格不变：关闭界面时余量回到拿起它的那一格', () => {
+    const { inventory, screen } = opened((inv) => inv.setSlot(5, planks(4)));
+    screen.clickSlot(5);
+    screen.splitSlot(20);
+    screen.toggle();
+    expect(inventory.slot(5)).toEqual(planks(3));
+    expect(inventory.slot(20)).toEqual(planks(1));
+  });
+
+  it('合成网格的格子同样适用：从一堆木板里拆一块进网格', () => {
+    const extra = grid();
+    const { screen } = opened((inv) => inv.setSlot(0, planks(4)), extra);
+    screen.clickSlot(0);
+    screen.splitSlot(FIRST_EXTRA);
+    screen.splitSlot(FIRST_EXTRA + 2);
+    expect(extra.slot(0)).toEqual(planks(1));
+    expect(extra.slot(2)).toEqual(planks(1));
+    expect(screen.cursor).toEqual(planks(2));
+    // 木板竖排两块就是木棍配方
+    expect(screen.crafting!.output).toEqual({ item: ItemType.Stick, count: 4 });
+  });
+
+  it('光标空着对网格里的一堆按拆堆键拿起一半', () => {
+    const extra = grid();
+    extra.setSlot(1, planks(4));
+    const { screen } = opened(() => {}, extra);
+    screen.splitSlot(FIRST_EXTRA + 1);
+    expect(screen.cursor).toEqual(planks(2));
+    expect(extra.slot(1)).toEqual(planks(2));
+  });
+
+  it('从 1 个原木出发只用点击与拆堆点击把木板排成竖排，输出格显示 4 根木棍，拿走后背包里剩 2 块木板', () => {
+    const extra = grid();
+    const { inventory, screen } = opened((inv) => inv.setSlot(0, logs(1)), extra);
+    // 原木进网格，点输出格拿到 4 块木板
+    screen.clickSlot(0);
+    screen.clickSlot(FIRST_EXTRA);
+    screen.clickOutput();
+    expect(screen.cursor).toEqual(planks(4));
+    // 左上、左下各放 1 块
+    screen.splitSlot(FIRST_EXTRA);
+    screen.splitSlot(FIRST_EXTRA + 2);
+    expect(screen.crafting!.output).toEqual({ item: ItemType.Stick, count: 4 });
+    // 光标上剩 2 块木板，放回背包；再拿走木棍
+    screen.clickSlot(0);
+    screen.clickOutput();
+    expect(screen.cursor).toEqual({ item: ItemType.Stick, count: 4 });
+    expect(inventory.slot(0)).toEqual(planks(2));
+    expect(extra.slot(0)).toBeUndefined();
+    expect(extra.slot(2)).toBeUndefined();
+  });
+});

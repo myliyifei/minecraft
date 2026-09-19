@@ -2121,6 +2121,80 @@ test('背包界面里有 2x2 合成网格与输出格，放进原木后输出格
   expect(errors).toEqual([]);
 });
 
+test('背包界面里对格子按右键拆堆：一堆木板拆进两格排成木棍配方，不弹浏览器菜单、不放置方块', async ({
+  page,
+}) => {
+  await giveOneLog(page);
+  await openInventoryScreen(page);
+  await expect(page.locator('#inventory-screen')).toBeVisible();
+
+  const gridCells = page.locator('#inventory-screen .invscreen__grid .invscreen__slot');
+  const output = page.locator('#inventory-screen [data-output]');
+  const cursor = page.locator('#inventory-screen .invscreen__cursor');
+  const first = page.locator('#inventory-screen .invscreen__slot[data-slot="0"]');
+
+  // 原木进网格，点输出格：4 块木板到光标上
+  await first.click();
+  await gridCells.first().click();
+  await output.click();
+  await expect(cursor).toHaveAttribute('data-item', String(ItemType.OakPlanks));
+  await expect(cursor.locator('.invscreen__count')).toHaveText('4');
+
+  // 以真实右键事件对左上、左下各放 1 块（事件经过界面层的事件委托）：木板竖排就是木棍配方
+  await gridCells.nth(0).click({ button: 'right' });
+  await expect(gridCells.nth(0)).toHaveAttribute('data-item', String(ItemType.OakPlanks));
+  await expect(cursor.locator('.invscreen__count')).toHaveText('3');
+  await gridCells.nth(2).click({ button: 'right' });
+  await expect(gridCells.nth(2)).toHaveAttribute('data-item', String(ItemType.OakPlanks));
+  await expect(cursor.locator('.invscreen__count')).toHaveText('2');
+  await expect(output).toHaveAttribute('data-item', String(ItemType.Stick));
+  await expect(output.locator('.invscreen__count')).toHaveText('4');
+
+  // 右键输出格、右键高亮的木棍配方、右键格子之间的空隙（标题）都什么都不改变：
+  // 界面层不为这几处发拆堆指令，网格里的木板仍各 1 块、光标仍 2 块
+  await output.click({ button: 'right' });
+  const stickRecipe = page.locator('#inventory-screen [data-recipe][data-craftable="true"]', {
+    hasText: ITEM_NAMES[ItemType.Stick],
+  });
+  await expect(stickRecipe).toHaveCount(1);
+  await stickRecipe.click({ button: 'right' });
+  await page.locator('#inventory-screen .invscreen__title').click({ button: 'right' });
+  await expect(output).toHaveAttribute('data-item', String(ItemType.Stick));
+  await expect(gridCells.nth(0).locator('.invscreen__count')).toHaveText('');
+  await expect(gridCells.nth(2).locator('.invscreen__count')).toHaveText('');
+  await expect(cursor.locator('.invscreen__count')).toHaveText('2');
+
+  // 剩下 2 块放回第 0 格（选中格，手持物品因此是木板），再右键它拿起一半：光标 1 块、格里 1 块
+  // （只有 1 个时格子不显示数量）
+  await first.click();
+  await expect(cursor).toBeHidden();
+  await expect(first.locator('.invscreen__count')).toHaveText('2');
+  await first.click({ button: 'right' });
+  await expect(cursor).toBeVisible();
+  await expect(cursor).toHaveAttribute('data-item', String(ItemType.OakPlanks));
+  await expect(cursor.locator('.invscreen__count')).toHaveText('');
+  await expect(first).toHaveAttribute('data-item', String(ItemType.OakPlanks));
+  await expect(first.locator('.invscreen__count')).toHaveText('');
+
+  // 界面开着时右键不弹浏览器菜单；也没有在世界里放置：木板合计仍是 4 块，分布在光标、第 0 格与网格里
+  expect(await menuBlocked(page)).toBe(true);
+  const planks = await page.evaluate((item) => {
+    const core = window.__VOXEL__!.core;
+    core.tick();
+    const grid = core.inventoryScreen.crafting!;
+    const count = (stack: ItemStack | undefined): number =>
+      stack?.item === item ? stack.count : 0;
+    return (
+      count(core.inventory.slot(0)) +
+      count(core.inventoryScreen.cursor) +
+      count(grid.slot(0)) +
+      count(grid.slot(2))
+    );
+  }, ItemType.OakPlanks);
+  expect(planks).toBe(4);
+  expect(errors).toEqual([]);
+});
+
 test('合成出的木板放到世界里，画面正中从草绿变成木板的褐黄', async ({ page }) => {
   await waitForFullViewDistance(page);
 

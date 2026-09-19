@@ -4,6 +4,7 @@ import type {
   InventoryScreenView,
   RecipeBookEntry,
 } from '../core/inventory-screen';
+import { MOUSE_BINDINGS } from '../input/keybindings';
 import {
   applyAtlasGrid,
   buildItemBox,
@@ -24,6 +25,8 @@ export interface InventoryScreenSource {
   readonly screen: InventoryScreenView;
   /** 点了第 index 格。下一个 tick 生效（ADR-0004）。 */
   clickSlot(index: number): void;
+  /** 对第 index 格按了拆堆键（右键）。下一个 tick 生效（ADR-0004）。 */
+  splitSlot(index: number): void;
   /** 点了输出格。下一个 tick 生效（ADR-0004）。 */
   clickCraftingOutput(): void;
   /** 点了配方书的第 index 条。下一个 tick 生效（ADR-0004）。 */
@@ -162,7 +165,27 @@ export function installInventoryScreen(
     source.clickSlot(Number(hit.dataset.slot));
   };
 
+  /**
+   * 右键按下在一格上：发拆堆指令。落在输出格、配方书条目、空隙上的右键不发任何指令
+   * ——那几处的拆堆规则是「什么都不改变」，这里不发，核心也就不必为它们各写一条空分支。
+   *
+   * 挂在 mousedown 而不是 contextmenu 上：Windows 上的浏览器松开右键才发 contextmenu，
+   * 而对着工作台按下右键之后界面在下一个 tick 就开了、锁定随即释放——松开那一刻鼠标已经
+   * 落在刚打开的界面上，接 contextmenu 会把开界面的那一下右键当成对某一格的拆堆。按下那一
+   * 刻界面还没开，按下事件的目标是画布，不会误发。浏览器菜单由输入适配器拦（界面开着时
+   * 一律 preventDefault），这里不重复。左键的 click 不会由右键触发，两条路径互不干扰。
+   */
+  const onMouseDown = (event: MouseEvent): void => {
+    if (event.button !== MOUSE_BINDINGS.split) return;
+    followPointer(event);
+    if (!(event.target instanceof Element)) return;
+    const hit = event.target.closest('[data-slot]');
+    if (!(hit instanceof HTMLElement)) return;
+    source.splitSlot(Number(hit.dataset.slot));
+  };
+
   root.addEventListener('click', onClick);
+  root.addEventListener('mousedown', onMouseDown);
   root.addEventListener('pointermove', followPointer);
   parent.append(root);
 
@@ -196,6 +219,7 @@ export function installInventoryScreen(
     },
     remove(): void {
       root.removeEventListener('click', onClick);
+      root.removeEventListener('mousedown', onMouseDown);
       root.removeEventListener('pointermove', followPointer);
       root.remove();
     },

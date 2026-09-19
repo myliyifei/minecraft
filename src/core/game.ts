@@ -30,6 +30,7 @@ import {
  */
 type ScreenClick =
   | { readonly kind: 'slot'; readonly index: number }
+  | { readonly kind: 'split'; readonly index: number }
   | { readonly kind: 'output' }
   | { readonly kind: 'recipe'; readonly index: number };
 
@@ -278,6 +279,17 @@ export class GameCore implements BlockEdit {
   }
 
   /**
+   * 拆堆点击开着的那个界面的第 index 格，下一个 tick 生效（ADR-0004）。与点格子排在同一条
+   * 队列里，按点击先后生效。拿起半堆、放下 1 个的规则在 `InventoryScreen.splitSlot` 里。
+   *
+   * 这是一条独立的界面指令，由界面层从右键事件翻译过来，与世界里的「使用」（`use`）无关：
+   * 界面开着时使用作废，右键落在格子上是拆堆；界面关着时右键是使用，拆堆点了没有反应。
+   */
+  splitSlot(index: number): void {
+    this.screenClicks.push({ kind: 'split', index });
+  }
+
+  /**
    * 点开着的那个界面的输出格，下一个 tick 生效（ADR-0004）。与点格子排在同一条队列里，
    * 先后顺序照点击的来。成品到光标上、材料各减 1 的规则在 `InventoryScreen.clickOutput` 里。
    */
@@ -431,6 +443,7 @@ export class GameCore implements BlockEdit {
     if (active) {
       for (const click of this.screenClicks) {
         if (click.kind === 'slot') active.clickSlot(click.index);
+        else if (click.kind === 'split') active.splitSlot(click.index);
         else if (click.kind === 'recipe') active.clickRecipe(click.index);
         else active.clickOutput();
       }

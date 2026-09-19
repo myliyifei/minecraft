@@ -188,8 +188,55 @@ export class InventoryScreen implements InventoryScreenView {
     // 空格接下整堆，同种并到堆叠上限；那一格已经满了就一个都不动。
     const left = this.mergeInto(index, cursor);
     if (left === cursor.count) return;
-    // 还有余量的话仍记着原来那一格：并了一部分不改变「这一堆是从哪儿拿的」。
-    this.holding = left > 0 ? { stack: withCount(cursor, left), from: holding.from } : undefined;
+    this.keepOnCursor(holding, left);
+  }
+
+  /**
+   * 拆堆点击一格（右键），与原版一致：
+   *
+   * - 光标空、格里有东西：拿起一半（向上取整），其余留在格里。4 块拿 2 块、3 块拿 2 块、
+   *   1 块拿 1 块。
+   * - 光标有东西、格是空的，或格里是同一类型且未满：放下 1 个。
+   * - 其余（光标空且格空、格已满、两边不同类型）什么都不改变——这里没有交换。
+   *
+   * 工具的堆叠上限是 1，规则不必另写：光标空着时「一半向上取整」就是整把；光标上有工具时
+   * 对空格放下这一把；格里是同一类型的工具则视为已满，与 `clickSlot` 的交换不同。
+   *
+   * 拿起的半堆记着来源格；放下 1 个不改变来源格（与 `clickSlot` 的合并一样）。
+   * 界面关着、下标指不到格子时什么都不改变。
+   *
+   * 与 `clickSlot` 是两个方法而不是一个带参数的方法：两者只有开头的定位与结尾的余量处理相同，
+   * 中间的规则没有一条一样，合成一个只会多出一层分支。
+   */
+  splitSlot(index: number): void {
+    if (!this.isOpen) return;
+    const ref = this.locate(index);
+    if (!ref) return;
+
+    const inSlot = ref.batch.slot(ref.local);
+    const holding = this.holding;
+
+    if (!holding) {
+      if (!inSlot) return;
+      const taken = Math.ceil(inSlot.count / 2);
+      this.holding = { stack: withCount(inSlot, taken), from: index };
+      const rest = inSlot.count - taken;
+      ref.batch.setSlot(ref.local, rest > 0 ? withCount(inSlot, rest) : undefined);
+      return;
+    }
+
+    // 只传 1 个给 `mergeInto`：空格、同一类型未满的格并入它，其余情形一个都不并入。
+    if (this.mergeInto(index, withCount(holding.stack, 1)) > 0) return;
+    this.keepOnCursor(holding, holding.stack.count - 1);
+  }
+
+  /**
+   * 光标上那一堆放下一部分之后，余量仍留在光标上；放光了光标就清空。
+   * 余量仍记着原来那一格：放下一部分不改变「这一堆是从哪儿拿的」。
+   */
+  private keepOnCursor(holding: CursorHold, left: number): void {
+    this.holding =
+      left > 0 ? { stack: withCount(holding.stack, left), from: holding.from } : undefined;
   }
 
   /**

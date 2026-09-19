@@ -1131,6 +1131,110 @@ describe('GameCore 的背包界面', () => {
   });
 });
 
+describe('GameCore 的拆堆点击', () => {
+  /** 合成网格第一格在界面里的格号。 */
+  const GRID_FIRST = INVENTORY_SIZE;
+  const PLANKS = (count: number) => ({ item: ItemType.OakPlanks, count });
+  const STICKS_X4 = { item: ItemType.Stick, count: 4 };
+
+  /**
+   * 背包界面开着、光标上拿着 4 块木板的核心：脚下那块草换成原木挖来，原木进网格，点输出格。
+   * 东西只能挖来与合成出来（理由见 `holdingDirt`）。
+   */
+  function holdingFourPlanks(): GameCore {
+    const core = coreOnFlatGround();
+    core.setBlock(...UNDERFOOT, BlockType.OakLog);
+    digUnderfoot(core, BlockType.OakLog);
+    core.toggleInventory();
+    core.tick();
+    core.clickSlot(0);
+    core.clickSlot(GRID_FIRST);
+    core.clickCraftingOutput();
+    core.tick();
+    expect(core.inventoryScreen.cursor).toEqual(PLANKS(4));
+    return core;
+  }
+
+  it('拆堆点击下一个 tick 生效（ADR-0004）：光标空着时拿起半堆', () => {
+    const core = holdingFourPlanks();
+    core.clickSlot(20);
+    core.tick();
+    expect(core.inventory.slot(20)).toEqual(PLANKS(4));
+
+    core.splitSlot(20);
+    expect(core.inventoryScreen.cursor).toBeUndefined();
+    core.tick();
+    expect(core.inventoryScreen.cursor).toEqual(PLANKS(2));
+    expect(core.inventory.slot(20)).toEqual(PLANKS(2));
+  });
+
+  it('拆堆点击与普通点击在同一 tick 里按先后顺序生效', () => {
+    const core = holdingFourPlanks();
+    // 光标上 4 块：拆 1 块进第 20 格，整堆（剩 3 块）放到第 21 格，再从第 21 格拆起 2 块
+    core.splitSlot(20);
+    core.clickSlot(21);
+    core.splitSlot(21);
+    core.tick();
+    expect(core.inventory.slot(20)).toEqual(PLANKS(1));
+    expect(core.inventory.slot(21)).toEqual(PLANKS(1));
+    expect(core.inventoryScreen.cursor).toEqual(PLANKS(2));
+  });
+
+  it('界面关着时拆堆点击什么都不改变', () => {
+    const core = coreOnFlatGround();
+    digUnderfoot(core, BlockType.Grass);
+    core.splitSlot(0);
+    core.tick();
+    expect(core.inventoryScreen.cursor).toBeUndefined();
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.Dirt, count: 1 });
+  });
+
+  it('从 1 个原木出发，只用点击与拆堆点击在 2x2 网格把木板排成竖排，输出格显示 4 根木棍；拿走后背包里剩 2 块木板', () => {
+    const core = holdingFourPlanks();
+    core.splitSlot(GRID_FIRST);
+    core.splitSlot(GRID_FIRST + 2);
+    core.tick();
+    const crafting = core.inventoryScreen.crafting!;
+    expect(crafting.slot(0)).toEqual(PLANKS(1));
+    expect(crafting.slot(2)).toEqual(PLANKS(1));
+    expect(crafting.output).toEqual(STICKS_X4);
+    expect(core.inventoryScreen.cursor).toEqual(PLANKS(2));
+
+    core.clickSlot(0);
+    core.clickCraftingOutput();
+    core.tick();
+    expect(core.inventoryScreen.cursor).toEqual(STICKS_X4);
+    expect(core.inventory.slot(0)).toEqual(PLANKS(2));
+    expect(crafting.output).toBeUndefined();
+  });
+
+  it('工作台界面（3x3 网格）的格子同样支持拆堆', () => {
+    // 脚下那块草换成原木挖来，掉进坑里之后正前方两格放一个工作台
+    const core = coreOnFlatGround();
+    core.setBlock(...UNDERFOOT, BlockType.OakLog);
+    digUnderfoot(core, BlockType.OakLog);
+    core.setBlock(0, FLAT_GROUND_Y + 1, -2, BlockType.CraftingTable);
+    look(core, 0, 0);
+    core.tick();
+    core.use();
+    core.tick();
+    expect(core.craftingTableScreen.open).toBe(true);
+
+    // 原木进网格正中，点输出格拿到 4 块木板，再拆 1 块进第 1 格、1 块进第 4 格（竖排）
+    core.clickSlot(0);
+    core.clickSlot(GRID_FIRST + 4);
+    core.clickCraftingOutput();
+    core.splitSlot(GRID_FIRST + 1);
+    core.splitSlot(GRID_FIRST + 4);
+    core.tick();
+    const crafting = core.craftingTableScreen.crafting!;
+    expect(crafting.slot(1)).toEqual(PLANKS(1));
+    expect(crafting.slot(4)).toEqual(PLANKS(1));
+    expect(crafting.output).toEqual(STICKS_X4);
+    expect(core.craftingTableScreen.cursor).toEqual(PLANKS(2));
+  });
+});
+
 describe('GameCore 的合成网格与输出格', () => {
   /** 合成网格第一格在界面里的格号。 */
   const GRID_FIRST = INVENTORY_SIZE;
@@ -1352,8 +1456,8 @@ describe('GameCore 的工作台', () => {
   /**
    * 站在平地上、正前方摆着一个工作台、朝它平视的核心。
    *
-   * 工作台由 `setBlock` 直接摆进世界：4 块木板合成它要把一堆木板拆成四格各一块，
-   * 拆堆是 #25 的事；合成本身在 tests/core/recipe.test.ts 里验。
+   * 工作台由 `setBlock` 直接摆进世界：这一组测的是使用键对着它的行为，不是合成；
+   * 合成本身在 tests/core/recipe.test.ts 里验。
    */
   function facingTable(at: [number, number, number] = AHEAD): GameCore {
     const core = coreOnFlatGround();

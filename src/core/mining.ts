@@ -192,8 +192,8 @@ export class Mining implements MiningView {
     if (!isBreakable(block)) return false;
     this.blocks.setBlock(x, y, z, BlockType.Air);
     // 掉落物与经验球都落在方块原来那一格里。什么都不掉的方块（树叶、空手挖的石头）
-    // 只是没有掉落物，经验照给——两样各查自己那一列。掉什么看工具类别（持镐挖石头掉圆石）。
-    const drop = blockDrop(block, tool.toolClass);
+    // 只是没有掉落物，经验照给——两样各查自己那一列。掉什么看手上的工具合格不合格（持镐挖石头掉圆石）。
+    const drop = blockDrop(block, tool);
     if (drop) this.drops.spawnInBlock(drop, x, y, z);
     const experience = blockExperience(block);
     if (experience > 0) this.experience.spawnInBlock(experience, x, y, z);

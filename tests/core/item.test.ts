@@ -4,11 +4,13 @@ import {
   DEFAULT_STACK_SIZE,
   ITEMS,
   ItemType,
+  TOOL_MATERIAL_ORDER,
   TOOL_MATERIALS,
   TOOL_STACK_SIZE,
   ToolClass,
   ToolMaterial,
   durabilityOf,
+  materialAtLeast,
   maxDurability,
   miningToolOf,
   stackLimit,
@@ -124,25 +126,58 @@ describe('手上那一堆在挖掘里算什么工具', () => {
     expect(miningToolOf({ item: ItemType.Stick, count: 1 })).toBe(BARE_HAND);
   });
 
-  it('木镐是倍率 2 的镐，木铲是倍率 2 的铲；损耗过的也一样', () => {
+  it('空手没有材质档：谈不上够不够方块要求的最低档', () => {
+    expect(BARE_HAND.material).toBeUndefined();
+    expect(BARE_HAND.toolClass).toBe(ToolClass.None);
+    expect(BARE_HAND.speed).toBe(1);
+  });
+
+  it('木镐是木档、倍率 2 的镐，木铲是木档、倍率 2 的铲；损耗过的也一样', () => {
     expect(miningToolOf({ item: ItemType.WoodenPickaxe, count: 1 })).toEqual({
       toolClass: ToolClass.Pickaxe,
+      material: ToolMaterial.Wood,
       speed: 2,
     });
     expect(miningToolOf({ item: ItemType.WoodenShovel, count: 1, damage: 40 })).toEqual({
       toolClass: ToolClass.Shovel,
+      material: ToolMaterial.Wood,
       speed: 2,
     });
   });
 
-  it('石镐是倍率 4 的镐，石斧是倍率 4 的斧', () => {
+  it('石镐是石档、倍率 4 的镐，石斧是石档、倍率 4 的斧', () => {
     expect(miningToolOf({ item: ItemType.StonePickaxe, count: 1 })).toEqual({
       toolClass: ToolClass.Pickaxe,
+      material: ToolMaterial.Stone,
       speed: 4,
     });
     expect(miningToolOf({ item: ItemType.StoneAxe, count: 1, damage: 130 })).toEqual({
       toolClass: ToolClass.Axe,
+      material: ToolMaterial.Stone,
       speed: 4,
+    });
+  });
+});
+
+describe('材质档有先后：木 < 石（issue #28）', () => {
+  it('顺序表从低到高列出每一档，一档一次不多不少', () => {
+    expect(TOOL_MATERIAL_ORDER).toEqual([ToolMaterial.Wood, ToolMaterial.Stone]);
+    expect([...TOOL_MATERIAL_ORDER].sort()).toEqual(Object.values(ToolMaterial).sort());
+  });
+
+  it('石不低于木，木不低于木，木低于石', () => {
+    expect(materialAtLeast(ToolMaterial.Stone, ToolMaterial.Wood)).toBe(true);
+    expect(materialAtLeast(ToolMaterial.Wood, ToolMaterial.Wood)).toBe(true);
+    expect(materialAtLeast(ToolMaterial.Wood, ToolMaterial.Stone)).toBe(false);
+  });
+
+  it('每一档都不低于自己，且顺序表上靠后的一档不低于靠前的任何一档', () => {
+    TOOL_MATERIAL_ORDER.forEach((material, index) => {
+      expect(materialAtLeast(material, material), `${material} 对自己`).toBe(true);
+      for (const lower of TOOL_MATERIAL_ORDER.slice(0, index)) {
+        expect(materialAtLeast(material, lower), `${material} 对 ${lower}`).toBe(true);
+        expect(materialAtLeast(lower, material), `${lower} 对 ${material}`).toBe(false);
+      }
     });
   });
 });

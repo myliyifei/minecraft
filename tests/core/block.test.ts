@@ -7,22 +7,32 @@ import {
   blockDrop,
   blockExperience,
   blockUse,
+  dropFor,
   isBreakable,
   miningTicks,
+  miningTicksFor,
   placedBlock,
+  type BlockDef,
 } from '../../src/core/block';
-import { BARE_HAND, ItemType, ToolClass, type MiningTool } from '../../src/core/item';
+import {
+  BARE_HAND,
+  ItemType,
+  ToolClass,
+  ToolMaterial,
+  type MiningTool,
+} from '../../src/core/item';
 
 /**
- * 木制与石制那一档的挖掘速度倍率，来自 #15 的物品属性表。
- * 工具物品本身要等 #21，这里只用得上「类别 + 倍率」这两个数。
+ * 木制与石制两档：材质档加它的挖掘速度倍率，倍率来自 #15 的物品属性表，写死字面值。
+ * 不从 `TOOL_MATERIALS` 反读：这个文件断言的是「某档挖某块要几 tick」，倍率是输入的一部分。
  */
-const WOODEN = 2;
-const STONE = 4;
+type MaterialWithSpeed = Pick<MiningTool, 'material' | 'speed'>;
+const WOODEN: MaterialWithSpeed = { material: ToolMaterial.Wood, speed: 2 };
+const STONE: MaterialWithSpeed = { material: ToolMaterial.Stone, speed: 4 };
 
 /** 手上拿着某一类、某一档的工具。 */
-function tool(toolClass: ToolClass, speed: number): MiningTool {
-  return { toolClass, speed };
+function tool(toolClass: ToolClass, material: MaterialWithSpeed): MiningTool {
+  return { toolClass, ...material };
 }
 
 /**
@@ -90,8 +100,8 @@ describe('方块的硬度表', () => {
 
 describe('手持工具时的挖掘耗时', () => {
   /**
-   * issue #22 给的关键数值：向上取整（硬度 × 30 ÷ 倍率），倍率只在正确工具上算数；
-   * 需要工具的方块没有正确工具时每点硬度 100 tick，这条优先。写死字面值，不从公式反算。
+   * issue #22 给的关键数值：向上取整（硬度 × 30 ÷ 倍率），倍率只在合格工具上算数；
+   * 需要工具的方块没有合格工具时每点硬度 100 tick，这条优先。写死字面值，不从公式反算。
    */
   const TOOL_MINING: Array<[string, BlockType, MiningTool, number]> = [
     ['持木镐挖石头', BlockType.Stone, tool(ToolClass.Pickaxe, WOODEN), 23],
@@ -108,7 +118,7 @@ describe('手持工具时的挖掘耗时', () => {
     // 需要工具的方块拿错工具仍按「需要工具」那一档算，倍率不起作用
     ['持石斧挖石头', BlockType.Stone, tool(ToolClass.Axe, STONE), 150],
     ['持木铲挖圆石', BlockType.Cobblestone, tool(ToolClass.Shovel, WOODEN), 200],
-    // 树叶没有正确工具，谁挖都一样
+    // 树叶没有合格工具，谁挖都一样
     ['持木斧挖树叶', BlockType.OakLeaves, tool(ToolClass.Axe, WOODEN), 6],
   ];
 
@@ -119,9 +129,9 @@ describe('手持工具时的挖掘耗时', () => {
   }
 });
 
-describe('方块表的正确工具一列', () => {
+describe('方块表的合格工具类别一列', () => {
   /**
-   * issue #15 的方块表给的「正确工具」一列。同样写死字面值，不从 `BLOCKS` 反读。
+   * issue #15 的方块表给的「合格工具」一列。同样写死字面值，不从 `BLOCKS` 反读。
    * 「无」是「没有哪种工具挖它更快」，树叶是这一档；空气与基岩不是挖掘目标，也记「无」。
    */
   const PROPER_TOOL: Array<[string, BlockType, ToolClass]> = [
@@ -138,16 +148,70 @@ describe('方块表的正确工具一列', () => {
   ];
 
   for (const [name, block, expected] of PROPER_TOOL) {
-    it(`${name}的正确工具是 ${expected}`, () => {
-      expect(BLOCKS[block].properTool).toBe(expected);
+    it(`${name}的合格工具类别是 ${expected}`, () => {
+      expect(BLOCKS[block].qualifiedToolClass).toBe(expected);
     });
   }
 
   it('每一行都填了这一列，且填的是一种工具类别', () => {
     const classes: readonly ToolClass[] = Object.values(ToolClass);
     for (const block of Object.values(BlockType)) {
-      expect(classes, `方块 ${block}`).toContain(BLOCKS[block].properTool);
+      expect(classes, `方块 ${block}`).toContain(BLOCKS[block].qualifiedToolClass);
     }
+  });
+});
+
+describe('方块表的最低材质档一列（issue #28）', () => {
+  it('现有方块全部为木：任何镐、斧、铲在它们上面都合格', () => {
+    for (const block of Object.values(BlockType)) {
+      expect(BLOCKS[block].minimumMaterial, `方块 ${block}`).toBe(ToolMaterial.Wood);
+    }
+  });
+
+  it('每一行填的都是一种材质档', () => {
+    const materials: readonly ToolMaterial[] = Object.values(ToolMaterial);
+    for (const block of Object.values(BlockType)) {
+      expect(materials, `方块 ${block}`).toContain(BLOCKS[block].minimumMaterial);
+    }
+  });
+});
+
+describe('合格工具：类别正确且材质档不低于方块要求的最低档', () => {
+  /**
+   * 现有方块的最低档全是木，这条规则在方块表上观察不到。拿石头那一行改最低档为石造一个
+   * 测试专用的方块定义：需要工具、硬度 1.5、合格工具是镐、掉圆石，只有最低档不同。
+   */
+  const STONE_ONLY: BlockDef = { ...BLOCKS[BlockType.Stone], minimumMaterial: ToolMaterial.Stone };
+  const cobblestone = { item: ItemType.Cobblestone, count: 1 };
+
+  it('持木镐挖它：类别对但档不够，视同没有合格工具，按需要工具那一档 150 tick 且什么都不掉', () => {
+    expect(miningTicksFor(STONE_ONLY, tool(ToolClass.Pickaxe, WOODEN))).toBe(150);
+    expect(dropFor(STONE_ONLY, tool(ToolClass.Pickaxe, WOODEN))).toBeNull();
+  });
+
+  it('持石镐挖它正常：12 tick、掉圆石', () => {
+    expect(miningTicksFor(STONE_ONLY, tool(ToolClass.Pickaxe, STONE))).toBe(12);
+    expect(dropFor(STONE_ONLY, tool(ToolClass.Pickaxe, STONE))).toEqual(cobblestone);
+  });
+
+  it('空手与拿错类别的石斧仍是 150 tick、什么都不掉', () => {
+    expect(miningTicksFor(STONE_ONLY, BARE_HAND)).toBe(150);
+    expect(dropFor(STONE_ONLY, BARE_HAND)).toBeNull();
+    expect(miningTicksFor(STONE_ONLY, tool(ToolClass.Axe, STONE))).toBe(150);
+    expect(dropFor(STONE_ONLY, tool(ToolClass.Axe, STONE))).toBeNull();
+  });
+
+  it('不需要工具的方块档不够时按倍率 1：最低档为石的原木持木斧挖是 60 tick，照样掉原木', () => {
+    const def: BlockDef = { ...BLOCKS[BlockType.OakLog], minimumMaterial: ToolMaterial.Stone };
+    expect(miningTicksFor(def, tool(ToolClass.Axe, WOODEN))).toBe(60);
+    expect(dropFor(def, tool(ToolClass.Axe, WOODEN))).toEqual({ item: ItemType.OakLog, count: 1 });
+    expect(miningTicksFor(def, tool(ToolClass.Axe, STONE))).toBe(15);
+  });
+
+  it('按方块种类查的两个入口与按定义查的结果一致', () => {
+    const wooden = tool(ToolClass.Pickaxe, WOODEN);
+    expect(miningTicks(BlockType.Stone, wooden)).toBe(miningTicksFor(BLOCKS[BlockType.Stone], wooden));
+    expect(blockDrop(BlockType.Stone, wooden)).toEqual(dropFor(BLOCKS[BlockType.Stone], wooden));
   });
 });
 
@@ -171,7 +235,7 @@ describe('空手挖掘的掉落表', () => {
 
   for (const [name, block, item] of HAND_DROPS) {
     it(name, () => {
-      const drop = blockDrop(block, ToolClass.None);
+      const drop = blockDrop(block, BARE_HAND);
       if (item === null) {
         expect(drop).toBeNull();
       } else {
@@ -181,7 +245,7 @@ describe('空手挖掘的掉落表', () => {
   }
 
   it('空气不掉东西', () => {
-    expect(blockDrop(BlockType.Air, ToolClass.None)).toBeNull();
+    expect(blockDrop(BlockType.Air, BARE_HAND)).toBeNull();
   });
 
   it('掉落表里每一堆都至少有一个', () => {
@@ -192,34 +256,36 @@ describe('空手挖掘的掉落表', () => {
   });
 });
 
-describe('掉落看手上的工具类别', () => {
-  it('需要工具的方块，手上没有正确工具时什么都不掉', () => {
+describe('掉落看手上的工具', () => {
+  it('需要工具的方块，手上没有合格工具时什么都不掉', () => {
     for (const block of Object.values(BlockType)) {
       if (!BLOCKS[block].requiresTool) continue;
-      expect(blockDrop(block, ToolClass.None), `方块 ${block} 空手`).toBeNull();
-      // 拿着的不是正确工具那一类也一样：石头要镐，斧头挖得动也拿不到东西
-      expect(blockDrop(block, ToolClass.Axe), `方块 ${block} 持斧`).toBeNull();
+      expect(blockDrop(block, BARE_HAND), `方块 ${block} 空手`).toBeNull();
+      // 拿着的不是合格工具那一类也一样：石头要镐，石斧挖得动也拿不到东西
+      expect(blockDrop(block, tool(ToolClass.Axe, STONE)), `方块 ${block} 持石斧`).toBeNull();
     }
   });
 
   it('不需要工具的方块不看工具：拿着什么挖都掉同一样', () => {
     for (const block of Object.values(BlockType)) {
       if (BLOCKS[block].requiresTool) continue;
-      const bare = blockDrop(block, ToolClass.None);
+      const bare = blockDrop(block, BARE_HAND);
       for (const toolClass of Object.values(ToolClass)) {
-        expect(blockDrop(block, toolClass), `方块 ${block} 持 ${toolClass}`).toEqual(bare);
+        expect(blockDrop(block, tool(toolClass, STONE)), `方块 ${block} 持 ${toolClass}`).toEqual(
+          bare,
+        );
       }
     }
   });
 
   it('持镐挖石头掉 1 个圆石，挖圆石也掉 1 个圆石（issue #22）', () => {
     const cobblestone = { item: ItemType.Cobblestone, count: 1 };
-    expect(blockDrop(BlockType.Stone, ToolClass.Pickaxe)).toEqual(cobblestone);
-    expect(blockDrop(BlockType.Cobblestone, ToolClass.Pickaxe)).toEqual(cobblestone);
+    expect(blockDrop(BlockType.Stone, tool(ToolClass.Pickaxe, WOODEN))).toEqual(cobblestone);
+    expect(blockDrop(BlockType.Cobblestone, tool(ToolClass.Pickaxe, WOODEN))).toEqual(cobblestone);
   });
 
-  it('草方块持镐挖照样掉泥土：镐不是它的正确工具，也不影响掉落', () => {
-    expect(blockDrop(BlockType.Grass, ToolClass.Pickaxe)).toEqual({
+  it('草方块持镐挖照样掉泥土：镐不是它的合格工具，也不影响掉落', () => {
+    expect(blockDrop(BlockType.Grass, tool(ToolClass.Pickaxe, WOODEN))).toEqual({
       item: ItemType.Dirt,
       count: 1,
     });
@@ -255,10 +321,10 @@ describe('挖掉一块给多少经验', () => {
   });
 
   it('经验与掉落各算各的：空手挖石头没有掉落，经验照给', () => {
-    expect(blockDrop(BlockType.Stone, ToolClass.None)).toBeNull();
+    expect(blockDrop(BlockType.Stone, BARE_HAND)).toBeNull();
     expect(blockExperience(BlockType.Stone)).toBeGreaterThan(0);
     // 树叶同理
-    expect(blockDrop(BlockType.OakLeaves, ToolClass.None)).toBeNull();
+    expect(blockDrop(BlockType.OakLeaves, BARE_HAND)).toBeNull();
     expect(blockExperience(BlockType.OakLeaves)).toBeGreaterThan(0);
   });
 
@@ -305,12 +371,15 @@ describe('放置表', () => {
   it('放下去再挖掉，拿回的是同一种物品：木板方块掉木板', () => {
     // issue #18：放下去的木板方块挖掉后掉回木板，材料不损失
     const block = placedBlock(ItemType.OakPlanks)!;
-    expect(blockDrop(block, ToolClass.None)).toEqual({ item: ItemType.OakPlanks, count: 1 });
+    expect(blockDrop(block, BARE_HAND)).toEqual({ item: ItemType.OakPlanks, count: 1 });
   });
 
   it('圆石放下去再持镐挖掉，掉回圆石：圆石是可回收的建材（issue #22）', () => {
     const block = placedBlock(ItemType.Cobblestone)!;
-    expect(blockDrop(block, ToolClass.Pickaxe)).toEqual({ item: ItemType.Cobblestone, count: 1 });
+    expect(blockDrop(block, tool(ToolClass.Pickaxe, WOODEN))).toEqual({
+      item: ItemType.Cobblestone,
+      count: 1,
+    });
   });
 });
 
@@ -351,7 +420,7 @@ describe('硬度换算成挖掘耗时', () => {
 describe('挖掘耗时看手上的工具', () => {
   /**
    * issue #15 的「关键数值」一节给的 tick 数：耗时 = 向上取整（硬度 × 30 ÷ 倍率），
-   * 需要工具而手上没有正确工具时则是每点硬度 100 tick。同样写死字面值。
+   * 需要工具而手上没有合格工具时则是每点硬度 100 tick。同样写死字面值。
    */
   const TIMINGS: Array<[string, BlockType, MiningTool, number]> = [
     ['泥土持木铲', BlockType.Dirt, tool(ToolClass.Shovel, WOODEN), 8],
@@ -369,7 +438,7 @@ describe('挖掘耗时看手上的工具', () => {
   }
 
   it('拿错工具与空手一样慢', () => {
-    // 铲挖原木、镐挖泥土都不是正确工具，倍率不起作用
+    // 铲挖原木、镐挖泥土都不是合格工具，倍率不起作用
     expect(miningTicks(BlockType.OakLog, tool(ToolClass.Shovel, STONE))).toBe(
       miningTicks(BlockType.OakLog, BARE_HAND),
     );
@@ -383,8 +452,8 @@ describe('挖掘耗时看手上的工具', () => {
     expect(miningTicks(BlockType.Stone, tool(ToolClass.Axe, STONE))).toBe(150);
   });
 
-  it('正确工具是「无」的方块谁也加不了速', () => {
-    // 树叶那一行的正确工具是「无」，斧头对它不起作用
+  it('合格工具是「无」的方块谁也加不了速', () => {
+    // 树叶那一行的合格工具是「无」，斧头对它不起作用
     const bare = miningTicks(BlockType.OakLeaves, BARE_HAND);
     for (const toolClass of Object.values(ToolClass)) {
       const held = tool(toolClass, STONE);

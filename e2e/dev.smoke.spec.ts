@@ -1711,7 +1711,7 @@ test('在工作台里造出木镐拿在手上：快捷栏画它的图标与中�
     },
     {
       pitch: MAX_PITCH,
-      // 持镐挖泥土与空手一样慢：镐不是泥土的正确工具
+      // 持镐挖泥土与空手一样慢：镐不是泥土的合格工具
       dirtTicks: miningTicks(BlockType.Dirt, BARE_HAND),
       pickupTicks: PICKUP_DELAY_TICKS + 2,
     },

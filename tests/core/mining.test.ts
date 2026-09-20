@@ -800,7 +800,7 @@ describe('手持工具挖穿方块损耗耐久', () => {
     expect(hand.held).toEqual({ item: ItemType.WoodenShovel, count: 1, damage: 1 });
   });
 
-  it('持镐挖泥土同样损耗 1 点：不看是不是正确工具', () => {
+  it('持镐挖泥土同样损耗 1 点：不看是不是合格工具', () => {
     const { mining, hand } = miningTowards(BlockType.Dirt, fresh(ItemType.WoodenPickaxe));
     hold(mining, 15);
     expect(hand.held).toEqual({ item: ItemType.WoodenPickaxe, count: 1, damage: 1 });

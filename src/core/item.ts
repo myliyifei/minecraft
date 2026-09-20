@@ -50,8 +50,8 @@ export function withCount(stack: ItemStack, count: number): ItemStack {
  * 工具类别（见 CONTEXT.md 的「工具」）：镐、斧、铲，加一个「无」。
  *
  * 两侧都用它：物品那边说某件工具属于哪一类（`ToolDef.toolClass`），方块那边说挖它的
- * 正确工具是哪一类（`BlockDef.properTool`）。「无」同时表示三件事——空手、手上那件东西
- * 不是工具、这种方块没有正确工具（树叶）。三者对挖掘的作用相同，不必分开。
+ * 合格工具是哪一类（`BlockDef.qualifiedToolClass`）。「无」同时表示三件事——空手、手上那件东西
+ * 不是工具、这种方块没有合格工具（树叶）。三者对挖掘的作用相同，不必分开。
  *
  * 值是字符串而不是编号：它不进存档（工具类别是由物品种类查出来的，不单独存），
  * 所以不必像 `ItemType` 那样把编号钉死，读起来还清楚些。
@@ -66,29 +66,13 @@ export const ToolClass = {
 export type ToolClass = (typeof ToolClass)[keyof typeof ToolClass];
 
 /**
- * 手上那件工具在挖掘上起的作用：算不算正确工具看类别，是正确工具时快多少看倍率。
- *
- * 只有这两个数进得了耗时公式，所以挖掘拿到的是它而不是整堆物品——耐久与图标不参与
- * 算耗时。哪种物品对应哪一件工具是物品表的事（`ToolDef`），倍率按材质档查（`TOOL_MATERIALS`），
- * 两样合成这一个值的地方是 `miningToolOf`。
- *
- * 与 `Hand` 不是一回事，别混：`Hand` 是「选中格里那一堆物品」，这里是「那一堆在挖掘
- * 那一步算什么」。空手也有这么一个值（`BARE_HAND`），它不是一只 `Hand`。
- */
-export interface MiningTool {
-  readonly toolClass: ToolClass;
-  /** 挖掘速度倍率：木 2、石 4（见 #15 的物品属性表）。空手是 1。 */
-  readonly speed: number;
-}
-
-/** 空手：没有类别，因此对任何方块都不算正确工具，倍率 1。手上拿着的不是工具时也是它。 */
-export const BARE_HAND: MiningTool = Object.freeze({ toolClass: ToolClass.None, speed: 1 });
-
-/**
  * 工具的材质档（见 CONTEXT.md 的「材质档」）：目前有木与石。铁、金、钻石在各自的切片里各加一行。
  *
  * 倍率与最大耐久按材质档查（`TOOL_MATERIALS`），不按每件工具各记一份：同一档的镐斧铲三件数值相同，
  * 记三遍就是三处可能对不上。值是字符串，理由同 `ToolClass`：它不进存档。
+ *
+ * 材质档有先后（木 < 石），先后记在 `TOOL_MATERIAL_ORDER` 里而不是这里的键顺序：对象键的顺序
+ * 不是拿来表达语义的地方。
  */
 export const ToolMaterial = {
   Wood: 'wood',
@@ -97,9 +81,53 @@ export const ToolMaterial = {
 
 export type ToolMaterial = (typeof ToolMaterial)[keyof typeof ToolMaterial];
 
+/**
+ * 材质档从低到高的顺序：木 < 石。加铁在石后面追加一项即可。
+ *
+ * 方块表的「最低材质档」一列（`BlockDef.minimumMaterial`）按它比大小：手上工具的档在这张表上
+ * 不在方块要求的那一档之前，才算合格工具（见 CONTEXT.md）。
+ */
+export const TOOL_MATERIAL_ORDER: readonly ToolMaterial[] = Object.freeze([
+  ToolMaterial.Wood,
+  ToolMaterial.Stone,
+]);
+
+/** 一档材质不低于另一档吗：石不低于木，木不低于木，木低于石。 */
+export function materialAtLeast(material: ToolMaterial, minimum: ToolMaterial): boolean {
+  return TOOL_MATERIAL_ORDER.indexOf(material) >= TOOL_MATERIAL_ORDER.indexOf(minimum);
+}
+
+/**
+ * 手上那件工具在挖掘上起的作用：算不算合格工具看类别与材质档，是合格工具时快多少看倍率。
+ *
+ * 只有这三样进得了耗时公式与掉落表，所以挖掘拿到的是它而不是整堆物品——耐久与图标不参与
+ * 算耗时。哪种物品对应哪一件工具是物品表的事（`ToolDef`），倍率按材质档查（`TOOL_MATERIALS`），
+ * 两样合成这一个值的地方是 `miningToolOf`。
+ *
+ * 与 `Hand` 不是一回事，别混：`Hand` 是「选中格里那一堆物品」，这里是「那一堆在挖掘
+ * 那一步算什么」。空手也有这么一个值（`BARE_HAND`），它不是一只 `Hand`。
+ */
+export interface MiningTool {
+  readonly toolClass: ToolClass;
+  /**
+   * 材质档，方块表的「最低材质档」一列拿它比（`materialAtLeast`）。空手没有材质档，是 undefined：
+   * 空手对任何方块都不合格，谈不上够不够档。
+   */
+  readonly material: ToolMaterial | undefined;
+  /** 挖掘速度倍率：木 2、石 4（见 #15 的物品属性表）。空手是 1。 */
+  readonly speed: number;
+}
+
+/** 空手：没有类别也没有材质档，因此对任何方块都不算合格工具，倍率 1。手上拿着的不是工具时也是它。 */
+export const BARE_HAND: MiningTool = Object.freeze({
+  toolClass: ToolClass.None,
+  material: undefined,
+  speed: 1,
+});
+
 /** 一档材质的两个数：挖掘速度倍率与最大耐久。 */
 export interface ToolMaterialDef {
-  /** 手持正确工具时挖掘耗时除的倍率（见 `miningTicks`）。 */
+  /** 手持合格工具时挖掘耗时除的倍率（见 `miningTicks`）。 */
   readonly speed: number;
   /** 满耐久是多少点；损耗到这么多点工具消失（`wornTool`）。 */
   readonly durability: number;
@@ -182,13 +210,17 @@ export function toolOf(item: ItemType): ToolDef | undefined {
 }
 
 /**
- * 手上那一堆在挖掘里算什么工具：工具按类别与材质档的倍率算，其余（空手、材料、方块物品）
+ * 手上那一堆在挖掘里算什么工具：工具按类别、材质档与那一档的倍率算，其余（空手、材料、方块物品）
  * 都是 `BARE_HAND`。损耗不参与——挖到只剩 1 点耐久的木镐与新的一样快。
  */
 export function miningToolOf(stack: ItemStack | undefined): MiningTool {
   const tool = stack && toolOf(stack.item);
   if (!tool) return BARE_HAND;
-  return { toolClass: tool.toolClass, speed: TOOL_MATERIALS[tool.material].speed };
+  return {
+    toolClass: tool.toolClass,
+    material: tool.material,
+    speed: TOOL_MATERIALS[tool.material].speed,
+  };
 }
 
 /** 这种物品的满耐久是多少点，不是工具时 undefined。 */

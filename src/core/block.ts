@@ -1,4 +1,11 @@
-import { ItemType, ToolClass, type ItemStack, type MiningTool } from './item';
+import {
+  ItemType,
+  ToolClass,
+  ToolMaterial,
+  materialAtLeast,
+  type ItemStack,
+  type MiningTool,
+} from './item';
 
 /**
  * 方块种类。数值直接存进区块的 Uint8Array，因此已发布的编号不可改动，新方块追加即可。
@@ -46,23 +53,32 @@ export interface BlockDef {
   /** 硬度（见 CONTEXT.md），挖掘耗时按它算。`UNBREAKABLE` 表示怎么挖都挖不掉。 */
   readonly hardness: number;
   /**
-   * 挖它更快的那一类工具（见 CONTEXT.md 的「正确工具」）：石头是镐，原木是斧，
+   * 合格工具（见 CONTEXT.md）的两个条件之一：类别。挖它更快的那一类工具，石头是镐，原木是斧，
    * 草与泥土是铲。`None` 是「没有哪种工具挖它更快」，树叶就是这一档。
    *
-   * 与 `requiresTool` 是两件事：这一列说「哪种工具算正确工具」，那一列说「手上没有它时还能不能
-   * 拿到东西」。草方块有正确工具（铲）但空手挖也照样掉泥土。
+   * 与 `requiresTool` 是两件事：这一列说「哪一类工具算合格」，那一列说「手上没有合格工具时还能不能
+   * 拿到东西」。草方块有合格工具（铲）但空手挖也照样掉泥土。
    */
-  readonly properTool: ToolClass;
+  readonly qualifiedToolClass: ToolClass;
   /**
-   * 挖它要正确工具（石头与圆石要镐）。空手照样挖得动，只是慢得多——每点硬度从 30 tick
+   * 合格工具的另一个条件：最低材质档。类别对了，材质档还得不低于这一档（`materialAtLeast`）。
+   * 类别对但档不够视同没有合格工具——需要工具的方块按每点硬度 100 tick 且什么都不掉，
+   * 不需要工具的方块按倍率 1。
+   *
+   * 现有方块全部为木，所以任何镐、斧、铲在它们上面都合格；铁矿石（第三切片）要石。没有合格工具
+   * 的方块（树叶）与不是挖掘目标的方块（空气、基岩）也填木，只是占位。
+   */
+  readonly minimumMaterial: ToolMaterial;
+  /**
+   * 挖它要合格工具（石头与圆石要镐）。空手照样挖得动，只是慢得多——每点硬度从 30 tick
    * 变成 100 tick，石头因此是 150 tick 而不是 45——而且什么都拿不到（见 `blockDrop`）。
    */
   readonly requiresTool: boolean;
   /**
    * 挖掉它掉出什么（见 CONTEXT.md 的「掉落表」），`null` 表示什么都不掉。
    *
-   * 这一列是「拿着正确工具时掉什么」。需要工具的方块在没有正确工具时一律什么都不掉，
-   * 那条规则在 `blockDrop` 里，不在数据里：石头这一行记的是圆石，空手挖石头仍然什么都拿不到。
+   * 这一列是「拿着合格工具时掉什么」。需要工具的方块在没有合格工具时一律什么都不掉，
+   * 那条规则在 `dropFor` 里，不在数据里：石头这一行记的是圆石，空手挖石头仍然什么都拿不到。
    */
   readonly drop: ItemStack | null;
   /**
@@ -95,12 +111,13 @@ const COMMON_EXPERIENCE = 30;
 
 /** 方块属性表——纯数据。加方块只加一行。 */
 export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
-  // 空气不是挖掘目标，硬度与正确工具只是占位。
+  // 空气不是挖掘目标，硬度、合格工具的类别与最低材质档只是占位。
   [BlockType.Air]: {
     opaque: false,
     solid: false,
     hardness: 0,
-    properTool: ToolClass.None,
+    qualifiedToolClass: ToolClass.None,
+    minimumMaterial: ToolMaterial.Wood,
     requiresTool: false,
     drop: null,
     experience: 0,
@@ -111,7 +128,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: true,
     solid: true,
     hardness: 0.6,
-    properTool: ToolClass.Shovel,
+    qualifiedToolClass: ToolClass.Shovel,
+    minimumMaterial: ToolMaterial.Wood,
     requiresTool: false,
     drop: one(ItemType.Dirt),
     experience: COMMON_EXPERIENCE,
@@ -121,7 +139,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: true,
     solid: true,
     hardness: 0.5,
-    properTool: ToolClass.Shovel,
+    qualifiedToolClass: ToolClass.Shovel,
+    minimumMaterial: ToolMaterial.Wood,
     requiresTool: false,
     drop: one(ItemType.Dirt),
     experience: COMMON_EXPERIENCE,
@@ -132,7 +151,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: true,
     solid: true,
     hardness: 1.5,
-    properTool: ToolClass.Pickaxe,
+    qualifiedToolClass: ToolClass.Pickaxe,
+    minimumMaterial: ToolMaterial.Wood,
     requiresTool: true,
     drop: one(ItemType.Cobblestone),
     experience: COMMON_EXPERIENCE,
@@ -142,8 +162,9 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: true,
     solid: true,
     hardness: UNBREAKABLE,
-    // 挖不动，谈不上哪种工具算正确工具。
-    properTool: ToolClass.None,
+    // 挖不动，谈不上哪种工具算合格工具。
+    qualifiedToolClass: ToolClass.None,
+    minimumMaterial: ToolMaterial.Wood,
     requiresTool: false,
     drop: null,
     // 挖不动，所以它永远碎不了，也就不会生成经验球。
@@ -154,7 +175,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: true,
     solid: true,
     hardness: 2,
-    properTool: ToolClass.Axe,
+    qualifiedToolClass: ToolClass.Axe,
+    minimumMaterial: ToolMaterial.Wood,
     requiresTool: false,
     drop: one(ItemType.OakLog),
     // 原木自成一档，比普通方块高一倍。
@@ -166,8 +188,9 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: false,
     solid: true,
     hardness: 0.2,
-    // 原版用剪刀与剑，本项目两样都还没有，所以树叶没有正确工具：拿什么挖都一样快。
-    properTool: ToolClass.None,
+    // 原版用剪刀与剑，本项目两样都还没有，所以树叶没有合格工具：拿什么挖都一样快。
+    qualifiedToolClass: ToolClass.None,
+    minimumMaterial: ToolMaterial.Wood,
     requiresTool: false,
     drop: null,
     // 树叶什么都不掉，但「任何方块都给经验」（见 CONTEXT.md 的「经验球」），
@@ -180,7 +203,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: true,
     solid: true,
     hardness: 2,
-    properTool: ToolClass.Axe,
+    qualifiedToolClass: ToolClass.Axe,
+    minimumMaterial: ToolMaterial.Wood,
     requiresTool: false,
     drop: one(ItemType.OakPlanks),
     // 木板是加工过的建材，不像原木那样自成一档，按普通方块给。
@@ -193,7 +217,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: true,
     solid: true,
     hardness: 2.5,
-    properTool: ToolClass.Axe,
+    qualifiedToolClass: ToolClass.Axe,
+    minimumMaterial: ToolMaterial.Wood,
     requiresTool: false,
     drop: one(ItemType.CraftingTable),
     experience: COMMON_EXPERIENCE,
@@ -205,7 +230,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: true,
     solid: true,
     hardness: 2,
-    properTool: ToolClass.Pickaxe,
+    qualifiedToolClass: ToolClass.Pickaxe,
+    minimumMaterial: ToolMaterial.Wood,
     requiresTool: true,
     drop: one(ItemType.Cobblestone),
     experience: COMMON_EXPERIENCE,
@@ -239,7 +265,7 @@ export function isBreakable(block: BlockType): boolean {
 const TICKS_PER_HARDNESS = 30;
 
 /**
- * 需要工具而手上没有正确工具时，一点硬度要挖多少 tick。
+ * 需要工具而手上没有合格工具时，一点硬度要挖多少 tick。
  * 石头因此空手要 150 tick，而不是按上面那一档算出来的 45。
  */
 const TICKS_PER_HARDNESS_WITHOUT_TOOL = 100;
@@ -253,42 +279,59 @@ const TICKS_PER_HARDNESS_WITHOUT_TOOL = 100;
  */
 const TICK_EPSILON = 1e-9;
 
-/** 手上那件工具对这种方块算不算正确工具。方块没有正确工具（树叶）时谁都不算。 */
-function isProperTool(def: BlockDef, toolClass: ToolClass): boolean {
-  return def.properTool !== ToolClass.None && def.properTool === toolClass;
+/**
+ * 手上那件工具对这种方块算不算合格工具（见 CONTEXT.md）：类别正确，且材质档不低于方块要求的
+ * 最低档。方块没有合格工具（树叶）时任何工具都不合格；空手没有材质档，也不合格。
+ */
+function isQualifiedTool(def: BlockDef, tool: MiningTool): boolean {
+  if (def.qualifiedToolClass === ToolClass.None || def.qualifiedToolClass !== tool.toolClass) return false;
+  return tool.material !== undefined && materialAtLeast(tool.material, def.minimumMaterial);
 }
 
 /**
- * 手上拿着这件工具，挖掉一个方块要多少 tick，挖不动的返回 `Infinity`。
+ * 手上拿着这件工具，按一份方块定义挖掉一个方块要多少 tick，挖不动的返回 `Infinity`。
  *
- * 公式：向上取整（硬度 × 30 ÷ 倍率）。倍率只在手上那件工具是正确工具时算数，否则是 1——
- * 拿铲挖原木与空手一样慢。需要工具的方块在没有正确工具时另走一档（每点硬度 100 tick），
- * 这条优先于倍率：拿着石斧挖石头仍是 150 tick。
+ * 公式：向上取整（硬度 × 30 ÷ 倍率）。倍率只在手上那件工具是合格工具时算数，否则是 1——
+ * 拿铲挖原木与空手一样慢，拿木镐挖最低档为石的方块也一样慢。需要工具的方块在没有合格工具时另走
+ * 一档（每点硬度 100 tick），这条优先于倍率：拿着石斧挖石头仍是 150 tick。
  *
- * 空手（`BARE_HAND`）的结果：草 18、泥土 15、树叶 6、原木 60、石头 150。
+ * 接一份定义而不是方块种类，是让测试拿一份改了最低档的定义验证材质档门槛——方块表里现在没有
+ * 一行最低档高于木。游戏里走的是 `miningTicks`。
  */
-export function miningTicks(block: BlockType, tool: MiningTool): number {
-  const def = BLOCKS[block];
-  const proper = isProperTool(def, tool.toolClass);
-  if (def.requiresTool && !proper) {
+export function miningTicksFor(def: BlockDef, tool: MiningTool): number {
+  const qualified = isQualifiedTool(def, tool);
+  if (def.requiresTool && !qualified) {
     return Math.ceil(def.hardness * TICKS_PER_HARDNESS_WITHOUT_TOOL - TICK_EPSILON);
   }
-  const speed = proper ? tool.speed : 1;
+  const speed = qualified ? tool.speed : 1;
   return Math.ceil((def.hardness * TICKS_PER_HARDNESS) / speed - TICK_EPSILON);
 }
 
 /**
- * 手上拿着这一类工具，挖掉一个方块掉出什么，什么都不掉时返回 `null`。
+ * 手上拿着这件工具，挖掉一个方块要多少 tick，挖不动的返回 `Infinity`（`miningTicksFor`）。
  *
- * 需要工具的方块只在手上拿着正确工具时掉东西——空手挖石头挖得掉，什么也拿不到。
- * 其余方块不看工具：草方块拿镐挖照样掉泥土。
- *
- * 只要类别不要倍率：掉什么与挖多快无关，木镐与石镐挖石头掉的是同一样东西。
+ * 空手（`BARE_HAND`）的结果：草 18、泥土 15、树叶 6、原木 60、石头 150。
  */
-export function blockDrop(block: BlockType, toolClass: ToolClass): ItemStack | null {
-  const def = BLOCKS[block];
-  if (def.requiresTool && !isProperTool(def, toolClass)) return null;
+export function miningTicks(block: BlockType, tool: MiningTool): number {
+  return miningTicksFor(BLOCKS[block], tool);
+}
+
+/**
+ * 手上拿着这件工具，按一份方块定义挖掉一个方块掉出什么，什么都不掉时返回 `null`。
+ *
+ * 需要工具的方块只在手上拿着合格工具时掉东西——空手挖石头挖得掉，什么也拿不到，持木镐挖
+ * 最低档为石的方块同样拿不到。其余方块不看工具：草方块拿镐挖照样掉泥土。
+ *
+ * 只要类别与材质档，不要倍率：掉什么与挖多快无关。接一份定义的理由同 `miningTicksFor`。
+ */
+export function dropFor(def: BlockDef, tool: MiningTool): ItemStack | null {
+  if (def.requiresTool && !isQualifiedTool(def, tool)) return null;
   return def.drop;
+}
+
+/** 手上拿着这件工具，挖掉一个方块掉出什么，什么都不掉时返回 `null`（`dropFor`）。 */
+export function blockDrop(block: BlockType, tool: MiningTool): ItemStack | null {
+  return dropFor(BLOCKS[block], tool);
 }
 
 /**

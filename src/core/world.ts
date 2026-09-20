@@ -1,4 +1,10 @@
-import { BlockType, type BlockEdit } from './block';
+import { BlockType, blockStateKind, type BlockEdit } from './block';
+import {
+  initialBlockState,
+  type BlockState,
+  type BlockStateEntry,
+  type BlockStateView,
+} from './block-state';
 import { Chunk } from './chunk';
 import { CHUNK_SHIFT, CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from './constants';
 import type { Vec3 } from './vec3';
@@ -31,9 +37,10 @@ export type ChunkSourceFactory = (seed: number) => ChunkSource;
  * 未加载的区块视为边界：读到空气，写入被丢弃。这与连锁挖掘「未加载区块视为边界」
  * 的规则一致，也让区块流式加载不必给读写路径加特例。
  *
- * 玩家改过的区块卸载之后仍由世界持有（见 `editedChunks` 与 ADR-0008）。
+ * 玩家改过的区块卸载之后仍由世界持有（见 `editedChunks` 与 ADR-0008）。方块的额外状态
+ * （熔炉里的东西）存在世界的一张按坐标索引的表里，不进区块数据（见 `blockStates` 与 ADR-0011）。
  */
-export class World implements BlockEdit {
+export class World implements BlockEdit, BlockStateView {
   private readonly chunks = new Map<number, Chunk>();
   /**
    * 玩家改过的区块，卸载之后仍留在这里。这条规则本身见 CONTEXT.md 的「已改区块」。
@@ -54,6 +61,16 @@ export class World implements BlockEdit {
    * （见 `WorldRenderer.syncChunkMeshes`），核心层测试里世界是一次性的。
    */
   private readonly changed = new Map<string, Vec3>();
+  /**
+   * 方块状态表（见 CONTEXT.md 的「方块状态」、ADR-0011）：键是世界坐标，值是那一格方块的额外状态。
+   *
+   * 由 `setBlock` 维护：放下带状态的方块建一条，换成别的方块删一条，同一种状态的两个编号之间
+   * 切换（熄火与燃烧中的熔炉）那条不动。区块卸载不删这里的条目——带状态的方块一定是玩家放的，
+   * 那个区块因此是已改区块，卸载后整块留着（ADR-0008），走回来时方块与状态都还在。
+   *
+   * 键用 `"x,y,z"` 字符串，理由同 `changed`：这条路每 tick 最多走几次。
+   */
+  private readonly blockStates = new Map<string, BlockState>();
   private readonly source: ChunkSource;
 
   constructor(source: ChunkSource) {
@@ -153,12 +170,48 @@ export class World implements BlockEdit {
     const lx = localOf(bx);
     const lz = localOf(bz);
     // 写成同样的方块不算变过：网格没必要为一次空写重建。
-    if (chunk.get(lx, by, lz) === block) return true;
+    const previous = chunk.get(lx, by, lz);
+    if (previous === block) return true;
     chunk.set(lx, by, lz, block);
+    this.syncBlockState(bx, by, bz, previous, block);
     // 这一下让它成了已改区块，卸载后不再丢弃。
     this.editedChunks.set(key, chunk);
-    this.changed.set(`${bx},${by},${bz}`, { x: bx, y: by, z: bz });
+    this.changed.set(blockKey(bx, by, bz), { x: bx, y: by, z: bz });
     return true;
+  }
+
+  blockStateAt(x: number, y: number, z: number): BlockState | undefined {
+    return this.blockStates.get(blockKey(Math.floor(x), Math.floor(y), Math.floor(z)));
+  }
+
+  /** 状态表里有几条。调试句柄与测试用它确认放下、挖掉之后表的增减。 */
+  get blockStateCount(): number {
+    return this.blockStates.size;
+  }
+
+  /**
+   * 整张状态表：每一条带着它的世界坐标。调试句柄读它看世界里有哪些带状态的方块。
+   *
+   * 坐标从键里解出来而不是另存一份：这条路只有调试与测试走，表里也只有几十条。
+   */
+  allBlockStates(): BlockStateEntry[] {
+    return [...this.blockStates].map(([key, state]) => {
+      const [x, y, z] = key.split(',').map(Number) as [number, number, number];
+      return { x, y, z, state };
+    });
+  }
+
+  /**
+   * 一格从 `previous` 换成 `block` 之后状态表该怎么改：种类没变就不动（熄火的熔炉点着了，
+   * 里面的东西还在）；变了就删掉旧种类那条、给新种类建一条空的。没有状态的方块（`None`）
+   * 两头都什么都不做。
+   */
+  private syncBlockState(x: number, y: number, z: number, previous: BlockType, block: BlockType): void {
+    if (blockStateKind(previous) === blockStateKind(block)) return;
+    const key = blockKey(x, y, z);
+    const state = initialBlockState(block);
+    if (state) this.blockStates.set(key, state);
+    else this.blockStates.delete(key);
   }
 
   /**
@@ -172,6 +225,11 @@ export class World implements BlockEdit {
     this.changed.clear();
     return blocks;
   }
+}
+
+/** 「变过的方块」与方块状态表共用的坐标键。要求整数输入。 */
+function blockKey(x: number, y: number, z: number): string {
+  return `${x},${y},${z}`;
 }
 
 /** 区块键的一维跨度，决定了世界的区块坐标范围：±2²⁵ 个区块。 */

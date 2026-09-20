@@ -40,6 +40,7 @@ import {
   CRACK_STAGES,
   HeldItemShape,
   ITEM_TILES,
+  TILE,
   TILE_PX,
   tileCell,
 } from '../src/render/atlas';
@@ -2584,6 +2585,75 @@ test('工作台方块画得出来：平视它时画面正中从远处的草绿�
   // 摆上之后画面正中变了，而且是木板的褐黄：红分量高于绿分量
   expect(rgb.after).not.toEqual(rgb.before);
   expect(rgb.after[0]).toBeGreaterThan(rgb.after[1]);
+  expect(errors).toEqual([]);
+});
+
+test('调试句柄放一块熔炉在玩家面前：画布上正面是熄火那一格，改成燃烧中编号并重建后是燃烧那一格', async ({
+  page,
+}) => {
+  await waitForFullViewDistance(page);
+  // 整段跑在一次同步的 evaluate 里。正面贴在方块的 −X 与 −Z 两面，所以玩家朝 +X 平视，熔炉摆在
+  // 正前方两格、眼睛那一层：正对视线的是它的 −X 面，也就是正面，画面正中那一像素落在炉口上。
+  // 两次都读回送上显卡的网格用到了哪些贴图格号：那是「画的是哪一格」的直接证据，像素颜色只作辅助。
+  const seen = await page.evaluate(
+    ({ furnace, lit, eyeHeight, chunkSize, eastYaw }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const centerRgb = window.__CENTER_RGB__!;
+      core.turn(eastYaw - core.player.yaw, -core.player.pitch);
+      const { x, y, z } = core.player.position;
+      const spot = { x: Math.floor(x) + 2, y: Math.floor(y + eyeHeight), z: Math.floor(z) };
+      const cx = Math.floor(spot.x / chunkSize);
+      const cz = Math.floor(spot.z / chunkSize);
+      const show = (block: BlockType) => {
+        core.setBlock(spot.x, spot.y, spot.z, block);
+        core.tick();
+        renderer.syncChunkMeshes();
+        renderer.render(1);
+        return {
+          block: core.getBlock(spot.x, spot.y, spot.z),
+          tiles: renderer.chunkMeshTiles(cx, cz),
+          rgb: centerRgb(),
+          hasState: core.blockStateAt(spot.x, spot.y, spot.z) !== undefined,
+          stateCount: core.blockStateCount,
+          entries: core.allBlockStates().map(({ x, y, z }) => ({ x, y, z })),
+        };
+      };
+      const before = core.blockStateCount;
+      return { before, off: show(furnace), lit: show(lit) };
+    },
+    {
+      furnace: BlockType.Furnace,
+      lit: BlockType.LitFurnace,
+      eyeHeight: PLAYER_EYE_HEIGHT,
+      chunkSize: CHUNK_SIZE,
+      // 朝 +X 看的偏航
+      eastYaw: -Math.PI / 2,
+    },
+  );
+  // 熄火时网格用到熄火正面、没有燃烧正面；改成燃烧中并重建后反过来
+  expect(seen.off.block).toBe(BlockType.Furnace);
+  expect(seen.off.tiles).toContain(TILE.furnaceFront);
+  expect(seen.off.tiles).not.toContain(TILE.litFurnaceFront);
+  expect(seen.lit.block).toBe(BlockType.LitFurnace);
+  expect(seen.lit.tiles).toContain(TILE.litFurnaceFront);
+  expect(seen.lit.tiles).not.toContain(TILE.furnaceFront);
+  // 顶面与侧面两次都在
+  for (const tiles of [seen.off.tiles, seen.lit.tiles]) {
+    expect(tiles).toContain(TILE.furnaceTop);
+    expect(tiles).toContain(TILE.furnaceSide);
+  }
+  // 画面正中：熄火时是炉口的近黑，燃烧时是火的橙——红分量高得多，且红 > 绿 > 蓝
+  expect(seen.lit.rgb[0]).toBeGreaterThan(seen.off.rgb[0] + 60);
+  expect(seen.lit.rgb[0]).toBeGreaterThan(seen.lit.rgb[1]);
+  expect(seen.lit.rgb[1]).toBeGreaterThan(seen.lit.rgb[2]);
+  // 调试句柄读得到状态表：放下建了一条，换编号那条还在
+  expect(seen.before).toBe(0);
+  expect(seen.off.hasState).toBe(true);
+  expect(seen.off.stateCount).toBe(1);
+  expect(seen.lit.hasState).toBe(true);
+  expect(seen.lit.stateCount).toBe(1);
+  expect(seen.off.entries).toEqual(seen.lit.entries);
+  expect(seen.lit.entries).toHaveLength(1);
   expect(errors).toEqual([]);
 });
 

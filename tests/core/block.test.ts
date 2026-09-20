@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   BLOCKS,
+  BlockStateKind,
   BlockType,
   BlockUse,
   UNBREAKABLE,
   blockDrop,
   blockExperience,
+  blockStateKind,
   blockUse,
   dropFor,
   isBreakable,
@@ -54,6 +56,9 @@ const HAND_MINING: Array<[string, BlockType, number, number]> = [
   ['工作台', BlockType.CraftingTable, 2.5, 75],
   // 圆石要镐（issue #22），空着手同样是每点硬度 100 tick
   ['圆石', BlockType.Cobblestone, 2, 200],
+  // 熔炉要镐（issue #30），硬度 3.5；燃烧中的那个编号与它同一行数据
+  ['熔炉', BlockType.Furnace, 3.5, 350],
+  ['燃烧中的熔炉', BlockType.LitFurnace, 3.5, 350],
 ];
 
 describe('方块的硬度表', () => {
@@ -90,8 +95,13 @@ describe('方块的硬度表', () => {
     expect(isBreakable(BlockType.OakLeaves)).toBe(true);
   });
 
-  it('本切片只有石头与圆石需要工具', () => {
-    const needsTool = new Set<BlockType>([BlockType.Stone, BlockType.Cobblestone]);
+  it('石头、圆石与两个编号的熔炉需要工具', () => {
+    const needsTool = new Set<BlockType>([
+      BlockType.Stone,
+      BlockType.Cobblestone,
+      BlockType.Furnace,
+      BlockType.LitFurnace,
+    ]);
     for (const block of Object.values(BlockType)) {
       expect(BLOCKS[block].requiresTool, `方块 ${block}`).toBe(needsTool.has(block));
     }
@@ -111,6 +121,11 @@ describe('手持工具时的挖掘耗时', () => {
     ['持木斧挖原木', BlockType.OakLog, tool(ToolClass.Axe, WOODEN), 30],
     ['持木斧挖工作台', BlockType.CraftingTable, tool(ToolClass.Axe, WOODEN), 38],
     ['持石镐挖石头', BlockType.Stone, tool(ToolClass.Pickaxe, STONE), 12],
+    // 熔炉（issue #30）：硬度 3.5 × 30 ÷ 2 = 52.5，向上取整
+    ['持木镐挖熔炉', BlockType.Furnace, tool(ToolClass.Pickaxe, WOODEN), 53],
+    ['持木镐挖燃烧中的熔炉', BlockType.LitFurnace, tool(ToolClass.Pickaxe, WOODEN), 53],
+    // 熔炉要镐：持木斧按需要工具那一档算，与空手相同
+    ['持木斧挖熔炉', BlockType.Furnace, tool(ToolClass.Axe, WOODEN), 350],
     ['持石斧挖原木', BlockType.OakLog, tool(ToolClass.Axe, STONE), 15],
     // 拿错工具与空手一样慢
     ['持木铲挖原木', BlockType.OakLog, tool(ToolClass.Shovel, WOODEN), 60],
@@ -230,6 +245,8 @@ describe('空手挖掘的掉落表', () => {
     // 石头与圆石要镐，空着手挖掉了也拿不到东西
     ['空手挖石头什么都不掉', BlockType.Stone, null],
     ['空手挖圆石什么都不掉', BlockType.Cobblestone, null],
+    ['空手挖熔炉什么都不掉', BlockType.Furnace, null],
+    ['空手挖燃烧中的熔炉什么都不掉', BlockType.LitFurnace, null],
     ['基岩什么都不掉', BlockType.Bedrock, null],
   ];
 
@@ -282,6 +299,12 @@ describe('掉落看手上的工具', () => {
     const cobblestone = { item: ItemType.Cobblestone, count: 1 };
     expect(blockDrop(BlockType.Stone, tool(ToolClass.Pickaxe, WOODEN))).toEqual(cobblestone);
     expect(blockDrop(BlockType.Cobblestone, tool(ToolClass.Pickaxe, WOODEN))).toEqual(cobblestone);
+  });
+
+  it('持镐挖两个编号的熔炉都掉 1 个熔炉：燃烧中的熔炉挖掉不会变成别的东西（issue #30）', () => {
+    const furnace = { item: ItemType.Furnace, count: 1 };
+    expect(blockDrop(BlockType.Furnace, tool(ToolClass.Pickaxe, WOODEN))).toEqual(furnace);
+    expect(blockDrop(BlockType.LitFurnace, tool(ToolClass.Pickaxe, WOODEN))).toEqual(furnace);
   });
 
   it('草方块持镐挖照样掉泥土：镐不是它的合格工具，也不影响掉落', () => {
@@ -347,6 +370,8 @@ describe('放置表', () => {
     ['木板放下去是木板方块', ItemType.OakPlanks, BlockType.OakPlanks],
     ['工作台放下去是工作台方块', ItemType.CraftingTable, BlockType.CraftingTable],
     ['圆石放下去是圆石方块', ItemType.Cobblestone, BlockType.Cobblestone],
+    // 放置永远是熄火那个编号：燃烧中的熔炉没有对应的物品
+    ['熔炉放下去是熄火的熔炉方块', ItemType.Furnace, BlockType.Furnace],
     ['木棍放不下去', ItemType.Stick, null],
     ['木镐放不下去', ItemType.WoodenPickaxe, null],
     ['木斧放不下去', ItemType.WoodenAxe, null],
@@ -380,6 +405,28 @@ describe('放置表', () => {
       item: ItemType.Cobblestone,
       count: 1,
     });
+  });
+});
+
+describe('方块表的「方块状态」一列（issue #30）', () => {
+  it('只有两个编号的熔炉带方块状态，其余方块没有', () => {
+    const stateful = new Set<BlockType>([BlockType.Furnace, BlockType.LitFurnace]);
+    for (const block of Object.values(BlockType)) {
+      expect(blockStateKind(block), `方块 ${block}`).toBe(
+        stateful.has(block) ? BlockStateKind.Furnace : BlockStateKind.None,
+      );
+    }
+  });
+
+  it('每一行都填了这一列，且填的是一种状态', () => {
+    const kinds: readonly BlockStateKind[] = Object.values(BlockStateKind);
+    for (const block of Object.values(BlockType)) {
+      expect(kinds, `方块 ${block}`).toContain(BLOCKS[block].state);
+    }
+  });
+
+  it('燃烧中的熔炉与熄火的熔炉除贴图外是同一行数据：硬度、合格工具、掉落、状态都相同', () => {
+    expect(BLOCKS[BlockType.LitFurnace]).toEqual(BLOCKS[BlockType.Furnace]);
   });
 });
 

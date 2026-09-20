@@ -11,8 +11,8 @@ import { plainsTerrain, plainsTreePlacement } from '../../src/core/terrain';
 import { oakTreesTouching } from '../../src/core/tree';
 import { chunkOf, chunksAround, ORIGIN_CHUNK, World } from '../../src/core/world';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
-import { ATLAS_COLS, ATLAS_ROWS, tileUvRect, TILE } from '../../src/render/atlas';
-import { buildChunkMesh, type MeshData } from '../../src/render/mesh';
+import { tileUvRect, TILE } from '../../src/render/atlas';
+import { buildChunkMesh, meshTiles, type MeshData } from '../../src/render/mesh';
 
 /**
  * 待生成网格的区块，配一个「区块之外」的视图。
@@ -259,6 +259,24 @@ describe('面到图集贴图的映射', () => {
     expectFaceTile(mesh, [0, 0, -1], TILE.craftingTableFront);
   });
 
+  it('熔炉顶面、侧面、正面各一张，正面贴 −X 与 −Z（issue #30）', () => {
+    const mesh = meshOf(sparse([[x, y, z, BlockType.Furnace]]));
+    expectFaceTile(mesh, [0, 1, 0], TILE.furnaceTop);
+    expectFaceTile(mesh, [0, -1, 0], TILE.furnaceTop);
+    expectFaceTile(mesh, [1, 0, 0], TILE.furnaceSide);
+    expectFaceTile(mesh, [0, 0, 1], TILE.furnaceSide);
+    expectFaceTile(mesh, [-1, 0, 0], TILE.furnaceFront);
+    expectFaceTile(mesh, [0, 0, -1], TILE.furnaceFront);
+  });
+
+  it('燃烧中的熔炉只有正面换成燃烧那一张，其余四面与熄火时相同', () => {
+    const mesh = meshOf(sparse([[x, y, z, BlockType.LitFurnace]]));
+    expectFaceTile(mesh, [0, 1, 0], TILE.furnaceTop);
+    expectFaceTile(mesh, [1, 0, 0], TILE.furnaceSide);
+    expectFaceTile(mesh, [-1, 0, 0], TILE.litFurnaceFront);
+    expectFaceTile(mesh, [0, 0, -1], TILE.litFurnaceFront);
+  });
+
   it('石头、基岩、泥土、树叶、木板六面同贴图', () => {
     const cases: Array<[BlockType, number]> = [
       [BlockType.Stone, TILE.stone],
@@ -290,31 +308,24 @@ describe('面到图集贴图的映射', () => {
   });
 });
 
-describe('生成地形的网格', () => {
-  /** uv 落在哪一格贴图上——`tileUvRect` 的反函数。 */
-  function tileAtUv(u: number, v: number): number {
-    const col = Math.floor(u * ATLAS_COLS);
-    const row = ATLAS_ROWS - 1 - Math.floor(v * ATLAS_ROWS);
-    return row * ATLAS_COLS + col;
-  }
+describe('网格用到了哪些贴图格号', () => {
+  const x = 8;
+  const y = FLAT_GROUND_Y + 4;
+  const z = 8;
 
-  /**
-   * 网格里用到的全部贴图格号。
-   * 取每个面 uv 的中点反查：四个角正落在格的边界上，会同时算进相邻的格里。
-   */
-  function tilesUsed(mesh: MeshData): Set<number> {
-    const tiles = new Set<number>();
-    for (let f = 0; f < faceCount(mesh); f++) {
-      let u = 0;
-      let v = 0;
-      for (let c = 0; c < 4; c++) {
-        u += mesh.uvs[f * 8 + c * 2]!;
-        v += mesh.uvs[f * 8 + c * 2 + 1]!;
-      }
-      tiles.add(tileAtUv(u / 4, v / 4));
-    }
-    return tiles;
-  }
+  it('一块熔炉的网格用到顶面、侧面与熄火正面三格；燃烧中的正面换成燃烧那一格', () => {
+    const off = meshTiles(meshOf(sparse([[x, y, z, BlockType.Furnace]])).uvs);
+    expect(off).toEqual(new Set([TILE.furnaceTop, TILE.furnaceSide, TILE.furnaceFront]));
+    const lit = meshTiles(meshOf(sparse([[x, y, z, BlockType.LitFurnace]])).uvs);
+    expect(lit).toEqual(new Set([TILE.furnaceTop, TILE.furnaceSide, TILE.litFurnaceFront]));
+  });
+
+  it('空网格一格都不用', () => {
+    expect(meshTiles(new Float32Array(0))).toEqual(new Set());
+  });
+});
+
+describe('生成地形的网格', () => {
 
   it('长了树的区块，网格里有橡木原木与橡树叶的贴图', () => {
     // 从种子生成的世界一路走到网格：树长出来了，而且带着对的贴图上了画面。
@@ -324,7 +335,7 @@ describe('生成地形的网格', () => {
     const tree = oakTreesTouching(plainsTreePlacement(DEFAULT_SEED), 0, 0)[0];
     if (!tree) throw new Error('原点区块附近应有一棵橡树');
 
-    const tiles = tilesUsed(meshOf(fromWorld(world, chunkOf(tree.x), chunkOf(tree.z))));
+    const tiles = meshTiles(meshOf(fromWorld(world, chunkOf(tree.x), chunkOf(tree.z))).uvs);
     expect(tiles).toContain(TILE.oakLogSide);
     expect(tiles).toContain(TILE.oakLeaves);
     // 地面的贴图也在：网格不是只剩一棵树

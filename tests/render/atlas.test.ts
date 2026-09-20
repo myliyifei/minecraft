@@ -17,6 +17,7 @@ import {
   heldItemShape,
   itemCubeUvs,
   itemIconUvs,
+  tileAtUv,
   tileCell,
   tileUvRect,
 } from '../../src/render/atlas';
@@ -57,6 +58,25 @@ describe('方块到贴图格号的映射表', () => {
     const tiles = BLOCK_TILES[BlockType.CraftingTable]!;
     expect(new Set([tiles.top, tiles.side, faceTile(tiles, 'front')]).size).toBe(3);
     expect(tiles.bottom).toBe(TILE.oakPlanks);
+  });
+
+  it('熔炉的两个编号共用顶面、底面与侧面，只有正面不同（issue #30）', () => {
+    const off = BLOCK_TILES[BlockType.Furnace]!;
+    const lit = BLOCK_TILES[BlockType.LitFurnace]!;
+    expect(off.top).toBe(TILE.furnaceTop);
+    expect(off.bottom).toBe(TILE.furnaceTop);
+    expect(off.side).toBe(TILE.furnaceSide);
+    expect(faceTile(off, 'front')).toBe(TILE.furnaceFront);
+    expect(lit).toEqual({ ...off, front: TILE.litFurnaceFront });
+    // 顶面、侧面、两种正面是四张不同的图
+    expect(new Set([off.top, off.side, off.front, lit.front]).size).toBe(4);
+  });
+
+  it('图集是 8x8，64 格里现在用了 24 格', () => {
+    expect(ATLAS_COLS).toBe(8);
+    expect(ATLAS_ROWS).toBe(8);
+    expect(Object.keys(TILE)).toHaveLength(24);
+    expect(new Set(Object.values(TILE)).size).toBe(24);
   });
 
   it('不同格的 uv 矩形互不重叠，且都在 [0, 1] 内', () => {
@@ -106,11 +126,23 @@ describe('物品到贴图格号的映射表', () => {
     }
   });
 
+  it('熔炉物品的图标是熄火那个正面，小方块六面与熔炉方块相同', () => {
+    expect(ITEM_TILES[ItemType.Furnace]).toBe(BLOCK_TILES[BlockType.Furnace]);
+    expect(faceTile(ITEM_TILES[ItemType.Furnace], 'front')).toBe(TILE.furnaceFront);
+  });
+
   it('格号换算成图集的列与行', () => {
-    // 4 列 4 行：格号 0 在左上角，格号 5 在第二行第二列
+    // 8 列：格号 0 在左上角，格号 7 在首行末列，格号 9 在第二行第二列
     expect(tileCell(0)).toEqual({ col: 0, row: 0 });
-    expect(tileCell(3)).toEqual({ col: 3, row: 0 });
-    expect(tileCell(5)).toEqual({ col: 1, row: 1 });
+    expect(tileCell(7)).toEqual({ col: 7, row: 0 });
+    expect(tileCell(9)).toEqual({ col: 1, row: 1 });
+  });
+
+  it('uv 反查格号：每一格矩形的中点反查回自己', () => {
+    for (let tile = 0; tile < ATLAS_COLS * ATLAS_ROWS; tile++) {
+      const rect = tileUvRect(tile);
+      expect(tileAtUv((rect.u0 + rect.u1) / 2, (rect.v0 + rect.v1) / 2)).toBe(tile);
+    }
   });
 });
 

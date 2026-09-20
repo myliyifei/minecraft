@@ -18,6 +18,7 @@ export const ItemType = {
   StonePickaxe: 10,
   StoneAxe: 11,
   StoneShovel: 12,
+  Furnace: 13,
 } as const;
 
 export type ItemType = (typeof ItemType)[keyof typeof ItemType];
@@ -187,6 +188,7 @@ export const ITEMS: Readonly<Record<ItemType, ItemDef>> = {
   [ItemType.StonePickaxe]: tool(ToolClass.Pickaxe, ToolMaterial.Stone),
   [ItemType.StoneAxe]: tool(ToolClass.Axe, ToolMaterial.Stone),
   [ItemType.StoneShovel]: tool(ToolClass.Shovel, ToolMaterial.Stone),
+  [ItemType.Furnace]: STACKABLE,
 };
 
 /** 这种物品一格最多堆多少个。 */

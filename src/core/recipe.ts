@@ -96,8 +96,8 @@ function toolRecipes({ head, pickaxe, axe, shovel }: ToolTier): Recipe[] {
 /**
  * 配方表——纯数据（见 CONTEXT.md 的「合成」）。加配方只加一条。
  *
- * 目前有原木出木板、木板出木棍、木板出工作台三条，加木制与石制各三件工具。铁、金、钻石
- * 那几档各再加一组 `toolRecipes`。
+ * 目前有原木出木板、木板出木棍、木板出工作台三条，加木制与石制各三件工具，再加圆石出熔炉。
+ * 铁、金、钻石那几档各再加一组 `toolRecipes`。
  */
 export const RECIPES: ReadonlyArray<Recipe> = [
   {
@@ -135,6 +135,18 @@ export const RECIPES: ReadonlyArray<Recipe> = [
     axe: ItemType.StoneAxe,
     shovel: ItemType.StoneShovel,
   }),
+  // 8 块圆石围一圈、中心空着出一个熔炉（#30）。图案占满 3x3，只在工作台里做得出；
+  // 四向对称，镜像与否结果相同，写 false。
+  {
+    kind: 'shaped',
+    result: one(ItemType.Furnace),
+    pattern: [
+      [ItemType.Cobblestone, ItemType.Cobblestone, ItemType.Cobblestone],
+      [ItemType.Cobblestone, undefined, ItemType.Cobblestone],
+      [ItemType.Cobblestone, ItemType.Cobblestone, ItemType.Cobblestone],
+    ],
+    mirrored: false,
+  },
 ];
 
 /**

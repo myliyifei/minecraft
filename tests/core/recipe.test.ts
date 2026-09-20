@@ -107,6 +107,46 @@ describe('配方表里的原木出木板', () => {
   });
 });
 
+describe('配方表里的圆石出熔炉（issue #30）', () => {
+  const C = ItemType.Cobblestone;
+  const FURNACE = { item: ItemType.Furnace, count: 1 };
+
+  /** 8 块圆石围一圈、中心那一格摆 `center`。 */
+  function ring(center: ItemType | undefined): Array<ItemType | undefined> {
+    return [C, C, C, C, center, C, C, C, C];
+  }
+
+  it('8 块圆石在 3x3 里围一圈、中心空着，出 1 个熔炉', () => {
+    expect(matchRecipe(ring(undefined), THREE_BY_THREE)).toEqual(FURNACE);
+  });
+
+  it('中心放了东西就不匹配：图案里的空格必须真的空着', () => {
+    expect(matchRecipe(ring(C), THREE_BY_THREE)).toBeUndefined();
+    expect(matchRecipe(ring(ItemType.Dirt), THREE_BY_THREE)).toBeUndefined();
+  });
+
+  it('7 块圆石不匹配：少一块就不是那一圈', () => {
+    for (let missing = 0; missing < 9; missing++) {
+      if (missing === 4) continue;
+      const contents = ring(undefined);
+      contents[missing] = undefined;
+      expect(matchRecipe(contents, THREE_BY_THREE), `缺第 ${missing} 格`).toBeUndefined();
+    }
+  });
+
+  it('图案占满三行三列，摆不进 2x2：背包界面里造不出熔炉', () => {
+    const recipe = RECIPES.find((r) => r.result.item === ItemType.Furnace)!;
+    expect(recipeFits(recipe, TWO_BY_TWO)).toBe(false);
+    expect(recipeFits(recipe, THREE_BY_THREE)).toBe(true);
+    expect(matchRecipe([C, C, C, C], TWO_BY_TWO)).toBeUndefined();
+  });
+
+  it('材料必须是圆石：8 块木板围一圈什么都不出', () => {
+    const P = ItemType.OakPlanks;
+    expect(matchRecipe([P, P, P, P, undefined, P, P, P, P], THREE_BY_THREE)).toBeUndefined();
+  });
+});
+
 /** 把一个小图案贴进 3x3 的某个位置：`top`、`left` 是它左上角所在的行与列。 */
 function placed(
   pattern: ReadonlyArray<ReadonlyArray<ItemType | undefined>>,

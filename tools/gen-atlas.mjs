@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 
 const TILE_PX = 16;
-const COLS = 4;
+const COLS = 8;
 const ROWS = 8;
 const WIDTH = COLS * TILE_PX;
 const HEIGHT = ROWS * TILE_PX;
@@ -60,6 +60,21 @@ const TABLE_TOP = [176, 142, 86];
 const TABLE_GRID = [92, 68, 40];
 const TABLE_CLOTH = [178, 60, 52];
 const TABLE_IRON = [200, 200, 205];
+/** 熔炉的炉体比圆石暗一档，炉口熄火时近黑，燃烧时是火的橙与黄。 */
+const FURNACE_BODY = [108, 108, 108];
+const FURNACE_MOUTH = [28, 28, 28];
+const FIRE = [232, 118, 22];
+const FIRE_BRIGHT = [252, 208, 64];
+
+/**
+ * 熔炉正面炉口的范围：横向居中 6 格宽，竖向从第 4 行到第 12 行。
+ * 玩家平视时视线落在方块的第 6 行上（眼高 1.62，取小数部分），端到端测试读画面正中的颜色时
+ * 读到的就是炉口，上下各留两行余量。
+ */
+const MOUTH_LEFT = 5;
+const MOUTH_RIGHT = 10;
+const MOUTH_TOP = 4;
+const MOUTH_BOTTOM = 12;
 
 /** 木棍图标的两端离格子边各留几像素，免得贴到边上。 */
 const STICK_MARGIN = 2;
@@ -222,7 +237,47 @@ const TILES = {
   17: toolIcon(pickaxeHead, STONE_HEAD),
   18: toolIcon(axeHead, STONE_HEAD),
   19: toolIcon(shovelHead, STONE_HEAD),
+  // furnace_top：暗灰的石板，四周一圈更暗的边，中间一块略亮的方板
+  20: (x, y, rand) => {
+    const border = x === 0 || y === 0 || x === TILE_PX - 1 || y === TILE_PX - 1;
+    const inner = x >= 3 && x <= 12 && y >= 3 && y <= 12;
+    if (border) return shade(COBBLE_GAP, Math.floor(rand() * 14) - 7);
+    return shade(FURNACE_BODY, (inner ? 10 : -4) + Math.floor(rand() * 18) - 9);
+  },
+  // furnace_side：圆石那样的碎块与缝，整体比圆石暗一档
+  21: (x, y, rand) => furnaceBody(x, y, rand),
+  // furnace_front：侧面的炉体，中间挖出一个近黑的炉口，炉口上沿一条更亮的石边
+  22: (x, y, rand) => {
+    if (inMouth(x, y)) return shade(FURNACE_MOUTH, Math.floor(rand() * 10) - 5);
+    if (y === MOUTH_TOP - 1 && x >= MOUTH_LEFT && x <= MOUTH_RIGHT) {
+      return shade(FURNACE_BODY, 24 + Math.floor(rand() * 10) - 5);
+    }
+    return furnaceBody(x, y, rand);
+  },
+  // lit_furnace_front：与熄火的正面同一块炉体，炉口里满是火——底部亮黄、往上转橙
+  23: (x, y, rand) => {
+    if (inMouth(x, y)) {
+      const bright = y >= MOUTH_BOTTOM - 1 || (y >= MOUTH_BOTTOM - 3 && (x + y) % 3 === 0);
+      return shade(bright ? FIRE_BRIGHT : FIRE, Math.floor(rand() * 20) - 10);
+    }
+    return TILES[22](x, y, rand);
+  },
 };
+
+/** 这一像素落在熔炉正面的炉口里吗。 */
+function inMouth(x, y) {
+  return x >= MOUTH_LEFT && x <= MOUTH_RIGHT && y >= MOUTH_TOP && y <= MOUTH_BOTTOM;
+}
+
+/** 熔炉的炉体：与圆石同样的碎块与缝，基色暗一档。侧面整面是它，正面挖掉炉口的部分也是它。 */
+function furnaceBody(x, y, rand) {
+  const row = Math.floor(y / 4);
+  const shift = row % 2 === 0 ? 0 : 2;
+  const gap = y % 4 === 3 || (x + shift) % 4 === 3;
+  if (gap) return shade(COBBLE_GAP, -12 + Math.floor(rand() * 16) - 8);
+  const block = ((row * 7 + Math.floor((x + shift) / 4) * 3) % 5) * 8 - 16;
+  return shade(FURNACE_BODY, block + Math.floor(rand() * 20) - 10);
+}
 
 /**
  * 裂纹的颜色与不透明度。

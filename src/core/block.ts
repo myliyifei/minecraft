@@ -21,6 +21,13 @@ export const BlockType = {
   OakPlanks: 7,
   CraftingTable: 8,
   Cobblestone: 9,
+  Furnace: 10,
+  /**
+   * 燃烧中的熔炉（见 CONTEXT.md 的「熔炉」）：与 `Furnace` 是同一种方块的两个编号，只有正面贴图
+   * 不同。放置永远放熄火那个编号；点火与熄火在两个编号之间切换（#34），两者挖掉都掉熔炉物品，
+   * 共用同一条方块状态。
+   */
+  LitFurnace: 11,
 } as const;
 
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
@@ -38,6 +45,21 @@ export const BlockUse = {
 } as const;
 
 export type BlockUse = (typeof BlockUse)[keyof typeof BlockUse];
+
+/**
+ * 这种方块带哪一种方块状态（见 CONTEXT.md 的「方块状态」、ADR-0011）；`None` 是没有额外状态，
+ * 绝大多数方块都是。
+ *
+ * 状态的形状在 `block-state.ts` 里，这里只记种类：方块表说「熔炉带熔炉状态」，世界据此在
+ * 放下时建一条、挖掉时删一条。两个编号记同一种，编号之间切换时那条状态不动。
+ * 值是字符串，理由同 `BlockUse`：它不进存档。
+ */
+export const BlockStateKind = {
+  None: 'none',
+  Furnace: 'furnace',
+} as const;
+
+export type BlockStateKind = (typeof BlockStateKind)[keyof typeof BlockStateKind];
 
 /** 挖不动的方块的硬度。基岩是唯一一个。 */
 export const UNBREAKABLE = Infinity;
@@ -94,6 +116,11 @@ export interface BlockDef {
    * 走放置。工作台这类带界面的方块填自己那一档，对着它时不看手上拿的是什么。
    */
   readonly use: BlockUse;
+  /**
+   * 带哪一种方块状态（见 `BlockStateKind`）。绝大多数方块是 `None`。熔炉的两个编号都填
+   * `Furnace`：世界按这一列决定放下时建不建状态、换成别的方块时删不删。
+   */
+  readonly state: BlockStateKind;
 }
 
 /** 一个某种物品的掉落。掉落表里绝大多数行都是这个形状。 */
@@ -109,6 +136,26 @@ function one(item: ItemType): ItemStack {
  */
 const COMMON_EXPERIENCE = 30;
 
+/**
+ * 熔炉（见 CONTEXT.md，issue #30）：石制，比圆石硬得多；要镐，持镐挖掉掉回熔炉本身。
+ * 两个编号（熄火与燃烧中）共用这一份：除正面贴图外它们没有任何区别，写两遍就是两处可能
+ * 对不上。带熔炉状态——原料、燃料、成品三格与燃烧、熔炼的进度存在世界的方块状态表里。
+ *
+ * 使用一列暂时是 `None`：熔炉界面（#33）进来时改成自己那一档。
+ */
+const FURNACE: BlockDef = {
+  opaque: true,
+  solid: true,
+  hardness: 3.5,
+  qualifiedToolClass: ToolClass.Pickaxe,
+  minimumMaterial: ToolMaterial.Wood,
+  requiresTool: true,
+  drop: one(ItemType.Furnace),
+  experience: COMMON_EXPERIENCE,
+  use: BlockUse.None,
+  state: BlockStateKind.Furnace,
+};
+
 /** 方块属性表——纯数据。加方块只加一行。 */
 export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
   // 空气不是挖掘目标，硬度、合格工具的类别与最低材质档只是占位。
@@ -122,6 +169,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     drop: null,
     experience: 0,
     use: BlockUse.None,
+    state: BlockStateKind.None,
   },
   // 草方块掉的是泥土，不是草方块本身——与原版一致。
   [BlockType.Grass]: {
@@ -134,6 +182,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     drop: one(ItemType.Dirt),
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
+    state: BlockStateKind.None,
   },
   [BlockType.Dirt]: {
     opaque: true,
@@ -145,6 +194,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     drop: one(ItemType.Dirt),
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
+    state: BlockStateKind.None,
   },
   // 石头要镐：持镐挖掉掉圆石（与原版一致），空手挖得掉但什么也拿不到。
   [BlockType.Stone]: {
@@ -157,6 +207,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     drop: one(ItemType.Cobblestone),
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
+    state: BlockStateKind.None,
   },
   [BlockType.Bedrock]: {
     opaque: true,
@@ -170,6 +221,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     // 挖不动，所以它永远碎不了，也就不会生成经验球。
     experience: 0,
     use: BlockUse.None,
+    state: BlockStateKind.None,
   },
   [BlockType.OakLog]: {
     opaque: true,
@@ -182,6 +234,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     // 原木自成一档，比普通方块高一倍。
     experience: 60,
     use: BlockUse.None,
+    state: BlockStateKind.None,
   },
   // 树叶什么都不掉。树苗与苹果要等树叶凋落（后续切片）。
   [BlockType.OakLeaves]: {
@@ -197,6 +250,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     // 所以它照普通方块给 30 点。原版的树叶不给经验，这一条是本项目自己定的。
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
+    state: BlockStateKind.None,
   },
   // 挖掉掉回木板本身：放下去再挖起来材料不损失，木板因此是可以反复用的建材。
   [BlockType.OakPlanks]: {
@@ -210,6 +264,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     // 木板是加工过的建材，不像原木那样自成一档，按普通方块给。
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
+    state: BlockStateKind.None,
   },
   // 工作台（见 CONTEXT.md）：木制，比木板硬半点；挖掉掉回工作台本身，搬得走。
   // 它是本切片唯一的可使用方块：使用键对着它打开工作台界面，而不是往它上面放方块。
@@ -223,6 +278,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     drop: one(ItemType.CraftingTable),
     experience: COMMON_EXPERIENCE,
     use: BlockUse.CraftingTable,
+    state: BlockStateKind.None,
   },
   // 圆石（issue #22）：石头持镐挖出来的建材，比石头硬半点。同样要镐，挖掉掉回圆石本身，
   // 放下去再挖起来材料不损失。
@@ -236,7 +292,10 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     drop: one(ItemType.Cobblestone),
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
+    state: BlockStateKind.None,
   },
+  [BlockType.Furnace]: FURNACE,
+  [BlockType.LitFurnace]: FURNACE,
 };
 
 export function isAir(block: BlockType): boolean {
@@ -352,6 +411,14 @@ export function blockUse(block: BlockType): BlockUse {
 }
 
 /**
+ * 这种方块带哪一种方块状态，`None` 是没有。世界放下、换掉一个方块时按它维护状态表
+ * （见 `World.setBlock`）。
+ */
+export function blockStateKind(block: BlockType): BlockStateKind {
+  return BLOCKS[block].state;
+}
+
+/**
  * 放置表：一种物品放下去变成哪种方块，`null` 表示放不下去（工具、食物那些）。
  *
  * 与 `BLOCKS` 的 `drop` 一列正好反着来，但两张表并不互逆：草方块掉的是泥土，
@@ -376,6 +443,8 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   [ItemType.StonePickaxe]: null,
   [ItemType.StoneAxe]: null,
   [ItemType.StoneShovel]: null,
+  // 放置永远是熄火那个编号：燃烧中的熔炉没有对应的物品，它挖掉也掉这一种。
+  [ItemType.Furnace]: BlockType.Furnace,
 };
 
 /**

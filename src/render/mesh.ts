@@ -1,7 +1,7 @@
 import { BlockType, isAir, isOpaque, type BlockView } from '../core/block';
 import { blockIndex, type ChunkView } from '../core/chunk';
 import { CHUNK_AREA, CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../core/constants';
-import { BLOCK_TILES, faceTile, tileUvRect, type Face } from './atlas';
+import { BLOCK_TILES, faceTile, tileAtUv, tileUvRect, type Face } from './atlas';
 
 /**
  * 一个区块的网格数据。纯 TypedArray，不含任何 three.js 类型——
@@ -143,6 +143,23 @@ const FACE_OFFSETS = Int32Array.from(
   FACES,
   (spec) => spec.normal[1] * CHUNK_AREA + spec.normal[2] * CHUNK_SIZE + spec.normal[0],
 );
+
+/**
+ * 一份网格的 uv 用到了哪些贴图格号。
+ *
+ * 每个面 4 个顶点、每顶点一对 uv，取四个顶点的中点反查（`tileAtUv`）：四个角正落在格的
+ * 边界上，会算进相邻的格里。端到端测试靠它确认画布上那块熔炉贴的是熄火还是燃烧的正面——
+ * 读回的是送上显卡的 uv，不必去比像素颜色。
+ */
+export function meshTiles(uvs: ArrayLike<number>): Set<number> {
+  const tiles = new Set<number>();
+  for (let i = 0; i + 7 < uvs.length; i += 8) {
+    const u = (uvs[i]! + uvs[i + 2]! + uvs[i + 4]! + uvs[i + 6]!) / 4;
+    const v = (uvs[i + 1]! + uvs[i + 3]! + uvs[i + 5]! + uvs[i + 7]!) / 4;
+    tiles.add(tileAtUv(u, v));
+  }
+  return tiles;
+}
 
 /**
  * 为一个区块生成网格：只有暴露面进网格，被不透光方块挡住的面直接跳过。

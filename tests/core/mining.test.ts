@@ -341,6 +341,71 @@ describe('挖穿之后掉出什么', () => {
   });
 });
 
+describe('挖掉熔炉时里面的东西一起掉出来（issue #30）', () => {
+  const PICKAXE = fresh(ItemType.WoodenPickaxe);
+  const FURNACE_X1 = { item: ItemType.Furnace, count: 1 };
+  const INPUT = { item: ItemType.Cobblestone, count: 3 };
+  const FUEL = { item: ItemType.OakLog, count: 2 };
+  const OUTPUT = { item: ItemType.Dirt, count: 4 };
+
+  /** 正前方摆一个装了原料、燃料、成品的熔炉，手上拿着 `held`。 */
+  function loadedFurnace(block: BlockType, held?: ItemStack) {
+    const setup = miningTowards(block, held);
+    const state = setup.world.blockStateAt(...TARGET)!;
+    state.input = INPUT;
+    state.fuel = FUEL;
+    state.output = OUTPUT;
+    return setup;
+  }
+
+  it('持木镐 53 tick 挖掉：熔炉物品与三格里的东西都在原位掉出，状态表里那条没了', () => {
+    const { world, mining, spawned } = loadedFurnace(BlockType.Furnace, PICKAXE);
+    hold(mining, 52);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Furnace);
+    expect(spawned).toEqual([]);
+
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([
+      { stack: FURNACE_X1, at: TARGET },
+      { stack: INPUT, at: TARGET },
+      { stack: FUEL, at: TARGET },
+      { stack: OUTPUT, at: TARGET },
+    ]);
+    expect(world.blockStateAt(...TARGET)).toBeUndefined();
+  });
+
+  it('燃烧中的编号挖掉结果相同：掉的是熔炉物品，不是别的', () => {
+    const { world, mining, spawned } = loadedFurnace(BlockType.LitFurnace, PICKAXE);
+    hold(mining, 53);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([
+      { stack: FURNACE_X1, at: TARGET },
+      { stack: INPUT, at: TARGET },
+      { stack: FUEL, at: TARGET },
+      { stack: OUTPUT, at: TARGET },
+    ]);
+    expect(world.blockStateAt(...TARGET)).toBeUndefined();
+  });
+
+  it('空手 350 tick 挖掉：熔炉物品拿不到，里面的东西照样掉出来，东西不会消失', () => {
+    const { world, mining, spawned } = loadedFurnace(BlockType.Furnace);
+    hold(mining, 350);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([
+      { stack: INPUT, at: TARGET },
+      { stack: FUEL, at: TARGET },
+      { stack: OUTPUT, at: TARGET },
+    ]);
+  });
+
+  it('空熔炉挖掉只掉熔炉物品', () => {
+    const { mining, spawned } = miningTowards(BlockType.Furnace, PICKAXE);
+    hold(mining, 53);
+    expect(spawned).toEqual([{ stack: FURNACE_X1, at: TARGET }]);
+  });
+});
+
 describe('挖穿之后给多少经验', () => {
   /** issue #26 给的经验值（#9 的数值乘 10）：普通方块 30、原木 60。 */
   const EXPERIENCE: Array<[string, BlockType, number, number]> = [

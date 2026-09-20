@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
+import { newFurnaceState } from '../../src/core/block-state';
+import { ItemType } from '../../src/core/item';
 import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { plainsSurfaceHeight, plainsTerrain } from '../../src/core/terrain';
 import { World, type ChunkSource } from '../../src/core/world';
@@ -213,6 +215,131 @@ describe('已改区块在卸载后保留', () => {
     expect(generated()).toBe(3);
     expect(world.getBlock(1, FLAT_GROUND_Y, 1)).toBe(BlockType.Air);
     expect(world.getBlock(17, FLAT_GROUND_Y, 1)).toBe(BlockType.Grass);
+  });
+});
+
+describe('World 的方块状态表（issue #30、ADR-0011）', () => {
+  const AT: [number, number, number] = [3, FLAT_GROUND_Y + 1, 5];
+
+  function worldWithOrigin(): World {
+    const world = new World(flatTestTerrain);
+    world.loadChunk(0, 0);
+    return world;
+  }
+
+  it('新建的世界状态表是空的，任何坐标都没有状态', () => {
+    const world = worldWithOrigin();
+    expect(world.blockStateCount).toBe(0);
+    expect(world.blockStateAt(...AT)).toBeUndefined();
+  });
+
+  it('放下熔炉，该坐标有一条空的熔炉状态', () => {
+    const world = worldWithOrigin();
+    world.setBlock(...AT, BlockType.Furnace);
+    expect(world.blockStateAt(...AT)).toEqual(newFurnaceState());
+    expect(world.blockStateCount).toBe(1);
+  });
+
+  it('放下泥土、石头这类没有状态的方块，状态表不动', () => {
+    const world = worldWithOrigin();
+    world.setBlock(...AT, BlockType.Dirt);
+    world.setBlock(...AT, BlockType.CraftingTable);
+    expect(world.blockStateCount).toBe(0);
+  });
+
+  it('熔炉换成空气，那条状态删掉', () => {
+    const world = worldWithOrigin();
+    world.setBlock(...AT, BlockType.Furnace);
+    world.setBlock(...AT, BlockType.Air);
+    expect(world.blockStateAt(...AT)).toBeUndefined();
+    expect(world.blockStateCount).toBe(0);
+  });
+
+  it('熔炉换成别的方块（泥土），那条状态同样删掉', () => {
+    const world = worldWithOrigin();
+    world.setBlock(...AT, BlockType.Furnace);
+    world.setBlock(...AT, BlockType.Dirt);
+    expect(world.blockStateAt(...AT)).toBeUndefined();
+  });
+
+  it('熄火的熔炉改成燃烧中的编号，状态是同一条、内容不丢；再改回来也一样', () => {
+    const world = worldWithOrigin();
+    world.setBlock(...AT, BlockType.Furnace);
+    const state = world.blockStateAt(...AT)!;
+    state.input = { item: ItemType.Cobblestone, count: 3 };
+
+    world.setBlock(...AT, BlockType.LitFurnace);
+    expect(world.blockStateAt(...AT)).toBe(state);
+    world.setBlock(...AT, BlockType.Furnace);
+    expect(world.blockStateAt(...AT)).toBe(state);
+    expect(world.blockStateAt(...AT)!.input).toEqual({ item: ItemType.Cobblestone, count: 3 });
+    expect(world.blockStateCount).toBe(1);
+  });
+
+  it('直接放下燃烧中的编号也建一条状态，挖掉同样删掉', () => {
+    const world = worldWithOrigin();
+    world.setBlock(...AT, BlockType.LitFurnace);
+    expect(world.blockStateAt(...AT)).toEqual(newFurnaceState());
+    world.setBlock(...AT, BlockType.Air);
+    expect(world.blockStateAt(...AT)).toBeUndefined();
+  });
+
+  it('熔炉原地再写一次熔炉，状态还是原来那一条', () => {
+    const world = worldWithOrigin();
+    world.setBlock(...AT, BlockType.Furnace);
+    const state = world.blockStateAt(...AT)!;
+    world.setBlock(...AT, BlockType.Furnace);
+    expect(world.blockStateAt(...AT)).toBe(state);
+  });
+
+  it('没落到世界里的写入不建状态：未加载的区块与世界高度之外', () => {
+    const world = worldWithOrigin();
+    expect(world.setBlock(100, FLAT_GROUND_Y + 1, 100, BlockType.Furnace)).toBe(false);
+    expect(world.setBlock(3, WORLD_MAX_Y + 1, 5, BlockType.Furnace)).toBe(false);
+    expect(world.blockStateCount).toBe(0);
+  });
+
+  it('两个坐标各一条，互不混淆；坐标按 floor 取整', () => {
+    const world = worldWithOrigin();
+    world.setBlock(...AT, BlockType.Furnace);
+    world.setBlock(AT[0] + 1, AT[1], AT[2], BlockType.Furnace);
+    expect(world.blockStateCount).toBe(2);
+    expect(world.blockStateAt(AT[0] + 0.5, AT[1] + 0.9, AT[2] + 0.1)).toBe(world.blockStateAt(...AT));
+    expect(world.blockStateAt(...AT)).not.toBe(world.blockStateAt(AT[0] + 1, AT[1], AT[2]));
+  });
+
+  it('整张表能遍历：每一条带着自己的坐标与状态，负坐标也解得回来', () => {
+    const world = worldWithOrigin();
+    world.loadChunk(-1, -1);
+    world.setBlock(...AT, BlockType.Furnace);
+    world.setBlock(-3, FLAT_GROUND_Y + 1, -7, BlockType.LitFurnace);
+    const entries = world.allBlockStates();
+    expect(entries).toHaveLength(2);
+    expect(entries).toContainEqual({ x: AT[0], y: AT[1], z: AT[2], state: world.blockStateAt(...AT) });
+    expect(entries).toContainEqual({
+      x: -3,
+      y: FLAT_GROUND_Y + 1,
+      z: -7,
+      state: world.blockStateAt(-3, FLAT_GROUND_Y + 1, -7),
+    });
+    expect(new World(flatTestTerrain).allBlockStates()).toEqual([]);
+  });
+
+  it('熔炉所在区块卸载再加载，方块与状态都还在，状态是同一条', () => {
+    const world = worldWithOrigin();
+    world.setBlock(...AT, BlockType.Furnace);
+    const state = world.blockStateAt(...AT)!;
+    state.fuel = { item: ItemType.OakLog, count: 2 };
+
+    world.unloadChunk(0, 0);
+    // 卸载期间条目不删：读方块是空气（未加载即空气），状态却还在表里
+    expect(world.getBlock(...AT)).toBe(BlockType.Air);
+    expect(world.blockStateCount).toBe(1);
+    world.loadChunk(0, 0);
+
+    expect(world.getBlock(...AT)).toBe(BlockType.Furnace);
+    expect(world.blockStateAt(...AT)).toBe(state);
+    expect(world.blockStateAt(...AT)!.fuel).toEqual({ item: ItemType.OakLog, count: 2 });
   });
 });
 

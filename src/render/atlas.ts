@@ -2,12 +2,13 @@ import { BlockType, placedBlock } from '../core/block';
 import { ItemType } from '../core/item';
 
 /**
- * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 4 列 8 行，目前用了前 20 格。
+ * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 8 行，目前用了前 24 格。
  *
- * 行列数都取 2 的幂：uv 是格号除以行列数，除以 4 或 8 在 float32 里是精确的，除以 5 就不是
+ * 行列数都取 2 的幂：uv 是格号除以行列数，除以 8 在 float32 里是精确的，除以 5 就不是
  * ——顶点属性存的是 Float32Array，1/5 一进去就带上舍入误差，一个面的边缘会取到相邻那一格的像素。
+ * 第三切片（#30）从 4 列扩到 8 列：矿石、材料、铁制工具还要十来格，4x8 的 32 格装不下。
  */
-export const ATLAS_COLS = 4;
+export const ATLAS_COLS = 8;
 export const ATLAS_ROWS = 8;
 export const TILE_PX = 16;
 export const ATLAS_PATH = 'textures/atlas.png';
@@ -37,6 +38,10 @@ export const TILE = {
   stonePickaxe: 17,
   stoneAxe: 18,
   stoneShovel: 19,
+  furnaceTop: 20,
+  furnaceSide: 21,
+  furnaceFront: 22,
+  litFurnaceFront: 23,
 } as const;
 
 /**
@@ -78,6 +83,19 @@ const CRAFTING_TABLE_TILES: FaceTiles = {
 };
 
 /**
+ * 熔炉：顶面与底面同一张，侧面一张，正面是熄火的炉口。方块与物品小方块共用这一份。
+ * 燃烧中的那个编号只把正面换成燃烧中的炉口，其余四面与它相同。
+ */
+const FURNACE_TILES: FaceTiles = {
+  top: TILE.furnaceTop,
+  bottom: TILE.furnaceTop,
+  side: TILE.furnaceSide,
+  front: TILE.furnaceFront,
+};
+
+const LIT_FURNACE_TILES: FaceTiles = { ...FURNACE_TILES, front: TILE.litFurnaceFront };
+
+/**
  * 方块到贴图格号的映射——纯数据。后续切片加方块只往这张表加行。
  * 空气没有贴图。
  */
@@ -100,6 +118,8 @@ export const BLOCK_TILES: Readonly<Record<BlockType, FaceTiles | null>> = {
   [BlockType.OakPlanks]: { top: TILE.oakPlanks, bottom: TILE.oakPlanks, side: TILE.oakPlanks },
   [BlockType.CraftingTable]: CRAFTING_TABLE_TILES,
   [BlockType.Cobblestone]: COBBLESTONE_TILES,
+  [BlockType.Furnace]: FURNACE_TILES,
+  [BlockType.LitFurnace]: LIT_FURNACE_TILES,
 };
 
 /** 六面同一张图标的物品（木棍、工具）在 `ITEM_TILES` 里那一行。 */
@@ -133,6 +153,8 @@ export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
   [ItemType.StonePickaxe]: flat(TILE.stonePickaxe),
   [ItemType.StoneAxe]: flat(TILE.stoneAxe),
   [ItemType.StoneShovel]: flat(TILE.stoneShovel),
+  // 熔炉物品的图标是熄火那个正面：放下去永远是熄火的编号，图标画的就是它。
+  [ItemType.Furnace]: FURNACE_TILES,
 };
 
 /**
@@ -210,6 +232,16 @@ export function tileUvRect(tile: number): UvRect {
     v0: 1 - (row + 1) / ATLAS_ROWS,
     v1: 1 - row / ATLAS_ROWS,
   };
+}
+
+/**
+ * 一对 uv 落在哪一格上：`tileUvRect` 的反函数。格的边界上的点归到下标大的那一格，所以要拿
+ * 一个面的 uv 中点来反查，不要拿角。渲染层的调试查询与网格测试用它读回「这个面贴的是哪一格」。
+ */
+export function tileAtUv(u: number, v: number): number {
+  const col = Math.floor(u * ATLAS_COLS);
+  const row = ATLAS_ROWS - 1 - Math.floor(v * ATLAS_ROWS);
+  return row * ATLAS_COLS + col;
 }
 
 /**

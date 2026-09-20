@@ -16,7 +16,7 @@ import {
   itemIconUvs,
 } from './atlas';
 import { dropBob, dropSpin } from './drop-motion';
-import { buildChunkMesh, type MeshData } from './mesh';
+import { buildChunkMesh, meshTiles, type MeshData } from './mesh';
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes, staleChunksFor } from './mesh-plan';
 import { chunkKey, type ChunkCoord } from '../core/world';
 
@@ -412,6 +412,16 @@ export class WorldRenderer {
   chunkMeshVertexCount(cx: number, cz: number): number {
     const mesh = this.meshes.get(chunkKey(cx, cz))?.mesh;
     return mesh ? mesh.geometry.getAttribute('position').count : 0;
+  }
+
+  /**
+   * 这个区块的网格用到了哪些贴图格号，按格号排序。没建过网格、或者一个面都没有时是空数组。
+   * 端到端测试用它确认一块熔炉画的是熄火还是燃烧的正面。
+   */
+  chunkMeshTiles(cx: number, cz: number): number[] {
+    const mesh = this.meshes.get(chunkKey(cx, cz))?.mesh;
+    if (!mesh) return [];
+    return [...meshTiles(mesh.geometry.getAttribute('uv').array)].sort((a, b) => a - b);
   }
 
   /**

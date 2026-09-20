@@ -6,6 +6,7 @@ import {
   miningTicks,
   type BlockEdit,
 } from './block';
+import { blockStateContents, type BlockStateView } from './block-state';
 import { chainConnectedBlocks } from './chain-mining';
 import type { DropSink } from './drop';
 import { miningToolOf, type MiningTool, type ToolHand } from './item';
@@ -78,12 +79,16 @@ const NO_CHAIN: readonly Vec3[] = Object.freeze([]);
  *
  * 时间只由 `step()` 的调用次数表达（ADR-0002），耗时表在 `miningTicks`。
  *
+ * 挖掉的是带方块状态的方块（熔炉）时，状态里装着的东西（三格里的原料、燃料、成品）与方块
+ * 自己的掉落一起在原位掉出（`breakBlock`），不看手上的工具——空手挖熔炉拿不到熔炉，里面的
+ * 东西照样掉出来，东西不能凭空消失。
+ *
  * 耗时与掉落都看手上拿着什么工具（`hand`）。耗时每 tick 按当时手上的工具重算——与目标方块
  * 每 tick 重算是同一个思路（ADR-0006）：挖到一半换上木镐，已经挖的那些 tick 留着，剩下的按
  * 木镐算。挖穿那一 tick 读一次手上的工具，用它决定掉什么、损耗几点耐久（ADR-0010）。
  */
 export class Mining implements MiningView {
-  private readonly blocks: BlockEdit;
+  private readonly blocks: BlockEdit & BlockStateView;
   private readonly aim: AimView;
   private readonly hand: ToolHand;
   private readonly drops: DropSink;
@@ -100,7 +105,7 @@ export class Mining implements MiningView {
   private chain: readonly Vec3[] | undefined;
 
   constructor(
-    blocks: BlockEdit,
+    blocks: BlockEdit & BlockStateView,
     aim: AimView,
     hand: ToolHand,
     drops: DropSink,
@@ -186,15 +191,23 @@ export class Mining implements MiningView {
    *
    * 方块种类当场重读而不是沿用连锁开始时记下的：那之后世界可能被别处改过（区块卸载、
    * 外部写入），已经不在了的格子直接跳过，不会凭空掉出东西，也不算一块。
+   *
+   * 带方块状态的方块（熔炉）还要把状态里装着的东西掉出来。状态得在写成空气之前读：那一下
+   * 写入会让世界把这条状态删掉（ADR-0011）。
    */
   private breakBlock(x: number, y: number, z: number, tool: MiningTool): boolean {
     const block = this.blocks.getBlock(x, y, z);
     if (!isBreakable(block)) return false;
+    const state = this.blocks.blockStateAt(x, y, z);
     this.blocks.setBlock(x, y, z, BlockType.Air);
     // 掉落物与经验球都落在方块原来那一格里。什么都不掉的方块（树叶、空手挖的石头）
     // 只是没有掉落物，经验照给——两样各查自己那一列。掉什么看手上的工具合格不合格（持镐挖石头掉圆石）。
     const drop = blockDrop(block, tool);
     if (drop) this.drops.spawnInBlock(drop, x, y, z);
+    // 状态里的东西不看工具：方块本身拿不拿得到，里面装的都得掉出来。
+    if (state) {
+      for (const stack of blockStateContents(state)) this.drops.spawnInBlock(stack, x, y, z);
+    }
     const experience = blockExperience(block);
     if (experience > 0) this.experience.spawnInBlock(experience, x, y, z);
     return true;

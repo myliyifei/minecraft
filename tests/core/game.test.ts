@@ -12,6 +12,7 @@ import {
   WORLD_MAX_Y,
   WORLD_MIN_Y,
 } from '../../src/core/constants';
+import { newFurnaceState, type FurnaceState } from '../../src/core/block-state';
 import { PICKUP_DELAY_TICKS } from '../../src/core/drop';
 import { HOTBAR_SIZE, INVENTORY_SIZE } from '../../src/core/inventory';
 import { BARE_HAND, ItemType } from '../../src/core/item';
@@ -1914,22 +1915,22 @@ describe('GameCore 的木石两档工具', () => {
     expect(core.inventory.held).toEqual({ ...PICKAXE, damage: 2 });
   });
 
+  /** 在正前方摆一块石头，持手上那把镐挖穿它，掉出来的圆石拾进背包。 */
+  function digStoneAhead(core: GameCore, ticks: number): void {
+    core.setBlock(...AHEAD_FROM_PIT, BlockType.Stone);
+    core.tick();
+    expect(core.mining.target).toMatchObject(toVec(AHEAD_FROM_PIT));
+    core.setMining(true);
+    core.tick(ticks);
+    expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Air);
+    core.setMining(false);
+    core.tick(PICKUP_TICKS);
+  }
+
   describe('圆石造出石制工具（issue #23）', () => {
     const STONE_PICKAXE = { item: ItemType.StonePickaxe, count: 1 };
     /** 石镐挖石头要多少 tick。写死 12（issue #23）：数值本身在 block.test.ts 与 mining.test.ts 里断言。 */
     const STONE_PICKAXE_STONE_TICKS = 12;
-
-    /** 在正前方摆一块石头，持手上那把镐挖穿它，掉出来的圆石拾进背包。 */
-    function digStoneAhead(core: GameCore, ticks: number): void {
-      core.setBlock(...AHEAD_FROM_PIT, BlockType.Stone);
-      core.tick();
-      expect(core.mining.target).toMatchObject(toVec(AHEAD_FROM_PIT));
-      core.setMining(true);
-      core.tick(ticks);
-      expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Air);
-      core.setMining(false);
-      core.tick(PICKUP_TICKS);
-    }
 
     it('持木镐挖三块石头攒够圆石，在工作台造出石镐，石镐挖石头 12 tick 掉圆石', () => {
       const core = holdingPickaxe();
@@ -2010,6 +2011,226 @@ describe('GameCore 的木石两档工具', () => {
       // 灰显的配方点了不填材料：3 个圆石还在背包里，网格是空的
       expect(core.inventory.slot(1)).toEqual({ item: ItemType.Cobblestone, count: 3 });
       expect(core.craftingTableScreen.crafting!.slot(0)).toBeUndefined();
+    });
+  });
+
+  describe('圆石造出熔炉，放到世界里再挖回来（issue #30）', () => {
+    const FURNACE_X1 = { item: ItemType.Furnace, count: 1 };
+    /** 木镐挖熔炉要多少 tick。写死 53（issue #30）：数值本身在 block.test.ts 里断言。 */
+    const PICKAXE_FURNACE_TICKS = 53;
+    /** 通过调试路径放进熔炉三格的东西：三种物品，共 9 件，与熔炉本身合起来 4 种 10 件。 */
+    const INPUT = { item: ItemType.Cobblestone, count: 3 };
+    const FUEL = { item: ItemType.OakLog, count: 2 };
+    const OUTPUT = { item: ItemType.Dirt, count: 4 };
+
+    /** 通过调试路径往正前方那块熔炉的三格里放东西，返回那条状态。 */
+    function fillFurnaceAhead(core: GameCore): FurnaceState {
+      const state = core.blockStateAt(...AHEAD_FROM_PIT)!;
+      state.input = INPUT;
+      state.fuel = FUEL;
+      state.output = OUTPUT;
+      return state;
+    }
+
+    /** 持木镐挖 8 块石头得到 8 块圆石，在工作台里造出熔炉放进第 `into` 格，关掉界面回到第一人称。 */
+    function craftFurnaceInto(core: GameCore, into: number): void {
+      for (let dug = 0; dug < 8; dug++) digStoneAhead(core, PICKAXE_STONE_TICKS);
+      expect(core.inventory.slot(1)).toEqual({ item: ItemType.Cobblestone, count: 8 });
+      core.tick();
+      expect(core.mining.target).toMatchObject(toVec(TABLE_FROM_PIT));
+      core.use();
+      core.tick();
+      const furnace = tableRecipeIndex(core, ItemType.Furnace);
+      expect(core.craftingTableScreen.crafting!.recipes[furnace]!.craftable).toBe(true);
+      core.clickRecipe(furnace);
+      core.clickCraftingOutput();
+      core.clickSlot(into);
+      core.toggleInventory();
+      core.tick();
+      expect(core.inventory.slot(into)).toEqual(FURNACE_X1);
+      // 8 块圆石全用光
+      expect(core.inventory.slot(1)).toBeUndefined();
+    }
+
+    /**
+     * 手持第 `slot` 格里的熔炉，侧过去斜看旁边那块草按使用键：落点是它顶上那一格（`ABOVE_ASIDE`）。
+     * 不能对着工作台放：使用优先于放置（ADR-0009），对着它按使用键开的是界面。
+     */
+    function placeFurnaceAside(core: GameCore, slot: number): void {
+      core.selectHotbarSlot(slot);
+      look(core, EAST_YAW, ASIDE_PITCH);
+      core.tick();
+      expect(core.mining.target).toMatchObject(toVec(ASIDE));
+      core.use();
+      core.tick();
+      expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Furnace);
+      expect(core.inventory.slot(slot)).toBeUndefined();
+    }
+
+    /** 站在坑里手持木镐、正前方紧挨着一块熔炉并对准它的核心。熔炉由调试路径直接摆进世界。 */
+    function pickaxeFacingFurnace(block: BlockType = BlockType.Furnace): GameCore {
+      const core = holdingPickaxe();
+      core.setBlock(...AHEAD_FROM_PIT, block);
+      core.tick();
+      expect(core.mining.target).toMatchObject(toVec(AHEAD_FROM_PIT));
+      return core;
+    }
+
+    it('8 块圆石在工作台里造出熔炉，木镐损耗 8 点', () => {
+      const core = holdingPickaxe();
+      craftFurnaceInto(core, 2);
+      expect(core.inventory.slot(2)).toEqual(FURNACE_X1);
+      expect(core.inventory.held).toEqual({ ...PICKAXE, damage: 8 });
+    });
+
+    it('背包界面的配方书不列熔炉：图案占满 3x3', () => {
+      const core = holdingPickaxe();
+      core.toggleInventory();
+      core.tick();
+      const listed = core.inventoryScreen.crafting!.recipes.map((e) => e.recipe.result.item);
+      expect(listed).not.toContain(ItemType.Furnace);
+    });
+
+    it('手持熔炉按使用键放下：世界里是熄火的编号，状态表里该坐标有一条空状态，手上那一格清空', () => {
+      const core = holdingPickaxe();
+      craftFurnaceInto(core, 2);
+      expect(core.blockStateCount).toBe(0);
+
+      placeFurnaceAside(core, 2);
+      expect(core.blockStateAt(...ABOVE_ASIDE)).toEqual(newFurnaceState());
+      expect(core.blockStateCount).toBe(1);
+      expect(core.allBlockStates()).toEqual([
+        { x: ABOVE_ASIDE[0], y: ABOVE_ASIDE[1], z: ABOVE_ASIDE[2], state: newFurnaceState() },
+      ]);
+    });
+
+    it('持木镐 53 tick 挖掉放下的熔炉：方块变空气、掉回熔炉物品、状态表里那条没了', () => {
+      const core = holdingPickaxe();
+      craftFurnaceInto(core, 2);
+      placeFurnaceAside(core, 2);
+      // 换回木镐，目标随即落到刚放下的熔炉上
+      core.selectHotbarSlot(0);
+      core.tick();
+      expect(core.mining.target).toMatchObject(toVec(ABOVE_ASIDE));
+
+      core.setMining(true);
+      core.tick(PICKAXE_FURNACE_TICKS - 1);
+      expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Furnace);
+      core.tick(1);
+      expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Air);
+      core.setMining(false);
+      expect(core.blockStateAt(...ABOVE_ASIDE)).toBeUndefined();
+      expect(core.blockStateCount).toBe(0);
+      // 熔炉物品拾回来，木镐多损耗 1 点
+      core.tick(PICKUP_TICKS);
+      expect(core.inventory.slot(1)).toEqual(FURNACE_X1);
+      expect(core.inventory.held).toEqual({ ...PICKAXE, damage: 9 });
+    });
+
+    it('通过调试路径往状态里放原料 3、燃料 2、成品 4，挖掉后原位掉出 4 种共 10 件，都拾进背包', () => {
+      const core = pickaxeFacingFurnace();
+      fillFurnaceAhead(core);
+
+      core.setMining(true);
+      core.tick(PICKAXE_FURNACE_TICKS);
+      core.setMining(false);
+      expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Air);
+      // 挖穿那一 tick：4 个掉落物都在原来那一格里，还没到拾取延迟
+      const drops = core.drops.all();
+      expect(drops).toHaveLength(4);
+      expect(drops.reduce((sum, drop) => sum + drop.count, 0)).toBe(10);
+      expect(new Set(drops.map((drop) => drop.item))).toEqual(
+        new Set([ItemType.Furnace, ItemType.Cobblestone, ItemType.OakLog, ItemType.Dirt]),
+      );
+      for (const drop of drops) {
+        expect(Math.floor(drop.position.x)).toBe(AHEAD_FROM_PIT[0]);
+        expect(Math.floor(drop.position.z)).toBe(AHEAD_FROM_PIT[2]);
+      }
+
+      core.tick(PICKUP_TICKS);
+      expect(core.drops.count).toBe(0);
+      // 拾进来的东西按顺序占快捷栏第 1 到第 4 格（第 0 格是木镐，储物格里是造镐剩下的木板与木棍）
+      const inventory = new Map<ItemType, number>();
+      for (let i = 1; i < HOTBAR_SIZE; i++) {
+        const stack = core.inventory.slot(i);
+        if (stack) inventory.set(stack.item, (inventory.get(stack.item) ?? 0) + stack.count);
+      }
+      expect(inventory).toEqual(
+        new Map([
+          [ItemType.Furnace, 1],
+          [ItemType.Cobblestone, 3],
+          [ItemType.OakLog, 2],
+          [ItemType.Dirt, 4],
+        ]),
+      );
+      expect(core.blockStateAt(...AHEAD_FROM_PIT)).toBeUndefined();
+    });
+
+    it('把方块直接改成燃烧中的编号再挖，结果相同：同样 53 tick，掉的还是熔炉与三格里的东西', () => {
+      const core = pickaxeFacingFurnace();
+      const state = fillFurnaceAhead(core);
+      core.setBlock(...AHEAD_FROM_PIT, BlockType.LitFurnace);
+      // 换编号不换状态：还是那一条
+      expect(core.blockStateAt(...AHEAD_FROM_PIT)).toBe(state);
+
+      core.setMining(true);
+      core.tick(PICKAXE_FURNACE_TICKS - 1);
+      expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.LitFurnace);
+      core.tick(1);
+      expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Air);
+      core.setMining(false);
+      const drops = core.drops.all();
+      expect(drops).toHaveLength(4);
+      expect(drops.reduce((sum, drop) => sum + drop.count, 0)).toBe(10);
+      expect(drops.map((drop) => drop.item)).toContain(ItemType.Furnace);
+      expect(core.blockStateAt(...AHEAD_FROM_PIT)).toBeUndefined();
+    });
+
+    it('空手挖熔炉 350 tick：碎了但拿不到熔炉，里面的东西照样掉出来，经验照给', () => {
+      const core = pickaxeFacingFurnace();
+      core.blockStateAt(...AHEAD_FROM_PIT)!.output = OUTPUT;
+      const before = core.experience.total;
+      // 选中空的第 3 格：空手
+      core.selectHotbarSlot(3);
+      core.tick();
+      core.setMining(true);
+      core.tick(349);
+      expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Furnace);
+      core.tick(1);
+      expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Air);
+      core.setMining(false);
+      expect(core.drops.all().map((drop) => ({ item: drop.item, count: drop.count }))).toEqual([
+        OUTPUT,
+      ]);
+      core.tick(PICKUP_TICKS + 3 * TICK_RATE);
+      expect(core.experience.total).toBe(before + 30);
+    });
+
+    it('持木斧挖熔炉按需要工具那一档：350 tick，拿不到熔炉', () => {
+      const core = pickaxeFacingFurnace();
+      // 用剩下的木板与木棍造一把木斧放进第 3 格：造完木镐还剩 3 块木板加 2 根木棍，正好一把
+      core.setBlock(...AHEAD_FROM_PIT, BlockType.Air);
+      core.tick();
+      core.use();
+      core.tick();
+      core.clickRecipe(tableRecipeIndex(core, ItemType.WoodenAxe));
+      core.clickCraftingOutput();
+      core.clickSlot(3);
+      core.toggleInventory();
+      core.tick();
+      expect(core.inventory.slot(3)).toEqual({ item: ItemType.WoodenAxe, count: 1 });
+      core.selectHotbarSlot(3);
+      core.setBlock(...AHEAD_FROM_PIT, BlockType.Furnace);
+      core.tick();
+      expect(core.mining.target).toMatchObject(toVec(AHEAD_FROM_PIT));
+
+      core.setMining(true);
+      core.tick(349);
+      expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Furnace);
+      core.tick(1);
+      expect(core.getBlock(...AHEAD_FROM_PIT)).toBe(BlockType.Air);
+      core.setMining(false);
+      expect(core.drops.count).toBe(0);
     });
   });
 });
@@ -2226,5 +2447,20 @@ describe('GameCore 的已改区块在玩家走远再回来之后', () => {
 
     // 重新生成的话这里是空气：平地的地表只到 FLAT_GROUND_Y
     expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Dirt);
+  });
+
+  it('旁边放一块熔炉并往原料格放 3 块圆石，走远到那个区块卸载再走回来，方块与状态都还在（issue #30、ADR-0011）', () => {
+    const core = coreForRoundTrip();
+    digUnderfoot(core, BlockType.Grass);
+    core.setBlock(...ABOVE_ASIDE, BlockType.Furnace);
+    const state = core.blockStateAt(...ABOVE_ASIDE)!;
+    state.input = { item: ItemType.Cobblestone, count: 3 };
+
+    roundTripFromOrigin(core);
+
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Furnace);
+    expect(core.blockStateAt(...ABOVE_ASIDE)).toBe(state);
+    expect(state.input).toEqual({ item: ItemType.Cobblestone, count: 3 });
+    expect(core.blockStateCount).toBe(1);
   });
 });

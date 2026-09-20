@@ -1,4 +1,5 @@
 import { BlockType, BlockUse, blockUse, type BlockEdit } from './block';
+import type { BlockState, BlockStateEntry, BlockStateView } from './block-state';
 import type { ChunkView } from './chunk';
 import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS } from './constants';
 import { CRAFTING_TABLE_GRID, CraftingGrid, INVENTORY_CRAFTING_GRID } from './crafting-grid';
@@ -56,7 +57,7 @@ export interface GameCoreOptions {
  * 「掉落物与背包」「经验球与等级」「放置方块」「背包界面」九件事，第二切片起加「合成」
  * 与「使用（工作台界面）」。生物等系统由后续切片挂进 step()。
  */
-export class GameCore implements BlockEdit {
+export class GameCore implements BlockEdit, BlockStateView {
   private readonly world: World;
   private readonly worldSeed: number;
   private readonly radius: number;
@@ -328,6 +329,26 @@ export class GameCore implements BlockEdit {
 
   setBlock(x: number, y: number, z: number, block: BlockType): boolean {
     return this.world.setBlock(x, y, z, block);
+  }
+
+  /**
+   * (x, y, z) 那一格的方块状态（见 CONTEXT.md 的「方块状态」），没有的返回 undefined。
+   *
+   * 给出的是状态表里那一条本身，不是副本：调试句柄与测试往熔炉里放东西走的就是这条路；
+   * 游戏里改它的是熔炉界面（#33）与熔炼状态机（#34）。
+   */
+  blockStateAt(x: number, y: number, z: number): BlockState | undefined {
+    return this.world.blockStateAt(x, y, z);
+  }
+
+  /** 方块状态表里有几条。 */
+  get blockStateCount(): number {
+    return this.world.blockStateCount;
+  }
+
+  /** 整张方块状态表，每一条带着坐标。调试句柄读它。 */
+  allBlockStates(): BlockStateEntry[] {
+    return this.world.allBlockStates();
   }
 
   /** 取走「哪些方块变过」的记录并清空。渲染层每帧取一次，据此重建过期的区块网格。 */

@@ -101,3 +101,22 @@ describe('合成一份：每个非空格各减 1', () => {
     expect(grid.slot(3)).toBeUndefined();
   });
 });
+
+describe('合成网格是一个格子批：所有格都收、都不是只取、关闭界面时退回背包', () => {
+  const grid = new CraftingGrid(INVENTORY_CRAFTING_GRID);
+
+  it('每一格都收任何物品', () => {
+    for (let i = 0; i < grid.size; i++) {
+      expect(grid.accepts(i, ItemType.OakLog)).toBe(true);
+      expect(grid.accepts(i, ItemType.WoodenPickaxe)).toBe(true);
+    }
+  });
+
+  it('没有一格是只取格', () => {
+    for (let i = 0; i < grid.size; i++) expect(grid.isTakeOnly(i)).toBe(false);
+  });
+
+  it('关闭界面时里面的材料退回背包', () => {
+    expect(grid.returnsOnClose).toBe(true);
+  });
+});

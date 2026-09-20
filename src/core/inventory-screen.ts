@@ -1,4 +1,3 @@
-import type { CraftingGrid } from './crafting-grid';
 import { isSlotIndex } from './inventory';
 import {
   isUnstackable,
@@ -10,6 +9,7 @@ import {
   type SlotStore,
 } from './item';
 import { ingredientCounts, layoutRecipe, recipesFor, type Recipe } from './recipe';
+import type { Crafting, RuledSlotBatch, SlotRules } from './slot-batch';
 
 /**
  * 光标上拿着的那一堆，以及它是从哪一格拿起来的。
@@ -20,13 +20,13 @@ import { ingredientCounts, layoutRecipe, recipesFor, type Recipe } from './recip
 interface CursorHold {
   readonly stack: ItemStack;
   /**
-   * 拿起它的那一格（界面里的格号，可能落在合成网格上）。关闭界面时光标物品先回这一格。
+   * 拿起它的那一格（界面里的格号，可能落在格子批上）。关闭界面时光标物品先回这一格。
    *
    * 记着它而不是一律走入包规则：玩家把第 20 格那一堆拿在手上按了背包键，东西回到第 20 格
    * 才是他预期的结果，而入包规则会把它塞进下标最小的空格里。
    *
-   * 从输出格拿的成品没有这一格（`undefined`）：输出格不存东西，成品不是从哪一格拿起来的，
-   * 关闭界面时它直接走入包规则。
+   * 光标空着时从输出格、只取格拿的东西没有这一格（`undefined`）：两处都不收东西，关闭界面时
+   * 光标上那一堆直接走入包规则。并进已有光标物品的成品与只取格物品不改变这一格。
    */
   readonly from: number | undefined;
 }
@@ -42,12 +42,19 @@ export interface RecipeBookEntry {
   readonly craftable: boolean;
 }
 
-/** 界面里的一格落在哪一批格子的第几格上。 */
+/** 界面里的一格落在哪一批格子的第几格上，以及那一批格子的规则。 */
 interface SlotRef {
   readonly batch: SlotBatch;
   /** 那一批格子里的下标。 */
   readonly local: number;
+  readonly rules: SlotRules;
 }
+
+/** 背包 36 格的规则：每格都收任何物品，没有只取格。 */
+const INVENTORY_RULES: SlotRules = Object.freeze({
+  accepts: () => true,
+  isTakeOnly: () => false,
+});
 
 /** 关闭界面时一样东西都不用交出去。共用一份，免得每次关界面都分配一个空数组。 */
 const NO_LEFTOVERS: readonly ItemStack[] = Object.freeze([]);
@@ -80,7 +87,7 @@ export interface InventoryScreenView {
   readonly open: boolean;
   /** 光标物品（见 CONTEXT.md）：拿在鼠标上的那一堆，没拿着东西时 undefined。 */
   readonly cursor: ItemStack | undefined;
-  /** 合成网格与输出格，界面没带合成网格时 undefined。 */
+  /** 合成网格与输出格，附加的格子批没有合成能力（或没有附加格子批）时 undefined。 */
   readonly crafting: CraftingView | undefined;
 }
 
@@ -88,24 +95,22 @@ export interface InventoryScreenView {
  * 背包界面（见 CONTEXT.md）：开合，以及光标物品这套拿起放下的操作。
  *
  * 工作台界面也是这个类的一个实例：它同样摆出全部 36 个背包格子，只是附加的合成网格是
- * 3x3 而不是 2x2。两者的差别全在构造时传进来的那块网格上，开合、光标、归还一套规则。
+ * 3x3 而不是 2x2。两者的差别全在构造时传进来的那个格子批上，开合、光标、归还一套规则。
  *
  * 状态放在核心而不是界面层：界面模式一开，移动、视角、挖掘、放置就都不算数了
  * （规则在 `GameCore.step`），这是游戏规则，不是一个 DOM 覆盖层的显隐。
  *
- * 界面里的格子可以不止背包那 36 格：构造时附加一块合成网格，格号接在背包之后编号，
- * 拿起、放下、合并、交换四种结果与背包格完全一样。界面层因此仍然只递格号，不必知道
- * 那一格属于哪一批。输出格不在这批格号里——它不存东西，点它是另一条指令（`clickOutput`）。
+ * 界面里的格子可以不止背包那 36 格：构造时附加一个格子批（`RuledSlotBatch`），格号接在
+ * 背包之后编号。普通格的拿起、放下、合并、交换四种结果与背包格完全一样，只是放下、合并、
+ * 交换之前先按那一格的规则判定收不收；只取格另有一条规则（`takeFrom`）。界面层因此仍然只递格号，
+ * 不必知道那一格属于哪一批、是哪种格。输出格不在这批格号里——它不存东西，点它是另一条
+ * 指令（`clickOutput`）。
  */
 export class InventoryScreen implements InventoryScreenView {
   private readonly slots: SlotStore;
-  /**
-   * 附加的那块合成网格，没有就是 undefined。
-   *
-   * 它只是 `SlotBatch` 而不是 `SlotStore`：归还时东西一律往背包里进，网格不收入包的东西。
-   */
-  private readonly extra: CraftingGrid | undefined;
-  /** 配方书列的那几条：配方表里摆得进附加网格的，顺序固定。没有网格就是空的。 */
+  /** 附加的那个格子批，没有就是 undefined。 */
+  private readonly extra: RuledSlotBatch | undefined;
+  /** 配方书列的那几条：配方表里摆得进附加网格的，顺序固定。没有合成能力就是空的。 */
   private readonly bookRecipes: ReadonlyArray<Recipe>;
   private isOpen = false;
   private holding: CursorHold | undefined;
@@ -116,11 +121,13 @@ export class InventoryScreen implements InventoryScreenView {
    */
   readonly crafting: CraftingView | undefined;
 
-  constructor(slots: SlotStore, extra?: CraftingGrid) {
+  constructor(slots: SlotStore, extra?: RuledSlotBatch) {
     this.slots = slots;
     this.extra = extra;
-    this.bookRecipes = extra ? recipesFor(extra) : [];
-    this.crafting = extra && craftingView(extra, slots, this.bookRecipes, slots.size);
+    const crafting = extra?.crafting;
+    this.bookRecipes = crafting ? recipesFor(crafting) : [];
+    this.crafting =
+      extra && crafting && craftingView(crafting, extra, slots, this.bookRecipes, slots.size);
   }
 
   get open(): boolean {
@@ -137,8 +144,8 @@ export class InventoryScreen implements InventoryScreenView {
   }
 
   /**
-   * 开合界面。关闭时光标上的东西与附加格子里的东西都回背包，返回一格都放不下的那些
-   * ——调用方负责把它们扔到世界里，物品因此不会凭空消失。
+   * 开合界面。关闭时光标上的东西退回背包；`returnsOnClose` 为 true 的格子批，里面的东西也
+   * 退回背包。返回一格都放不下的那些——调用方负责把它们扔到世界里，物品因此不会凭空消失。
    *
    * 返回的是一批而不是一堆：附加格子里可以摆着好几种物品，背包满了它们各自无处可去。
    */
@@ -148,12 +155,15 @@ export class InventoryScreen implements InventoryScreenView {
   }
 
   /**
-   * 点一格。四种结果，与原版一致：
+   * 点一格。普通格四种结果，与原版一致：
    *
    * - 光标空、格里有东西：拿起整堆，那一格空了。
    * - 光标有东西、格是空的：整堆放下。
-   * - 两边同种：并进那一格，超过堆叠上限的余量留在光标上。
-   * - 两边异种，或两边是同种工具（堆叠上限 1）：交换。
+   * - 两边同一类型：并进那一格，超过堆叠上限的余量留在光标上。
+   * - 两边不同类型，或两边是同一类型的工具（堆叠上限 1）：交换。
+   *
+   * 后三种都要往格里放东西，先按那一格的规则判定收不收（`SlotRules.accepts`）：不收时什么都不改变，
+   * 光标上的东西还在。只取格走另一条规则（`takeFrom`）。
    *
    * 界面关着、下标指不到格子、两边都是空的时候什么都不发生。
    */
@@ -163,6 +173,10 @@ export class InventoryScreen implements InventoryScreenView {
     // 光标上那一堆就没了。
     const ref = this.locate(index);
     if (!ref) return;
+    if (ref.rules.isTakeOnly(ref.local)) {
+      this.takeFrom(ref);
+      return;
+    }
 
     const inSlot = ref.batch.slot(ref.local);
     const holding = this.holding;
@@ -175,9 +189,10 @@ export class InventoryScreen implements InventoryScreenView {
     }
 
     const cursor = holding.stack;
+    if (!ref.rules.accepts(ref.local, cursor.item)) return;
 
-    // 异种要换手，`mergeInto` 表达不了这一种，单独一条。换来的那一堆是从这一格拿的，
-    // 所以「从哪儿拿的」跟着换。两把同种工具也走这条：并不进去，「满了所以没有任何反应」
+    // 不同类型要换手，`mergeInto` 表达不了这一种，单独一条。换来的那一堆是从这一格拿的，
+    // 所以「从哪儿拿的」跟着换。两把同一类型的工具也走这条：并不进去，「满了所以没有任何反应」
     // 对可堆叠物品是对的，对工具玩家要的是换一把（见 `isUnstackable`）。
     if (inSlot && (inSlot.item !== cursor.item || isUnstackable(cursor.item))) {
       ref.batch.setSlot(ref.local, cursor);
@@ -185,19 +200,22 @@ export class InventoryScreen implements InventoryScreenView {
       return;
     }
 
-    // 空格接下整堆，同种并到堆叠上限；那一格已经满了就一个都不动。
+    // 空格接下整堆，同一类型并到堆叠上限；那一格已经满了就一个都不动。
     const left = this.mergeInto(index, cursor);
     if (left === cursor.count) return;
     this.keepOnCursor(holding, left);
   }
 
   /**
-   * 拆堆点击一格（右键），与原版一致：
+   * 拆堆点击一格（右键），普通格与原版一致：
    *
    * - 光标空、格里有东西：拿起一半（向上取整），其余留在格里。4 块拿 2 块、3 块拿 2 块、
    *   1 块拿 1 块。
    * - 光标有东西、格是空的，或格里是同一类型且未满：放下 1 个。
-   * - 其余（光标空且格空、格已满、两边不同类型）什么都不改变——这里没有交换。
+   * - 其余（光标空且格空、格已满、两边不同类型、那一格不收这种物品）什么都不改变——这里
+   *   没有交换。
+   *
+   * 只取格没有拆堆：对它按拆堆键与普通点击相同（`takeFrom`），成品不会被拆成半堆留在格里。
    *
    * 工具的堆叠上限是 1，规则不必另写：光标空着时「一半向上取整」就是整把；光标上有工具时
    * 对空格放下这一把；格里是同一类型的工具则视为已满，与 `clickSlot` 的交换不同。
@@ -212,6 +230,10 @@ export class InventoryScreen implements InventoryScreenView {
     if (!this.isOpen) return;
     const ref = this.locate(index);
     if (!ref) return;
+    if (ref.rules.isTakeOnly(ref.local)) {
+      this.takeFrom(ref);
+      return;
+    }
 
     const inSlot = ref.batch.slot(ref.local);
     const holding = this.holding;
@@ -231,6 +253,37 @@ export class InventoryScreen implements InventoryScreenView {
   }
 
   /**
+   * 点只取格（见 CONTEXT.md），点击与拆堆同一条规则：
+   *
+   * - 光标空着：整堆到光标上，那一格空了。
+   * - 光标上是同一类型：并到堆叠上限，并不完的留在格里。工具的堆叠上限是 1，一个都并不进去。
+   * - 光标上是别的东西，或格空着：什么都不改变，没有交换也没有放下。
+   *
+   * 光标空着时拿起的那一堆没有「原格」（`CursorHold.from` 为 undefined）：只取格不收东西，关闭界面
+   * 时它直接走入包规则。并进光标的那部分则跟着光标原来的来源格——从背包第 20 格拿起的木板并进了
+   * 只取格里的几块，关闭时整堆回第 20 格。两条都与输出格的成品相同（`clickOutput`）。
+   */
+  private takeFrom(ref: SlotRef): void {
+    const inSlot = ref.batch.slot(ref.local);
+    if (!inSlot) return;
+    const holding = this.holding;
+
+    if (!holding) {
+      this.holding = { stack: inSlot, from: undefined };
+      ref.batch.setSlot(ref.local, undefined);
+      return;
+    }
+
+    const cursor = holding.stack;
+    if (cursor.item !== inSlot.item) return;
+    const moved = Math.min(stackLimit(cursor.item) - cursor.count, inSlot.count);
+    if (moved <= 0) return;
+    this.holding = { stack: withCount(cursor, cursor.count + moved), from: holding.from };
+    const rest = inSlot.count - moved;
+    ref.batch.setSlot(ref.local, rest > 0 ? withCount(inSlot, rest) : undefined);
+  }
+
+  /**
    * 光标上那一堆放下一部分之后，余量仍留在光标上；放光了光标就清空。
    * 余量仍记着原来那一格：放下一部分不改变「这一堆是从哪儿拿的」。
    */
@@ -242,22 +295,22 @@ export class InventoryScreen implements InventoryScreenView {
   /**
    * 点输出格：把成品拿到光标上，网格每个非空格各消耗 1 个。
    *
-   * 三种情形：光标空着，成品整份到光标上；光标上是同种且装得下整份，并上去；其余
-   * （异种、同种但装不下、输出格空着、界面关着）一个都不动。装不下整份时不合成半份：
+   * 三种情形：光标空着，成品整份到光标上；光标上是同一类型且装得下整份，并上去；其余
+   * （不同类型、同一类型但装不下、输出格空着、界面关着）一个都不动。装不下整份时不合成半份：
    * 成品与消耗的材料是一对，并进去 3 块而消耗 1 个原木就不守恒了。
    *
    * 从这里拿到的成品没有「原格」：关闭界面时它直接走入包规则（见 `CursorHold.from`）。
    */
   clickOutput(): void {
     if (!this.isOpen) return;
-    const grid = this.extra;
-    const output = grid?.output;
-    if (!grid || !output) return;
+    const crafting = this.extra?.crafting;
+    const output = crafting?.output;
+    if (!crafting || !output) return;
 
     const holding = this.holding;
     if (!holding) {
       this.holding = { stack: output, from: undefined };
-      grid.consumeOne();
+      crafting.consumeOne();
       return;
     }
     const cursor = holding.stack;
@@ -267,7 +320,7 @@ export class InventoryScreen implements InventoryScreenView {
       stack: withCount(cursor, cursor.count + output.count),
       from: holding.from,
     };
-    grid.consumeOne();
+    crafting.consumeOne();
   }
 
   /**
@@ -284,14 +337,15 @@ export class InventoryScreen implements InventoryScreenView {
   clickRecipe(index: number): void {
     if (!this.isOpen) return;
     const grid = this.extra;
+    const crafting = grid?.crafting;
     const recipe = isSlotIndex(index, this.bookRecipes.length)
       ? this.bookRecipes[index]
       : undefined;
-    if (!grid || !recipe) return;
+    if (!grid || !crafting || !recipe) return;
     if (!hasIngredients(recipe, countItems(this.slots, grid))) return;
     if (!this.returnGrid(grid)) return;
 
-    const layout = layoutRecipe(recipe, grid);
+    const layout = layoutRecipe(recipe, crafting);
     for (let i = 0; i < layout.length; i++) {
       const item = layout[i];
       if (item === undefined) continue;
@@ -306,7 +360,7 @@ export class InventoryScreen implements InventoryScreenView {
    * 与关闭界面时的归还（`putEverythingBack`）不同：那边回不去的要交出去扔到脚下，这边界面
    * 还开着，东西留在网格里玩家看得见、拿得到。
    */
-  private returnGrid(grid: CraftingGrid): boolean {
+  private returnGrid(grid: SlotBatch): boolean {
     let allReturned = true;
     for (let i = 0; i < grid.size; i++) {
       const stack = grid.slot(i);
@@ -331,22 +385,25 @@ export class InventoryScreen implements InventoryScreenView {
   /**
    * 第 index 格落在哪一批格子的第几格上，指不到格子时 undefined。
    *
-   * 附加格子的格号接在背包之后：背包 36 格时第 36 格就是附加格子的第 0 格。
+   * 附加格子的格号接在背包之后：背包 36 格时第 36 格就是格子批的第 0 格。
    * 小数与 NaN 由 `isSlotIndex` 挡掉——界面层递过来的是 DOM 属性读出来的数字。
    */
   private locate(index: number): SlotRef | undefined {
     if (!isSlotIndex(index, this.size)) return undefined;
     const local = index - this.slots.size;
-    if (local < 0) return { batch: this.slots, local: index };
-    return this.extra ? { batch: this.extra, local } : undefined;
+    if (local < 0) return { batch: this.slots, local: index, rules: INVENTORY_RULES };
+    const extra = this.extra;
+    return extra ? { batch: extra, local, rules: extra } : undefined;
   }
 
   /**
-   * 关闭界面时把东西都还回背包，返回一格都放不下的那些。
+   * 关闭界面时把东西都退回背包，返回一格都放不下的那些。
    *
-   * 顺序是先光标物品（回拿起它的那一格），再合成网格按格号从小到大。这个顺序有讲究：
-   * 光标上那一堆可能就是从网格里拿起来的，先回原格再让网格清空，它才跟着进背包，
+   * 顺序是先光标物品（回拿起它的那一格），再格子批按格号从小到大。这个顺序有讲究：
+   * 光标上那一堆可能就是从格子批里拿起来的，先回原格再让格子批清空，它才跟着进背包，
    * 而不是留在一个已经关掉的界面里。
+   *
+   * `returnsOnClose` 为 false 的格子批，里面的东西原地不动：熔炉里的原料与成品关掉界面还在熔炉里。
    */
   private putEverythingBack(): readonly ItemStack[] {
     const leftovers: ItemStack[] = [];
@@ -354,7 +411,7 @@ export class InventoryScreen implements InventoryScreenView {
     if (fromCursor) leftovers.push(fromCursor);
 
     const extra = this.extra;
-    if (extra) {
+    if (extra?.returnsOnClose) {
       for (let i = 0; i < extra.size; i++) {
         const stack = extra.slot(i);
         if (!stack) continue;
@@ -367,8 +424,8 @@ export class InventoryScreen implements InventoryScreenView {
   }
 
   /**
-   * 光标物品回背包：先试拿起它的那一格，剩下的走入包规则（同种未满堆 → 第一个空格）。
-   * 从输出格拿的成品没有原格，直接走入包规则。返回一格都放不下的那些，并把光标清空。
+   * 光标物品退回背包：先试拿起它的那一格，剩下的走入包规则（同一类型未满堆 → 第一个空格）。
+   * 从输出格、只取格拿的东西没有原格，直接走入包规则。返回一格都放不下的那些，并把光标清空。
    */
   private putCursorBack(): ItemStack | undefined {
     const holding = this.holding;
@@ -384,11 +441,12 @@ export class InventoryScreen implements InventoryScreenView {
 
   /**
    * 把一堆物品并进某一格，返回没并进去的数量。
-   * 空格接下整堆，同种的填到堆叠上限，异种、已经满了的与指不到的格子一个都不接。
+   * 空格接下整堆，同一类型的填到堆叠上限；不同类型、已经满了的、不收这种物品的、只取的
+   * 与指不到的格子一个都不接。
    */
   private mergeInto(index: number, stack: ItemStack): number {
     const ref = this.locate(index);
-    if (!ref) return stack.count;
+    if (!ref || !admits(ref, stack.item)) return stack.count;
     const inSlot = ref.batch.slot(ref.local);
     if (!inSlot) {
       ref.batch.setSlot(ref.local, stack);
@@ -403,25 +461,31 @@ export class InventoryScreen implements InventoryScreenView {
   }
 }
 
+/** 这一格能不能往里放这种物品：不是只取格，而且收这种物品。 */
+function admits(ref: SlotRef, item: ItemType): boolean {
+  return !ref.rules.isTakeOnly(ref.local) && ref.rules.accepts(ref.local, item);
+}
+
 /**
- * 给一块合成网格包一层界面层要的只读视图：格号从 `firstSlot` 起。
+ * 给一个带合成能力的格子批包一层界面层要的只读视图：格号从 `firstSlot` 起。
  *
  * 配方书那一列每次读都当场算，与输出格同一个理由：材料在背包与网格之间移动、拾取也往
  * 背包里进，记一份就得在每处改动后去刷，而配方就那么几条，重算一次的开销很小。
  */
 function craftingView(
-  grid: CraftingGrid,
+  crafting: Crafting,
+  grid: SlotBatch,
   slots: SlotStore,
   recipes: ReadonlyArray<Recipe>,
   firstSlot: number,
 ): CraftingView {
   return {
-    width: grid.width,
-    height: grid.height,
+    width: crafting.width,
+    height: crafting.height,
     firstSlot,
     slot: (local) => grid.slot(local),
     get output() {
-      return grid.output;
+      return crafting.output;
     },
     get recipes() {
       const available = countItems(slots, grid);

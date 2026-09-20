@@ -1,6 +1,7 @@
 import { isSlotIndex } from './inventory';
-import { withCount, type ItemStack, type SlotBatch } from './item';
+import { withCount, type ItemStack, type ItemType } from './item';
 import { matchRecipe, type GridSize } from './recipe';
+import type { Crafting, RuledSlotBatch } from './slot-batch';
 
 /** 背包界面那块合成网格的尺寸（见 CONTEXT.md 的「合成网格」）：2x2。 */
 export const INVENTORY_CRAFTING_GRID: GridSize = Object.freeze({ width: 2, height: 2 });
@@ -11,15 +12,18 @@ export const CRAFTING_TABLE_GRID: GridSize = Object.freeze({ width: 3, height: 3
 /**
  * 合成网格（见 CONTEXT.md）：一批按行排列的格子，加一个由内容算出来的输出格。
  *
- * 它是 `SlotBatch` 而不是 `SlotStore`：格子逐格读写，背包界面那套拿起放下直接用在它上面，
- * 但它不按入包规则收东西——拾取到的东西不该落进网格里。
+ * 它是格子批（`RuledSlotBatch`）最简单的一种实现：每格都收任何物品、没有只取格、关闭界面时
+ * 里面的材料退回背包。背包界面那套拿起放下直接用在它上面，但它不按入包规则收东西——拾取
+ * 到的东西不该落进网格里。
  *
  * 输出格不存东西：它是网格内容对配方表的一次匹配结果，每次读都当场算。存一份的话，
  * 每条 `setSlot` 都得记着去刷它，而配方就那么几条，算一次比记着刷便宜得多也不会出错。
  */
-export class CraftingGrid implements SlotBatch, GridSize {
+export class CraftingGrid implements RuledSlotBatch, Crafting {
   readonly width: number;
   readonly height: number;
+  /** 关闭界面时材料退回背包：网格只是合成时临时放材料的地方。 */
+  readonly returnsOnClose = true;
   private readonly cells: Array<ItemStack | undefined>;
 
   constructor({ width, height }: GridSize) {
@@ -30,6 +34,21 @@ export class CraftingGrid implements SlotBatch, GridSize {
 
   get size(): number {
     return this.cells.length;
+  }
+
+  /** 网格自己就是那份合成能力：输出格由网格内容算出，合成一份改的也是网格。 */
+  get crafting(): Crafting {
+    return this;
+  }
+
+  /** 每格都收任何物品：摆的东西对不对配方，由输出格的匹配结果体现，网格不检查。 */
+  accepts(_index: number, _item: ItemType): boolean {
+    return true;
+  }
+
+  /** 没有一格是只取格：成品在输出格里，输出格不在这批格子里。 */
+  isTakeOnly(_index: number): boolean {
+    return false;
   }
 
   slot(index: number): ItemStack | undefined {

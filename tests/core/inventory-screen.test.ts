@@ -4,6 +4,7 @@ import { INVENTORY_SIZE, Inventory } from '../../src/core/inventory';
 import { InventoryScreen } from '../../src/core/inventory-screen';
 import { ItemType, type ItemStack } from '../../src/core/item';
 import { RECIPES } from '../../src/core/recipe';
+import type { RuledSlotBatch } from '../../src/core/slot-batch';
 
 /** 一堆泥土。 */
 function dirt(count: number): ItemStack {
@@ -37,11 +38,11 @@ function grid(): CraftingGrid {
 const FIRST_EXTRA = INVENTORY_SIZE;
 
 /**
- * 一个背包加一个开着的背包界面。背包里的东西由 `fill` 摆，`extra` 是附加的那块合成网格。
+ * 一个背包加一个开着的背包界面。背包里的东西由 `fill` 摆，`extra` 是附加的那个格子批。
  */
 function opened(
   fill: (inventory: Inventory) => void = () => {},
-  extra?: CraftingGrid,
+  extra?: RuledSlotBatch,
 ): {
   inventory: Inventory;
   screen: InventoryScreen;
@@ -926,5 +927,219 @@ describe('拆堆点击：光标空着拿起半堆，光标有物品逐个放下'
     expect(inventory.slot(0)).toEqual(planks(2));
     expect(extra.slot(0)).toBeUndefined();
     expect(extra.slot(2)).toBeUndefined();
+  });
+});
+
+/**
+ * 测试专用的格子批，3 格，规则与合成网格不同：第 0 格只收原木，第 1 格什么都收，第 2 格是
+ * 只取格；关闭界面时退不退回由构造时定。没有合成能力。用它验证界面按格子批的规则分派，而不是
+ * 把合成网格的规则写死。
+ */
+class FakeRuledSlotBatch implements RuledSlotBatch {
+  readonly size = 3;
+  readonly crafting = undefined;
+  private readonly cells: Array<ItemStack | undefined> = [undefined, undefined, undefined];
+
+  constructor(readonly returnsOnClose: boolean) {}
+
+  slot(index: number): ItemStack | undefined {
+    return this.cells[index];
+  }
+
+  setSlot(index: number, stack: ItemStack | undefined): void {
+    this.cells[index] = stack;
+  }
+
+  accepts(index: number, item: ItemType): boolean {
+    return index !== 0 || item === ItemType.OakLog;
+  }
+
+  isTakeOnly(index: number): boolean {
+    return index === 2;
+  }
+}
+
+/** 测试专用格子批的三格在界面里的格号。 */
+const LOGS_ONLY = FIRST_EXTRA;
+const ANYTHING = FIRST_EXTRA + 1;
+const TAKE_ONLY = FIRST_EXTRA + 2;
+
+describe('格子批的规则：某格拒收某物品时点击什么都不改变', () => {
+  it('拿着泥土点只收原木的空格，泥土还在光标上，那一格仍空', () => {
+    const batch = new FakeRuledSlotBatch(true);
+    const { screen } = opened((inv) => inv.setSlot(0, dirt(10)), batch);
+    screen.clickSlot(0);
+    screen.clickSlot(LOGS_ONLY);
+    expect(screen.cursor).toEqual(dirt(10));
+    expect(batch.slot(0)).toBeUndefined();
+  });
+
+  it('拿着泥土点只收原木、里面有原木的格，不交换', () => {
+    const batch = new FakeRuledSlotBatch(true);
+    batch.setSlot(0, logs(3));
+    const { screen } = opened((inv) => inv.setSlot(0, dirt(10)), batch);
+    screen.clickSlot(0);
+    screen.clickSlot(LOGS_ONLY);
+    expect(screen.cursor).toEqual(dirt(10));
+    expect(batch.slot(0)).toEqual(logs(3));
+  });
+
+  it('对拒收的格按拆堆键也什么都不改变', () => {
+    const batch = new FakeRuledSlotBatch(true);
+    const { screen } = opened((inv) => inv.setSlot(0, dirt(10)), batch);
+    screen.clickSlot(0);
+    screen.splitSlot(LOGS_ONLY);
+    expect(screen.cursor).toEqual(dirt(10));
+    expect(batch.slot(0)).toBeUndefined();
+  });
+
+  it('收的物品照常放下、拆堆、拿起：原木进只收原木的格', () => {
+    const batch = new FakeRuledSlotBatch(true);
+    const { screen } = opened((inv) => inv.setSlot(0, logs(4)), batch);
+    screen.clickSlot(0);
+    screen.splitSlot(LOGS_ONLY);
+    expect(batch.slot(0)).toEqual(logs(1));
+    screen.clickSlot(LOGS_ONLY);
+    expect(batch.slot(0)).toEqual(logs(4));
+    expect(screen.cursor).toBeUndefined();
+    screen.clickSlot(LOGS_ONLY);
+    expect(screen.cursor).toEqual(logs(4));
+  });
+
+  it('什么都收的格与背包格一样：泥土放得进去', () => {
+    const batch = new FakeRuledSlotBatch(true);
+    const { screen } = opened((inv) => inv.setSlot(0, dirt(10)), batch);
+    screen.clickSlot(0);
+    screen.clickSlot(ANYTHING);
+    expect(batch.slot(1)).toEqual(dirt(10));
+    expect(screen.cursor).toBeUndefined();
+  });
+});
+
+describe('格子批的规则：只取格点击与拆堆全拿走、同一类型合并、不同类型不动', () => {
+  it('光标空着点只取格，整堆到光标上，那一格空了', () => {
+    const batch = new FakeRuledSlotBatch(true);
+    batch.setSlot(2, planks(10));
+    const { screen } = opened(undefined, batch);
+    screen.clickSlot(TAKE_ONLY);
+    expect(screen.cursor).toEqual(planks(10));
+    expect(batch.slot(2)).toBeUndefined();
+  });
+
+  it('光标空着对只取格按拆堆键，也是整堆拿走而不是一半', () => {
+    const batch = new FakeRuledSlotBatch(true);
+    batch.setSlot(2, planks(10));
+    const { screen } = opened(undefined, batch);
+    screen.splitSlot(TAKE_ONLY);
+    expect(screen.cursor).toEqual(planks(10));
+    expect(batch.slot(2)).toBeUndefined();
+  });
+
+  it('光标上是同一类型时并到堆叠上限，并不完的留在格里', () => {
+    const batch = new FakeRuledSlotBatch(true);
+    batch.setSlot(2, planks(10));
+    const { screen } = opened((inv) => inv.setSlot(0, planks(60)), batch);
+    screen.clickSlot(0);
+    screen.clickSlot(TAKE_ONLY);
+    expect(screen.cursor).toEqual(planks(64));
+    expect(batch.slot(2)).toEqual(planks(6));
+  });
+
+  it('光标上是同一类型时按拆堆键与点击相同，不是只并 1 个', () => {
+    const batch = new FakeRuledSlotBatch(true);
+    batch.setSlot(2, planks(10));
+    const { screen } = opened((inv) => inv.setSlot(0, planks(20)), batch);
+    screen.clickSlot(0);
+    screen.splitSlot(TAKE_ONLY);
+    expect(screen.cursor).toEqual(planks(30));
+    expect(batch.slot(2)).toBeUndefined();
+  });
+
+  it('光标上是别的东西时什么都不改变：不交换、不放下', () => {
+    const batch = new FakeRuledSlotBatch(true);
+    batch.setSlot(2, planks(10));
+    const { screen } = opened((inv) => inv.setSlot(0, dirt(10)), batch);
+    screen.clickSlot(0);
+    screen.clickSlot(TAKE_ONLY);
+    screen.splitSlot(TAKE_ONLY);
+    expect(screen.cursor).toEqual(dirt(10));
+    expect(batch.slot(2)).toEqual(planks(10));
+  });
+
+  it('光标上有东西、只取格空着时放不进去', () => {
+    const batch = new FakeRuledSlotBatch(true);
+    const { screen } = opened((inv) => inv.setSlot(0, planks(10)), batch);
+    screen.clickSlot(0);
+    screen.clickSlot(TAKE_ONLY);
+    screen.splitSlot(TAKE_ONLY);
+    expect(screen.cursor).toEqual(planks(10));
+    expect(batch.slot(2)).toBeUndefined();
+  });
+
+  it('光标上是同一类型的工具时一把都并不进去：堆叠上限是 1', () => {
+    const batch = new FakeRuledSlotBatch(true);
+    batch.setSlot(2, pickaxe());
+    const { screen } = opened((inv) => inv.setSlot(0, { ...pickaxe(), damage: 5 }), batch);
+    screen.clickSlot(0);
+    screen.clickSlot(TAKE_ONLY);
+    expect(screen.cursor).toEqual({ ...pickaxe(), damage: 5 });
+    expect(batch.slot(2)).toEqual(pickaxe());
+  });
+
+  it('从背包第 20 格拿起的木板并进只取格里的几块之后，关闭界面时整堆回第 20 格', () => {
+    const batch = new FakeRuledSlotBatch(false);
+    batch.setSlot(2, planks(10));
+    const { inventory, screen } = opened((inv) => inv.setSlot(20, planks(20)), batch);
+    screen.clickSlot(20);
+    screen.clickSlot(TAKE_ONLY);
+    expect(screen.toggle()).toEqual([]);
+    expect(inventory.slot(20)).toEqual(planks(30));
+    expect(inventory.slot(0)).toBeUndefined();
+    expect(batch.slot(2)).toBeUndefined();
+  });
+
+  it('从只取格拿到光标上的东西，关闭界面时按入包规则进背包，不回只取格', () => {
+    const batch = new FakeRuledSlotBatch(false);
+    batch.setSlot(2, planks(10));
+    const { inventory, screen } = opened(undefined, batch);
+    screen.clickSlot(TAKE_ONLY);
+    expect(screen.toggle()).toEqual([]);
+    expect(inventory.slot(0)).toEqual(planks(10));
+    expect(batch.slot(2)).toBeUndefined();
+  });
+});
+
+describe('格子批的规则：关闭时不退回的格子批，内容在关闭后仍在', () => {
+  it('关闭界面时三格里的东西原地不动，背包不多东西，也没有要交出去的', () => {
+    const batch = new FakeRuledSlotBatch(false);
+    batch.setSlot(0, logs(3));
+    batch.setSlot(1, dirt(7));
+    batch.setSlot(2, planks(10));
+    const { inventory, screen } = opened(undefined, batch);
+    expect(screen.toggle()).toEqual([]);
+    expect(batch.slot(0)).toEqual(logs(3));
+    expect(batch.slot(1)).toEqual(dirt(7));
+    expect(batch.slot(2)).toEqual(planks(10));
+    for (let i = 0; i < INVENTORY_SIZE; i++) expect(inventory.slot(i)).toBeUndefined();
+  });
+
+  it('光标上的东西照样退回：从格子批里拿起的回原格，留在格子批里', () => {
+    const batch = new FakeRuledSlotBatch(false);
+    batch.setSlot(1, dirt(7));
+    const { inventory, screen } = opened(undefined, batch);
+    screen.clickSlot(ANYTHING);
+    expect(screen.toggle()).toEqual([]);
+    expect(screen.cursor).toBeUndefined();
+    expect(batch.slot(1)).toEqual(dirt(7));
+    expect(inventory.slot(0)).toBeUndefined();
+  });
+
+  it('关闭时退回的格子批照旧清空、东西进背包', () => {
+    const batch = new FakeRuledSlotBatch(true);
+    batch.setSlot(1, dirt(7));
+    const { inventory, screen } = opened(undefined, batch);
+    expect(screen.toggle()).toEqual([]);
+    expect(batch.slot(1)).toBeUndefined();
+    expect(inventory.slot(0)).toEqual(dirt(7));
   });
 });

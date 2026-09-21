@@ -27,6 +27,16 @@ If this repo ever grows into a monorepo with several bounded contexts, switch to
 
 When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `CONTEXT.md`. Don't drift to synonyms the glossary explicitly avoids (each entry lists them under `_Avoid_`).
 
+`_Avoid_` entries come in two forms, explained in the glossary's own "怎么读这份术语表" section:
+
+- A bare word is banned outright — never write it for that concept.
+- A word followed by `（…）` is banned only for the meaning the parenthesis names. The same word is
+  legitimate elsewhere, often because it is another glossary term (`吸收` vs `拾取`) or has an
+  ordinary Chinese sense (`材料`, `公式`, `暂停`). Read the surrounding text before calling it a
+  violation.
+
+When you add or tighten an `_Avoid_` entry, check whether the word has a second legitimate meaning in this repo. If it does, write the condition in parentheses rather than banning it outright.
+
 `CONTEXT.md` defines terms in Chinese with the English name in parentheses (e.g. **区块（Chunk）**). Use the English name for code identifiers and the Chinese term in prose aimed at the user.
 
 If the concept you need isn't in the glossary yet, that's a signal — either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).

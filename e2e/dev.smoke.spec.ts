@@ -8,6 +8,11 @@ import {
   TICK_RATE,
 } from '../src/core/constants';
 import { CRAFTING_TABLE_GRID, INVENTORY_CRAFTING_GRID } from '../src/core/crafting-grid';
+import {
+  FURNACE_FUEL_SLOT,
+  FURNACE_INPUT_SLOT,
+  FURNACE_RESULT_SLOT,
+} from '../src/core/furnace-slots';
 import { PICKUP_DELAY_TICKS } from '../src/core/drop';
 import { HOTBAR_SIZE, INVENTORY_SIZE } from '../src/core/inventory';
 import {
@@ -52,6 +57,13 @@ import {
   readElementPixels,
   waitForFirstFrame,
 } from './canvas';
+
+/** 熔炉三格各自的下标与读屏名字。 */
+const FURNACE_SLOTS: ReadonlyArray<readonly [number, string]> = [
+  [FURNACE_INPUT_SLOT, STRINGS.furnaceInput],
+  [FURNACE_FUEL_SLOT, STRINGS.furnaceFuel],
+  [FURNACE_RESULT_SLOT, STRINGS.furnaceResult],
+];
 
 /** 背包界面那块合成网格有几格。 */
 const CRAFTING_CELLS = INVENTORY_CRAFTING_GRID.width * INVENTORY_CRAFTING_GRID.height;
@@ -2498,7 +2510,7 @@ test('背包界面右侧有配方书，点木板配方自动填入材料，输�
 test('工作台界面右侧也有配方书，点木板配方自动填入材料', async ({ page }) => {
   await giveOneLog(page);
   // 挖完站在一格深的坑里，工作台摆在眼前那一格，使用键直接给核心
-  await setTableAhead(page);
+  await setUsableAhead(page);
   await page.evaluate(() => {
     const core = window.__VOXEL__!.core;
     core.use();
@@ -2558,35 +2570,38 @@ test('背包界面开着时不显示十字准星', async ({ page }) => {
 });
 
 /**
- * 在玩家正前方紧挨着的那一格摆一个工作台，并让玩家朝它平视。返回那一格的坐标。
+ * 在玩家正前方紧挨着的那一格摆一个可使用方块（默认工作台），并让玩家朝它平视。返回那一格的坐标。
  *
- * 工作台由 `setBlock` 直接摆进世界：核心没有往背包里塞物品的入口，而 4 块木板合成它要先
- * 拆堆（#25）。这条测的是右键那一下的接线，不是合成。
+ * 方块由 `setBlock` 直接摆进世界：核心没有往背包里放入物品的入口，而 4 块木板合成工作台要先
+ * 拆堆（#25）、8 块圆石合成熔炉要先挖石头。这条测的是右键那一下的接线，不是合成。
  */
-async function setTableAhead(page: Page): Promise<Vec3> {
+async function setUsableAhead(
+  page: Page,
+  block: BlockType = BlockType.CraftingTable,
+): Promise<Vec3> {
   return page.evaluate(
-    ({ table, eyeHeight }) => {
+    ({ block, eyeHeight }) => {
       const core = window.__VOXEL__!.core;
       const { x, y, z } = core.player.position;
       // 眼睛那一层、正前方（−Z）一格
       const spot = { x: Math.floor(x), y: Math.floor(y + eyeHeight), z: Math.floor(z) - 1 };
-      core.setBlock(spot.x, spot.y, spot.z, table);
+      core.setBlock(spot.x, spot.y, spot.z, block);
       core.turn(-core.player.yaw, -core.player.pitch);
       core.tick();
       const target = core.mining.target;
       if (!target || target.x !== spot.x || target.y !== spot.y || target.z !== spot.z) {
-        throw new Error('平视时应该对准正前方那个工作台');
+        throw new Error(`平视时应该对准正前方那个方块 ${block}`);
       }
       return spot;
     },
-    { table: BlockType.CraftingTable, eyeHeight: PLAYER_EYE_HEIGHT },
+    { block, eyeHeight: PLAYER_EYE_HEIGHT },
   );
 }
 
 test('右键对着工作台打开工作台界面并交还鼠标，按 E 关闭并抓回鼠标，准星随之隐藏与复现', async ({
   page,
 }) => {
-  await setTableAhead(page);
+  await setUsableAhead(page);
   await grabPointer(page);
   const screen = page.locator('#crafting-table-screen');
   const inventory = page.locator('#inventory-screen');
@@ -2631,7 +2646,7 @@ test('右键对着工作台打开工作台界面并交还鼠标，按 E 关闭�
 });
 
 test('工作台界面开着时按 Esc 也关掉它', async ({ page }) => {
-  await setTableAhead(page);
+  await setUsableAhead(page);
   await grabPointer(page);
   const screen = page.locator('#crafting-table-screen');
   await page.evaluate(
@@ -2644,6 +2659,126 @@ test('工作台界面开着时按 Esc 也关掉它', async ({ page }) => {
   await page.keyboard.press(INVENTORY_CLOSE_KEY);
   await expect(screen).toBeHidden();
   await expect.poll(() => readLockedElementId(page)).toBe('game');
+  expect(errors).toEqual([]);
+});
+
+test('右键对着熔炉打开熔炉界面：三格、两条进度条、36 格，交还鼠标；按 E 关闭并重新锁定鼠标，准星随之隐藏与复现', async ({
+  page,
+}) => {
+  await setUsableAhead(page, BlockType.Furnace);
+  await grabPointer(page);
+  const screen = page.locator('#furnace-screen');
+  const crosshair = page.locator('#crosshair');
+  await expect(screen).toBeHidden();
+  await expect(crosshair).toBeVisible();
+
+  // 右键：事件真的经过输入适配器。用合成事件而不是 page.mouse，理由见放置那条测试。
+  await page.evaluate(
+    (useButton) => document.dispatchEvent(new MouseEvent('mousedown', { button: useButton })),
+    MOUSE_BINDINGS.use,
+  );
+  await expect(screen).toBeVisible();
+  await expect(page.locator('#inventory-screen')).toBeHidden();
+  await expect(page.locator('#crafting-table-screen')).toBeHidden();
+  await expect.poll(() => readLockedElementId(page)).toBe(null);
+  await expect(crosshair).toBeHidden();
+  await expect(page.locator('#hud')).toBeHidden();
+
+  // 标题与无障碍名都是「熔炉」；三格接在 36 格之后、各有自己的名字；没有合成网格、输出格与配方书
+  await expect(screen).toHaveAttribute('aria-label', STRINGS.furnace);
+  await expect(page.locator('#furnace-screen .invscreen__title')).toHaveText(STRINGS.furnace);
+  await expect(page.locator('#furnace-screen .invscreen__slot')).toHaveCount(
+    INVENTORY_SIZE + FURNACE_SLOTS.length,
+  );
+  for (const [local, label] of FURNACE_SLOTS) {
+    const cell = page.locator(`#furnace-screen [data-slot="${INVENTORY_SIZE + local}"]`);
+    await expect(cell).toBeVisible();
+    await expect(cell).toHaveAttribute('aria-label', label);
+  }
+  await expect(page.locator('#furnace-screen .invscreen__grid')).toHaveCount(0);
+  await expect(page.locator('#furnace-screen [data-output]')).toHaveCount(0);
+  await expect(page.locator('#furnace-screen .invscreen__recipes')).toHaveCount(0);
+
+  // 两条进度条都在，本 issue 里熔炉不推进，长度都是 0
+  for (const label of [STRINGS.fuelLeft, STRINGS.smeltProgress]) {
+    const bar = screen.getByRole('progressbar', { name: label });
+    await expect(bar).toBeVisible();
+    await expect(bar).toHaveAttribute('aria-valuenow', '0');
+  }
+
+  // 按 E 关掉的是熔炉界面，不是再开一层背包界面；鼠标当场回到第一人称
+  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await expect(screen).toBeHidden();
+  await expect(page.locator('#inventory-screen')).toBeHidden();
+  await expect.poll(() => readLockedElementId(page)).toBe('game');
+  await expect(crosshair).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('熔炉界面开着时按 Esc 也关掉它', async ({ page }) => {
+  await setUsableAhead(page, BlockType.Furnace);
+  await grabPointer(page);
+  const screen = page.locator('#furnace-screen');
+  const crosshair = page.locator('#crosshair');
+  await page.evaluate(
+    (useButton) => document.dispatchEvent(new MouseEvent('mousedown', { button: useButton })),
+    MOUSE_BINDINGS.use,
+  );
+  await expect(screen).toBeVisible();
+  await expect.poll(() => readLockedElementId(page)).toBe(null);
+  await expect(crosshair).toBeHidden();
+
+  await page.keyboard.press(INVENTORY_CLOSE_KEY);
+  await expect(screen).toBeHidden();
+  await expect.poll(() => readLockedElementId(page)).toBe('game');
+  await expect(crosshair).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('熔炉界面画的是那个熔炉的三格：调试句柄放进去的粗铁、煤炭、铁锭出现在对应格里，点成品格拿到光标上', async ({
+  page,
+}) => {
+  // 放东西与开界面都直接给核心：这条测的是界面里画了什么、点击递没递到，右键那一下的接线在上面
+  // 两条里；而指针锁定期间 headless Chromium 会把页面的任务调度降到约 1/10。
+  const spot = await setUsableAhead(page, BlockType.Furnace);
+  await page.evaluate(
+    ({ spot, input, fuel, output }) => {
+      const core = window.__VOXEL__!.core;
+      const state = core.blockStateAt(spot.x, spot.y, spot.z)!;
+      state.input = input;
+      state.fuel = fuel;
+      state.output = output;
+      core.use();
+      core.tick();
+    },
+    {
+      spot,
+      input: { item: ItemType.RawIron, count: 3 },
+      fuel: { item: ItemType.Coal, count: 2 },
+      output: { item: ItemType.IronIngot, count: 10 },
+    },
+  );
+  const screen = page.locator('#furnace-screen');
+  await expect(screen).toBeVisible();
+
+  const cell = (local: number): Locator =>
+    page.locator(`#furnace-screen [data-slot="${INVENTORY_SIZE + local}"]`);
+  await expect(cell(FURNACE_INPUT_SLOT)).toHaveAttribute('data-item', String(ItemType.RawIron));
+  await expect(cell(FURNACE_INPUT_SLOT)).toHaveAttribute('title', ITEM_NAMES[ItemType.RawIron]);
+  await expect(cell(FURNACE_FUEL_SLOT)).toHaveAttribute('data-item', String(ItemType.Coal));
+  await expect(cell(FURNACE_RESULT_SLOT)).toHaveAttribute(
+    'data-item',
+    String(ItemType.IronIngot),
+  );
+  await expect(cell(FURNACE_RESULT_SLOT).locator('.invscreen__count')).toHaveText('10');
+
+  // 点成品格：10 个铁锭到光标上，成品格空了
+  await cell(FURNACE_RESULT_SLOT).click();
+  await expect(cell(FURNACE_RESULT_SLOT)).not.toHaveAttribute('data-item');
+  await expect(page.locator('#furnace-screen .invscreen__cursor')).toHaveAttribute(
+    'data-item',
+    String(ItemType.IronIngot),
+  );
   expect(errors).toEqual([]);
 });
 

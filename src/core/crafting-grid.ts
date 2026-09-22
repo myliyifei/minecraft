@@ -24,6 +24,8 @@ export class CraftingGrid implements RuledSlotBatch, Crafting {
   readonly height: number;
   /** 关闭界面时材料退回背包：网格只是合成时临时放材料的地方。 */
   readonly returnsOnClose = true;
+  /** 合成网格没有熔炼进度条。 */
+  readonly smelting = undefined;
   private readonly cells: Array<ItemStack | undefined>;
 
   constructor({ width, height }: GridSize) {

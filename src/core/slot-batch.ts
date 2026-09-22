@@ -32,10 +32,23 @@ export interface Crafting extends GridSize {
 }
 
 /**
+ * 一个格子批的熔炼进度：界面上那两条进度条各画多长，都是 0 到 1 的比例。
+ *
+ * 界面依赖它而不是熔炉状态本身：画进度条要的只有这两个数，燃料与熔炼的 tick 怎么记是熔炉的事。
+ * 没有进度条的格子批没有它（`RuledSlotBatch.smelting` 为 undefined）。
+ */
+export interface SmeltingProgress {
+  /** 燃料剩余条：当前这件燃料还能烧的比例，没点火时是 0。 */
+  readonly fuelRatio: number;
+  /** 熔炼进度条：当前这件原料炼到几分之几，没在炼时是 0。 */
+  readonly progressRatio: number;
+}
+
+/**
  * 格子批（见 CONTEXT.md）：界面里接在背包 36 格之后的那一批附加格子，带着自己的规则。
  * 每格两条——收不收某种物品、是不是只取格；整批一条——关闭界面时里面的东西退不退回背包。
- * 合成网格是它的一个实现：每格都收、都不是只取、关闭时退回。熔炉的三格将是另一个：原料格
- * 与燃料格各只收特定物品、成品格只取、关闭时留在熔炉里。
+ * 合成网格是它的一个实现：每格都收、都不是只取、关闭时退回。熔炉的三格是另一个（`FurnaceSlots`）：
+ * 原料格与燃料格各只收特定物品、成品格只取、关闭时留在熔炉里。
  *
  * 界面依赖这个接口而不是某一种格子批：拿起、放下、合并、交换、拆堆、关闭时归还这套规则
  * 只写一遍，按每格的规则分派。
@@ -47,4 +60,6 @@ export interface RuledSlotBatch extends SlotBatch, SlotRules {
   readonly returnsOnClose: boolean;
   /** 这批格子旁边的输出格与合成能力，没有输出格的格子批是 undefined。 */
   readonly crafting: Crafting | undefined;
+  /** 这批格子的熔炼进度，没有进度条的格子批是 undefined。 */
+  readonly smelting: SmeltingProgress | undefined;
 }

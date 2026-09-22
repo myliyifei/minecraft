@@ -67,7 +67,7 @@ export function installPlayerControls(
 ): PlayerControls {
   const pressed = new Set<MoveAction>();
   const locked = (): boolean => document.pointerLockElement === canvas;
-  // 界面模式（见 CONTEXT.md）：背包界面或工作台界面开着。这时鼠标已经交还给页面，
+  // 界面模式（见 CONTEXT.md）：背包界面、工作台界面或熔炉界面开着。这时鼠标已经交还给页面，
   // 键盘只认关掉界面那两颗键。
   const uiOpen = (): boolean => target.uiMode;
   const sendIntent = (): void => target.setMoveIntent(intentOf(pressed));

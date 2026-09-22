@@ -494,11 +494,14 @@ describe('方块表的「方块状态」一列（issue #30）', () => {
 });
 
 describe('方块表的「使用」一列', () => {
-  it('只有工作台是可使用方块：使用键对着它打开界面', () => {
+  it('只有工作台与熔炉是可使用方块：使用键对着它们打开界面，熔炉的两个编号都开熔炉界面', () => {
+    const uses: Partial<Record<BlockType, BlockUse>> = {
+      [BlockType.CraftingTable]: BlockUse.CraftingTable,
+      [BlockType.Furnace]: BlockUse.Furnace,
+      [BlockType.LitFurnace]: BlockUse.Furnace,
+    };
     for (const block of Object.values(BlockType)) {
-      expect(blockUse(block), `方块 ${block}`).toBe(
-        block === BlockType.CraftingTable ? BlockUse.CraftingTable : BlockUse.None,
-      );
+      expect(blockUse(block), `方块 ${block}`).toBe(uses[block] ?? BlockUse.None);
     }
   });
 });

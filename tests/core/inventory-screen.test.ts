@@ -938,6 +938,7 @@ describe('拆堆点击：光标空着拿起半堆，光标有物品逐个放下'
 class FakeRuledSlotBatch implements RuledSlotBatch {
   readonly size = 3;
   readonly crafting = undefined;
+  readonly smelting = undefined;
   private readonly cells: Array<ItemStack | undefined> = [undefined, undefined, undefined];
 
   constructor(readonly returnsOnClose: boolean) {}

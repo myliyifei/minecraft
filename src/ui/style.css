@@ -426,6 +426,60 @@ body {
   box-shadow: inset 0 0 0 1px rgb(0 0 0 / 35%);
 }
 
+/*
+ * 熔炉三格：左边一列自上而下是原料格、燃料剩余条、燃料格，中间是熔炼进度条，右边是成品格，
+ * 三样竖向对齐到中线。与合成网格那一段同一个位置、同一种排法。
+ */
+.invscreen__furnace {
+  display: flex;
+  align-items: center;
+  gap: var(--tile);
+}
+
+.invscreen__furnace-feed {
+  display: grid;
+  justify-items: center;
+  gap: calc(var(--tile) / 4);
+}
+
+/*
+ * 两条进度条：暗色轨道上一段填充，长度由 inventory-screen.ts 写成 --ratio（0 到 1），算式留在
+ * 这里——与耐久条、等级条同一套做法。燃料剩余条与图标同宽；熔炼进度条夹在原料那一列与成品格之间，
+ * 与合成网格旁的箭头在同一个位置。
+ * 硬边，不做渐变。
+ */
+.invscreen__fuel,
+.invscreen__smelt {
+  display: block;
+  height: calc(var(--tile) / 2);
+  background: rgb(0 0 0 / 70%);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 35%);
+}
+
+.invscreen__fuel {
+  width: var(--slot-icon);
+}
+
+.invscreen__smelt {
+  width: calc(var(--tile) * 2);
+}
+
+.invscreen__fuel-fill,
+.invscreen__smelt-fill {
+  display: block;
+  width: calc(var(--ratio, 0) * 100%);
+  height: 100%;
+}
+
+/* 燃料是火的橙色，熔炼进度是白色，与合成那边的箭头同色。 */
+.invscreen__fuel-fill {
+  background: #f08a24;
+}
+
+.invscreen__smelt-fill {
+  background: #fff;
+}
+
 /* 鼠标停在哪一格上就亮一档：点下去动的是这一格。与快捷栏的选中格同一套加亮。 */
 .invscreen__slot:hover,
 .invscreen__output:hover {

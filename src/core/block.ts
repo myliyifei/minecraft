@@ -41,11 +41,13 @@ export type BlockType = (typeof BlockType)[keyof typeof BlockType];
  * 那一下走放置。
  *
  * 值是字符串而不是编号：它不进存档（由方块种类查出来），与 `ToolClass` 同一个理由。
- * 熔炉、箱子（第三切片）各加一个值，核心那边多一条分派，挖掘与放置的逻辑不必动。
+ * 箱子进来时再加一个值，核心那边多一条分派，挖掘与放置的逻辑不必动。
  */
 export const BlockUse = {
   None: 'none',
   CraftingTable: 'crafting-table',
+  /** 熔炉界面（issue #33）。熔炉的两个编号都是这一档。 */
+  Furnace: 'furnace',
 } as const;
 
 export type BlockUse = (typeof BlockUse)[keyof typeof BlockUse];
@@ -144,8 +146,7 @@ const COMMON_EXPERIENCE = 30;
  * 熔炉（见 CONTEXT.md，issue #30）：石制，比圆石硬得多；要镐，持镐挖掉掉回熔炉本身。
  * 两个编号（熄火与燃烧中）共用这一份：除正面贴图外它们没有任何区别，写两遍就是两处可能
  * 对不上。带熔炉状态——原料、燃料、成品三格与燃烧、熔炼的进度存在世界的方块状态表里。
- *
- * 使用一列暂时是 `None`：熔炉界面（#33）进来时改成自己那一档。
+ * 可使用：使用键对着它打开熔炉界面（#33），不看手上拿的是什么。
  */
 const FURNACE: BlockDef = {
   opaque: true,
@@ -156,7 +157,7 @@ const FURNACE: BlockDef = {
   requiresTool: true,
   drop: one(ItemType.Furnace),
   experience: COMMON_EXPERIENCE,
-  use: BlockUse.None,
+  use: BlockUse.Furnace,
   state: BlockStateKind.Furnace,
 };
 

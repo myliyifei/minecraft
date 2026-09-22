@@ -14,6 +14,11 @@ import {
 } from '../../src/core/constants';
 import { newFurnaceState, type FurnaceState } from '../../src/core/block-state';
 import { PICKUP_DELAY_TICKS } from '../../src/core/drop';
+import {
+  FURNACE_FUEL_SLOT,
+  FURNACE_INPUT_SLOT,
+  FURNACE_RESULT_SLOT,
+} from '../../src/core/furnace-slots';
 import { HOTBAR_SIZE, INVENTORY_SIZE } from '../../src/core/inventory';
 import { BARE_HAND, ItemType } from '../../src/core/item';
 import { IDLE_INTENT, MAX_PITCH, WALK_SPEED, WALK_STEP } from '../../src/core/player';
@@ -1647,6 +1652,270 @@ describe('GameCore 的工作台', () => {
     core.toggleInventory();
     core.tick();
     expect(core.inventory.held).toEqual({ item: ItemType.OakPlanks, count: 4 });
+  });
+});
+
+describe('GameCore 的熔炉界面（issue #33）', () => {
+  /** 眼睛那一层：站在平地上，眼睛落在地表之上第二格里。 */
+  const EYE_LAYER_Y = FLAT_GROUND_Y + 2;
+  /** 站在出生点朝 −Z 平视时正前方紧挨着的那一格。 */
+  const AHEAD: [number, number, number] = [0, EYE_LAYER_Y, -1];
+  /** 站在出生点朝 +X 平视时正前方紧挨着的那一格：第二个熔炉摆在这儿。 */
+  const EAST: [number, number, number] = [1, EYE_LAYER_Y, 0];
+  /** 正前方六格远：超出触及距离（4.5 格）。 */
+  const FAR_AHEAD: [number, number, number] = [0, EYE_LAYER_Y, -6];
+  /** 站在一格深的坑里朝 −Z 平视时，正前方两格远的那一格。 */
+  const AHEAD_FROM_PIT: [number, number, number] = [0, FLAT_GROUND_Y + 1, -2];
+  /** 三格在界面里的格号：接在背包 36 格之后。 */
+  const INPUT = INVENTORY_SIZE + FURNACE_INPUT_SLOT;
+  const RESULT = INVENTORY_SIZE + FURNACE_RESULT_SLOT;
+  const RAW_IRON_X3 = { item: ItemType.RawIron, count: 3 };
+  const COAL_X2 = { item: ItemType.Coal, count: 2 };
+  const INGOTS_X10 = { item: ItemType.IronIngot, count: 10 };
+
+  /**
+   * 站在平地上、正前方摆着一个熔炉、朝它平视的核心。熔炉由 `setBlock` 直接摆进世界，状态表随之
+   * 建一条空状态；合成与放置在「圆石造出熔炉」那一组里验过。
+   */
+  function facingFurnace(
+    block: BlockType = BlockType.Furnace,
+    at: [number, number, number] = AHEAD,
+  ): GameCore {
+    const core = coreOnFlatGround();
+    core.setBlock(...at, block);
+    look(core, 0, 0);
+    core.tick();
+    return core;
+  }
+
+  /** 按一次使用键并推进一个 tick。 */
+  function useOnce(core: GameCore): void {
+    core.use();
+    core.tick();
+  }
+
+  /** 按一次背包键并推进一个 tick。 */
+  function toggleOnce(core: GameCore): void {
+    core.toggleInventory();
+    core.tick();
+  }
+
+  /** 通过调试路径往 `at` 那个熔炉的三格里放东西，返回那条状态。 */
+  function fillFurnace(core: GameCore, at: [number, number, number] = AHEAD): FurnaceState {
+    const state = core.blockStateAt(...at)!;
+    state.input = RAW_IRON_X3;
+    state.fuel = COAL_X2;
+    state.output = INGOTS_X10;
+    return state;
+  }
+
+  it('对着触及距离内的熔炉按使用键，下一个 tick 打开熔炉界面（ADR-0004）', () => {
+    const core = facingFurnace();
+    core.use();
+    expect(core.furnaceScreen.open).toBe(false);
+    core.tick();
+    expect(core.furnaceScreen.open).toBe(true);
+    // 开的是熔炉界面，不是另两个；三者都算界面模式
+    expect(core.inventoryScreen.open).toBe(false);
+    expect(core.craftingTableScreen.open).toBe(false);
+    expect(core.uiMode).toBe(true);
+  });
+
+  it('燃烧中的编号同样打开熔炉界面', () => {
+    const core = facingFurnace(BlockType.LitFurnace);
+    useOnce(core);
+    expect(core.furnaceScreen.open).toBe(true);
+  });
+
+  it('熔炉界面开着时移动与挖掘指令被忽略', () => {
+    const core = facingFurnace();
+    useOnce(core);
+    const standing = core.player.position;
+
+    core.setMoveIntent({ ...IDLE_INTENT, forward: true });
+    core.setMining(true);
+    core.tick(2 * miningTicks(BlockType.Furnace, BARE_HAND));
+    expect(core.player.position).toEqual(standing);
+    expect(core.getBlock(...AHEAD)).toBe(BlockType.Furnace);
+    expect(core.mining.progress).toBe(0);
+  });
+
+  it('手里拿着泥土对着熔炉按使用键不放置：打开界面，泥土一块不少（ADR-0009）', () => {
+    const core = holdingDirt();
+    core.setBlock(...AHEAD_FROM_PIT, BlockType.Furnace);
+    look(core, 0, 0);
+    core.tick();
+    expect(core.mining.target).toMatchObject(toVec(AHEAD_FROM_PIT));
+    core.takeChangedBlocks();
+
+    useOnce(core);
+    expect(core.furnaceScreen.open).toBe(true);
+    expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
+    expect(core.takeChangedBlocks()).toEqual([]);
+  });
+
+  it('熔炉超出触及距离时按使用键什么都不改变', () => {
+    const core = facingFurnace(BlockType.Furnace, FAR_AHEAD);
+    expect(core.mining.target).toBeUndefined();
+    core.takeChangedBlocks();
+    useOnce(core);
+    expect(core.furnaceScreen.open).toBe(false);
+    expect(core.uiMode).toBe(false);
+    expect(core.takeChangedBlocks()).toEqual([]);
+    expect(core.blockStateAt(...FAR_AHEAD)).toEqual(newFurnaceState());
+  });
+
+  it('界面三格就是那个熔炉的三格：调试路径放进成品格的 10 个铁锭，光标空点它全拿走', () => {
+    const core = facingFurnace();
+    const state = fillFurnace(core);
+    useOnce(core);
+    const smelting = core.furnaceScreen.smelting!;
+    expect(smelting.firstSlot).toBe(INVENTORY_SIZE);
+    expect(smelting.slot(FURNACE_INPUT_SLOT)).toEqual(RAW_IRON_X3);
+    expect(smelting.slot(FURNACE_FUEL_SLOT)).toEqual(COAL_X2);
+    expect(smelting.slot(FURNACE_RESULT_SLOT)).toEqual(INGOTS_X10);
+
+    core.clickSlot(RESULT);
+    core.tick();
+    expect(core.furnaceScreen.cursor).toEqual(INGOTS_X10);
+    expect(state.output).toBeUndefined();
+  });
+
+  it('没有合成网格、输出格与配方书；本 issue 里状态不推进，两条进度条恒为空', () => {
+    const core = facingFurnace();
+    fillFurnace(core);
+    useOnce(core);
+    expect(core.furnaceScreen.crafting).toBeUndefined();
+    core.tick(TICK_RATE);
+    expect(core.furnaceScreen.smelting!.fuelRatio).toBe(0);
+    expect(core.furnaceScreen.smelting!.progressRatio).toBe(0);
+    // 点输出格、点配方书什么都不改变
+    core.clickCraftingOutput();
+    core.clickRecipe(0);
+    core.tick();
+    expect(core.furnaceScreen.cursor).toBeUndefined();
+  });
+
+  it('关闭界面后三格内容不变、背包里什么都没多；再打开还在', () => {
+    const core = facingFurnace();
+    const state = fillFurnace(core);
+    useOnce(core);
+    toggleOnce(core);
+    expect(core.furnaceScreen.open).toBe(false);
+    expect(state.input).toEqual(RAW_IRON_X3);
+    expect(state.fuel).toEqual(COAL_X2);
+    expect(state.output).toEqual(INGOTS_X10);
+    for (let i = 0; i < INVENTORY_SIZE; i++) expect(core.inventory.slot(i)).toBeUndefined();
+    expect(core.drops.count).toBe(0);
+
+    useOnce(core);
+    expect(core.furnaceScreen.open).toBe(true);
+    expect(core.furnaceScreen.smelting!.slot(FURNACE_RESULT_SLOT)).toEqual(INGOTS_X10);
+  });
+
+  it('关闭界面时光标物品退回原格：从原料格拿起的粗铁回原料格', () => {
+    const core = facingFurnace();
+    const state = fillFurnace(core);
+    useOnce(core);
+    core.clickSlot(INPUT);
+    core.tick();
+    expect(core.furnaceScreen.cursor).toEqual(RAW_IRON_X3);
+    expect(state.input).toBeUndefined();
+
+    toggleOnce(core);
+    expect(core.furnaceScreen.cursor).toBeUndefined();
+    expect(state.input).toEqual(RAW_IRON_X3);
+    expect(core.inventory.slot(0)).toBeUndefined();
+  });
+
+  it('关闭界面时光标物品退回原格：从背包第 5 格拿起的粗铁回第 5 格', () => {
+    const core = facingFurnace();
+    const state = fillFurnace(core);
+    useOnce(core);
+    // 先把原料格那 3 个粗铁放到第 5 格，再从第 5 格拿起来
+    core.clickSlot(INPUT);
+    core.clickSlot(5);
+    core.clickSlot(5);
+    toggleOnce(core);
+    expect(core.inventory.slot(5)).toEqual(RAW_IRON_X3);
+    expect(state.input).toBeUndefined();
+  });
+
+  it('背包全满时关闭界面，从成品格拿起的铁锭掉在玩家脚下', () => {
+    const core = facingFurnace();
+    const state = core.blockStateAt(...AHEAD)!;
+    useOnce(core);
+    // 核心没有往背包里放入物品的入口：借原料格一格一格地把 36 格填满粗铁
+    for (let i = 0; i < INVENTORY_SIZE; i++) {
+      state.input = { item: ItemType.RawIron, count: 64 };
+      core.clickSlot(INPUT);
+      core.clickSlot(i);
+      core.tick();
+    }
+    for (let i = 0; i < INVENTORY_SIZE; i++) {
+      expect(core.inventory.slot(i)).toEqual({ item: ItemType.RawIron, count: 64 });
+    }
+    state.output = INGOTS_X10;
+    core.clickSlot(RESULT);
+    toggleOnce(core);
+
+    expect(core.furnaceScreen.open).toBe(false);
+    expect(state.output).toBeUndefined();
+    const drops = core.drops.all();
+    expect(drops).toHaveLength(1);
+    expect(drops[0]).toMatchObject(INGOTS_X10);
+    const feet = core.player.position;
+    expect(Math.floor(drops[0]!.position.x)).toBe(Math.floor(feet.x));
+    expect(Math.floor(drops[0]!.position.z)).toBe(Math.floor(feet.z));
+  });
+
+  it('两个熔炉各有各的三格：对着哪个按使用键，界面里就是哪个', () => {
+    const core = facingFurnace();
+    fillFurnace(core);
+    core.setBlock(...EAST, BlockType.Furnace);
+    const east = core.blockStateAt(...EAST)!;
+    east.fuel = { item: ItemType.Stick, count: 7 };
+
+    useOnce(core);
+    expect(core.furnaceScreen.smelting!.slot(FURNACE_RESULT_SLOT)).toEqual(INGOTS_X10);
+    toggleOnce(core);
+
+    look(core, EAST_YAW, 0);
+    core.tick();
+    expect(core.mining.target).toMatchObject(toVec(EAST));
+    useOnce(core);
+    const smelting = core.furnaceScreen.smelting!;
+    expect(smelting.slot(FURNACE_INPUT_SLOT)).toBeUndefined();
+    expect(smelting.slot(FURNACE_FUEL_SLOT)).toEqual({ item: ItemType.Stick, count: 7 });
+    expect(smelting.slot(FURNACE_RESULT_SLOT)).toBeUndefined();
+  });
+
+  it('熔炉界面开着时按背包键关闭它，而不是再开背包界面', () => {
+    const core = facingFurnace();
+    useOnce(core);
+    toggleOnce(core);
+    expect(core.furnaceScreen.open).toBe(false);
+    expect(core.inventoryScreen.open).toBe(false);
+    expect(core.uiMode).toBe(false);
+  });
+
+  it('背包界面开着时使用键不生效：熔炉界面不会开', () => {
+    const core = facingFurnace();
+    toggleOnce(core);
+    expect(core.inventoryScreen.open).toBe(true);
+
+    useOnce(core);
+    expect(core.furnaceScreen.open).toBe(false);
+    expect(core.inventoryScreen.open).toBe(true);
+  });
+
+  it('同一时刻最多开一个界面：关掉熔炉界面之后按背包键才开背包界面', () => {
+    const core = facingFurnace();
+    useOnce(core);
+    toggleOnce(core);
+    toggleOnce(core);
+    expect(core.inventoryScreen.open).toBe(true);
+    expect(core.furnaceScreen.open).toBe(false);
   });
 });
 

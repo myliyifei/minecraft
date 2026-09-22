@@ -1,8 +1,14 @@
+import {
+  FURNACE_FUEL_SLOT,
+  FURNACE_INPUT_SLOT,
+  FURNACE_RESULT_SLOT,
+} from '../core/furnace-slots';
 import { HOTBAR_SIZE, INVENTORY_SIZE, type InventoryView } from '../core/inventory';
 import type {
   CraftingView,
   InventoryScreenView,
   RecipeBookEntry,
+  SmeltingView,
 } from '../core/inventory-screen';
 import { MOUSE_BINDINGS } from '../input/keybindings';
 import {
@@ -17,8 +23,8 @@ import { ITEM_NAMES, recipeLabel, STRINGS } from './strings';
 /**
  * 一层界面要读核心的哪几样、往回递哪一条指令。写成窄接口，接线接错了编译期就报。
  *
- * 背包界面与工作台界面各接一份：`screen` 是各自那个界面对象的视图，`inventory` 与两条
- * 点击指令是同一份——36 个背包格子两层都画，点击由核心递给开着的那个界面。
+ * 背包界面、工作台界面与熔炉界面各接一份：`screen` 是各自那个界面对象的视图，`inventory` 与
+ * 点击指令是同一份——36 个背包格子每层都画，点击由核心递给开着的那个界面。
  */
 export interface InventoryScreenSource {
   readonly inventory: InventoryView;
@@ -51,10 +57,16 @@ export const CRAFTING_TABLE_SCREEN_LABEL: InventoryScreenLabel = {
   title: STRINGS.craftingTable,
 };
 
+/** 熔炉界面那一层：使用键对着熔炉打开。 */
+export const FURNACE_SCREEN_LABEL: InventoryScreenLabel = {
+  id: 'furnace-screen',
+  title: STRINGS.furnace,
+};
+
 /**
  * 背包界面（见 CONTEXT.md）的那层 DOM 覆盖层：36 格、一块合成网格加输出格、右侧那块
  * 配方书面板，以及一个跟着鼠标走的光标物品。工作台界面是同一层的另一份实例：网格 3x3，
- * 标题换成「工作台」。
+ * 标题换成「工作台」。熔炉界面是第三份：没有网格与配方书，换成熔炉三格与两条进度条。
  *
  * 开着没有、光标上拿着什么、点一格之后东西怎么搬、输出格里显示什么、配方书里哪条高亮，
  * 全都在核心里（`src/core/inventory-screen.ts`）。这里只做两件事：把核心的状态画成格子，
@@ -100,6 +112,8 @@ export function installInventoryScreen(
   const crafting = buildCraftingHud(source.screen.crafting);
   // 配方书：面板右侧一列，列的是核心报的那几条，这里只照着画。
   const recipeBook = buildRecipeBook(source.screen.crafting);
+  // 熔炉三格与两条进度条：摆在合成网格那个位置，格号同样由核心给。
+  const furnace = buildFurnaceHud(source.screen.smelting);
 
   // 储物格：背包的第 9–35 格，3 行 9 列
   const storage = document.createElement('div');
@@ -120,11 +134,13 @@ export function installInventoryScreen(
     cells.push(buildSlotCell(i < HOTBAR_SIZE ? hotbar : storage, 'invscreen', i));
   }
 
-  // 面板分两栏：左栏自上而下是标题、合成网格、储物格、快捷栏，右栏是配方书。
+  // 面板分两栏：左栏自上而下是标题、合成网格（或熔炉三格）、储物格、快捷栏，右栏是配方书。
+  // 熔炉界面没有配方书，只有左栏。
   const main = document.createElement('div');
   main.className = 'invscreen__main';
   main.append(title);
   if (crafting) main.append(crafting.root);
+  if (furnace) main.append(furnace.root);
   main.append(storage, hotbar);
   panel.append(main);
   if (recipeBook) panel.append(recipeBook.root);
@@ -209,6 +225,7 @@ export function installInventoryScreen(
       }
       crafting?.update();
       recipeBook?.update();
+      furnace?.update();
 
       refreshSlot(cursor, stack);
       const hasCursor = stack !== undefined;
@@ -278,6 +295,101 @@ function buildCraftingHud(area: CraftingView | undefined): CraftingHud | undefin
       refreshSlot(output, area.output);
     },
   };
+}
+
+/** 熔炉三格与两条进度条的 DOM 与刷新。 */
+interface FurnaceHud {
+  readonly root: HTMLElement;
+  /** 让三格与两条进度条跟上核心。 */
+  update(): void;
+}
+
+/** 一条进度条：轨道、上次画的比例。 */
+interface ProgressBar {
+  readonly track: HTMLElement;
+  /** 上一次画的比例。与当前相同就不碰 DOM。 */
+  shown?: number;
+}
+
+/**
+ * 造熔炉三格与两条进度条。界面没带熔炉三格时不造。
+ *
+ * 摆法与原版一致：左边一列自上而下是原料格、燃料剩余条、燃料格，中间是熔炼进度条，右边是成品格。
+ * 三格与背包格子是同一种格子（同一套画法、带 data-slot），点它们递的也是格号；哪一格收什么、
+ * 成品格只取，都是核心的规则，这里不判。
+ */
+function buildFurnaceHud(area: SmeltingView | undefined): FurnaceHud | undefined {
+  if (!area) return undefined;
+
+  const root = document.createElement('div');
+  root.className = 'invscreen__furnace';
+  root.setAttribute('role', 'group');
+  root.setAttribute('aria-label', STRINGS.furnace);
+
+  const feed = document.createElement('div');
+  feed.className = 'invscreen__furnace-feed';
+
+  const input = buildFurnaceSlot(feed, area.firstSlot + FURNACE_INPUT_SLOT, STRINGS.furnaceInput);
+  const fuelBar = buildProgressBar(feed, 'invscreen__fuel', STRINGS.fuelLeft);
+  const fuel = buildFurnaceSlot(feed, area.firstSlot + FURNACE_FUEL_SLOT, STRINGS.furnaceFuel);
+  root.append(feed);
+
+  const smeltBar = buildProgressBar(root, 'invscreen__smelt', STRINGS.smeltProgress);
+  const result = buildFurnaceSlot(
+    root,
+    area.firstSlot + FURNACE_RESULT_SLOT,
+    STRINGS.furnaceResult,
+  );
+
+  return {
+    root,
+    update(): void {
+      refreshSlot(input, area.slot(FURNACE_INPUT_SLOT));
+      refreshSlot(fuel, area.slot(FURNACE_FUEL_SLOT));
+      refreshSlot(result, area.slot(FURNACE_RESULT_SLOT));
+      refreshProgressBar(fuelBar, area.fuelRatio);
+      refreshProgressBar(smeltBar, area.progressRatio);
+    },
+  };
+}
+
+/**
+ * 熔炉里的一格：与背包格子同一套画法、带 data-slot，追加进 `parent`。
+ *
+ * 不在列表里，所以不是 listitem：三格分在两处摆，读屏软件按各自的名字（原料格、燃料格、成品格）
+ * 报，与输出格同一个做法。
+ */
+function buildFurnaceSlot(parent: HTMLElement, index: number, label: string): SlotCell {
+  const cell = buildSlotCell(parent, 'invscreen', index);
+  cell.slot.setAttribute('role', 'button');
+  cell.slot.setAttribute('aria-label', label);
+  return cell;
+}
+
+/**
+ * 造一条进度条，追加进 `parent`：暗色轨道上一段亮色填充，填充的长度由 --ratio（0 到 1）决定，
+ * 算式在 style.css——与耐久条、等级条同一套做法。`block` 是它的 class 名，填充是 `block-fill`。
+ */
+function buildProgressBar(parent: HTMLElement, block: string, label: string): ProgressBar {
+  const track = document.createElement('span');
+  track.className = block;
+  track.setAttribute('role', 'progressbar');
+  track.setAttribute('aria-label', label);
+  track.setAttribute('aria-valuemin', '0');
+  track.setAttribute('aria-valuemax', '100');
+  const fill = document.createElement('span');
+  fill.className = `${block}-fill`;
+  track.append(fill);
+  parent.append(track);
+  return { track };
+}
+
+/** 比例变了才重画一条进度条。读屏软件报的是百分数，取整。 */
+function refreshProgressBar(bar: ProgressBar, ratio: number): void {
+  if (bar.shown === ratio) return;
+  bar.shown = ratio;
+  bar.track.style.setProperty('--ratio', String(ratio));
+  bar.track.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
 }
 
 /** 配方书的 DOM 与刷新。 */

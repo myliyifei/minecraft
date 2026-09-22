@@ -1,10 +1,11 @@
-import { BlockType, BlockUse, blockUse, type BlockEdit } from './block';
+import { BlockStateKind, BlockType, BlockUse, blockUse, type BlockEdit } from './block';
 import type { BlockState, BlockStateEntry, BlockStateView } from './block-state';
 import type { ChunkView } from './chunk';
 import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS } from './constants';
 import { CRAFTING_TABLE_GRID, CraftingGrid, INVENTORY_CRAFTING_GRID } from './crafting-grid';
 import { Drops, type DropsView } from './drop';
 import { Experience, type ExperienceView } from './experience';
+import { FurnaceSlots } from './furnace-slots';
 import { Inventory, wrapHotbarSlot, type InventoryView } from './inventory';
 import { InventoryScreen, type InventoryScreenView } from './inventory-screen';
 import { IDLE_MINING, Mining, type MiningView } from './mining';
@@ -74,6 +75,12 @@ export class GameCore implements BlockEdit, BlockStateView {
    */
   private readonly craftingTableGrid: CraftingGrid;
   private readonly craftingTableState: InventoryScreen;
+  /**
+   * 熔炉界面（见 CONTEXT.md）：同一个界面类，附加的是熔炉三格。世界里有几个熔炉都只有这一个界面，
+   * 使用键对着哪个熔炉，三格就重绑到哪一条状态（`FurnaceSlots.bind`）。
+   */
+  private readonly furnaceSlots: FurnaceSlots;
+  private readonly furnaceScreenState: InventoryScreen;
   private readonly miningState: Mining;
   private ticks = 0;
   private intent: MoveIntent = IDLE_INTENT;
@@ -116,6 +123,8 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.inventoryScreenState = new InventoryScreen(this.inventoryState, this.inventoryCraftingGrid);
     this.craftingTableGrid = new CraftingGrid(CRAFTING_TABLE_GRID);
     this.craftingTableState = new InventoryScreen(this.inventoryState, this.craftingTableGrid);
+    this.furnaceSlots = new FurnaceSlots();
+    this.furnaceScreenState = new InventoryScreen(this.inventoryState, this.furnaceSlots);
     // 挖掘要看手上的工具、还要让它损耗耐久：背包既是「手」也是收物品的地方。
     this.miningState = new Mining(
       this.world,
@@ -176,6 +185,14 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
+   * 熔炉界面的只读视图：开着没有、光标上拿着什么、熔炉三格里是什么、两条进度条多长。
+   * 只能由使用键对着熔炉（`use`）打开，按背包键关闭。三格是最近一次打开的那个熔炉的。
+   */
+  get furnaceScreen(): InventoryScreenView {
+    return this.furnaceScreenState;
+  }
+
+  /**
    * 这一刻是界面模式吗（见 CONTEXT.md）——有界面开着就是。
    *
    * 问的是「有没有界面开着」而不是「背包界面开着没有」：移动、视角、挖掘、使用那几处
@@ -190,6 +207,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   private get activeScreen(): InventoryScreen | undefined {
     if (this.inventoryScreenState.open) return this.inventoryScreenState;
     if (this.craftingTableState.open) return this.craftingTableState;
+    if (this.furnaceScreenState.open) return this.furnaceScreenState;
     return undefined;
   }
 
@@ -247,7 +265,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
-   * 使用（见 CONTEXT.md、ADR-0009）：目标方块是可使用方块（工作台）就打开它的界面，
+   * 使用（见 CONTEXT.md、ADR-0009）：目标方块是可使用方块（工作台、熔炉）就打开它的界面，
    * 不看手上拿的是什么；否则把手上那一堆的一个放到目标方块的相邻面上。按一次使用键调一次。
    *
    * 与 `setMining` 同一条路，下一个 tick 生效（ADR-0004）。同一个 tick 里按两次也只算
@@ -260,10 +278,11 @@ export class GameCore implements BlockEdit, BlockStateView {
 
   /**
    * 按背包键，下一个 tick 生效（ADR-0004）：有界面开着就关掉它（不管是哪一个），
-   * 一个都没开就打开背包界面。工作台界面因此关得掉、开不了——它只由 `use` 打开。
+   * 一个都没开就打开背包界面。工作台界面与熔炉界面因此关得掉、开不了——它们只由 `use` 打开。
    *
    * 同一个 tick 里按两次相互抵消：一开一关，界面状态没有净变化。关闭时光标上与合成网格
-   * 里还有东西的话，它们回背包，一格都放不下的那些掉在玩家脚下（`InventoryScreen.toggle`）。
+   * 里还有东西的话，它们退回背包，一格都放不下的那些掉在玩家脚下（`InventoryScreen.toggle`）；
+   * 熔炉三格里的东西留在熔炉里，不退回。
    */
   toggleInventory(): void {
     this.toggleQueued = !this.toggleQueued;
@@ -335,7 +354,7 @@ export class GameCore implements BlockEdit, BlockStateView {
    * (x, y, z) 那一格的方块状态（见 CONTEXT.md 的「方块状态」），没有的返回 undefined。
    *
    * 给出的是状态表里那一条本身，不是副本：调试句柄与测试往熔炉里放东西走的就是这条路；
-   * 游戏里改它的是熔炉界面（#33）与熔炼状态机（#34）。
+   * 游戏里改它的是熔炉界面与熔炼状态机（#34）。
    */
   blockStateAt(x: number, y: number, z: number): BlockState | undefined {
     return this.world.blockStateAt(x, y, z);
@@ -437,20 +456,41 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
-   * 使用键落在目标方块上：可使用方块（工作台）开界面，其余走放置（ADR-0009）。
+   * 使用键落在目标方块上：可使用方块（工作台、熔炉）开界面，其余走放置（ADR-0009）。
    *
    * 目标由挖掘那一步算出来，这里直接用它（ADR-0006）：射线只走到触及距离，拿得到目标
-   * 就说明够得着，触及距离之外的工作台因此不是目标，使用键什么都不发生。
-   * 分派看的是方块表的「使用」一列（`blockUse`），熔炉、箱子加进来时这里各多一条。
+   * 就说明够得着，触及距离之外的工作台与熔炉因此不是目标，使用键什么都不发生。
+   * 分派看的是方块表的「使用」一列（`blockUse`），箱子加进来时这里多一条。
+   *
+   * 走到这里说明没有界面开着（`uiMode` 为假），下面每一下切换都是打开。
    */
   private useTarget(): void {
     const hit = this.miningState.target;
-    if (hit && blockUse(this.world.getBlock(hit.x, hit.y, hit.z)) === BlockUse.CraftingTable) {
-      // 走到这里说明没有界面开着（`uiMode` 为假），这一下切换就是打开。
-      this.craftingTableState.toggle();
-      return;
+    if (hit) {
+      const use = blockUse(this.world.getBlock(hit.x, hit.y, hit.z));
+      if (use === BlockUse.CraftingTable) {
+        this.craftingTableState.toggle();
+        return;
+      }
+      if (use === BlockUse.Furnace) {
+        this.openFurnace(hit);
+        return;
+      }
     }
     placeBlock(this.world, this.miningState, this.playerState, this.inventoryState);
+  }
+
+  /**
+   * 打开那一格熔炉的界面：三格先重绑到它在状态表里的那一条，再打开。
+   *
+   * 熔炉方块一放下世界就建好那条状态（`World.setBlock`），这里一定查得到；查不到（状态不是
+   * 熔炉的）就什么都不做，而不是开一个三格不知道指向哪里的界面。
+   */
+  private openFurnace({ x, y, z }: Vec3): void {
+    const state = this.world.blockStateAt(x, y, z);
+    if (state?.kind !== BlockStateKind.Furnace) return;
+    this.furnaceSlots.bind(state);
+    this.furnaceScreenState.toggle();
   }
 
   /**

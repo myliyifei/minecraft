@@ -9,7 +9,7 @@ import {
   type SlotStore,
 } from './item';
 import { ingredientCounts, layoutRecipe, recipesFor, type Recipe } from './recipe';
-import type { Crafting, RuledSlotBatch, SlotRules } from './slot-batch';
+import type { Crafting, RuledSlotBatch, SmeltingProgress, SlotRules } from './slot-batch';
 
 /**
  * 光标上拿着的那一堆，以及它是从哪一格拿起来的。
@@ -81,6 +81,19 @@ export interface CraftingView {
   readonly recipes: ReadonlyArray<RecipeBookEntry>;
 }
 
+/**
+ * 熔炉三格与两条进度条的只读视图：各格摆了什么、燃料还剩多少、这件炼到几分之几。
+ *
+ * 界面层据此画三格与进度条。格号与 `CraftingView` 同一条规则：第 local 格在界面里是
+ * `firstSlot + local`，哪一格是原料、燃料、成品见 `FURNACE_INPUT_SLOT` 那三个下标。
+ */
+export interface SmeltingView extends SmeltingProgress {
+  /** 三格里第 0 格在界面里的格号。 */
+  readonly firstSlot: number;
+  /** 第 local 格里的那一堆，空格是 undefined。 */
+  slot(local: number): ItemStack | undefined;
+}
+
 /** 背包界面的只读视图。界面层读它画覆盖层。 */
 export interface InventoryScreenView {
   /** 界面开着没有。开着时核心处于界面模式（见 CONTEXT.md）。 */
@@ -89,13 +102,16 @@ export interface InventoryScreenView {
   readonly cursor: ItemStack | undefined;
   /** 合成网格与输出格，附加的格子批没有合成能力（或没有附加格子批）时 undefined。 */
   readonly crafting: CraftingView | undefined;
+  /** 熔炉三格与两条进度条，附加的格子批没有熔炼进度（或没有附加格子批）时 undefined。 */
+  readonly smelting: SmeltingView | undefined;
 }
 
 /**
  * 背包界面（见 CONTEXT.md）：开合，以及光标物品这套拿起放下的操作。
  *
  * 工作台界面也是这个类的一个实例：它同样摆出全部 36 个背包格子，只是附加的合成网格是
- * 3x3 而不是 2x2。两者的差别全在构造时传进来的那个格子批上，开合、光标、归还一套规则。
+ * 3x3 而不是 2x2。熔炉界面是第三个：附加的是熔炉三格（`FurnaceSlots`），没有合成网格。三者的
+ * 差别全在构造时传进来的那个格子批上，开合、光标、归还一套规则。
  *
  * 状态放在核心而不是界面层：界面模式一开，移动、视角、挖掘、放置就都不算数了
  * （规则在 `GameCore.step`），这是游戏规则，不是一个 DOM 覆盖层的显隐。
@@ -121,6 +137,9 @@ export class InventoryScreen implements InventoryScreenView {
    */
   readonly crafting: CraftingView | undefined;
 
+  /** 熔炉三格与进度条的视图，构造时造一次，理由同 `crafting`。 */
+  readonly smelting: SmeltingView | undefined;
+
   constructor(slots: SlotStore, extra?: RuledSlotBatch) {
     this.slots = slots;
     this.extra = extra;
@@ -128,6 +147,8 @@ export class InventoryScreen implements InventoryScreenView {
     this.bookRecipes = crafting ? recipesFor(crafting) : [];
     this.crafting =
       extra && crafting && craftingView(crafting, extra, slots, this.bookRecipes, slots.size);
+    const smelting = extra?.smelting;
+    this.smelting = extra && smelting && smeltingView(smelting, extra, slots.size);
   }
 
   get open(): boolean {
@@ -490,6 +511,20 @@ function craftingView(
     get recipes() {
       const available = countItems(slots, grid);
       return recipes.map((recipe) => ({ recipe, craftable: hasIngredients(recipe, available) }));
+    },
+  };
+}
+
+/** 给一个带熔炼进度的格子批包一层界面层要的只读视图：格号从 `firstSlot` 起。 */
+function smeltingView(smelting: SmeltingProgress, batch: SlotBatch, firstSlot: number): SmeltingView {
+  return {
+    firstSlot,
+    slot: (local) => batch.slot(local),
+    get fuelRatio() {
+      return smelting.fuelRatio;
+    },
+    get progressRatio() {
+      return smelting.progressRatio;
     },
   };
 }

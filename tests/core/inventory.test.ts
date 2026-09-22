@@ -114,6 +114,17 @@ describe('物品进背包', () => {
     expect(inventory.slot(3)).toEqual(dirt(1));
   });
 
+  it('两把铁镐各占一格（issue #32）', () => {
+    const inventory = new Inventory();
+    const ironPickaxe = { item: ItemType.IronPickaxe, count: 1 };
+    expect(inventory.add(ironPickaxe)).toBe(0);
+    expect(inventory.add(ironPickaxe)).toBe(0);
+    expect(filledSlots(inventory)).toEqual([
+      [0, ItemType.IronPickaxe, 1],
+      [1, ItemType.IronPickaxe, 1],
+    ]);
+  });
+
   it('堆叠上限是 64，工具是 1', () => {
     expect(stackLimit(ItemType.WoodenPickaxe)).toBe(1);
     // 上限写死在这里而不是从 stackLimit 反读：那样改坏数据表这条也照样通过

@@ -23,6 +23,11 @@ export const ItemType = {
   Coal: 14,
   /** 铁矿石掉的材料（issue #31）：可堆叠，放不下去，熔炉里炼成铁锭。 */
   RawIron: 15,
+  /** 粗铁在熔炉里炼成的材料（issue #32 定义，#34 的熔炼产出它）：可堆叠，放不下去，铁制工具的头。 */
+  IronIngot: 16,
+  IronPickaxe: 17,
+  IronAxe: 18,
+  IronShovel: 19,
 } as const;
 
 export type ItemType = (typeof ItemType)[keyof typeof ItemType];
@@ -71,23 +76,24 @@ export const ToolClass = {
 export type ToolClass = (typeof ToolClass)[keyof typeof ToolClass];
 
 /**
- * 工具的材质档（见 CONTEXT.md 的「材质档」）：目前有木与石。铁、金、钻石在各自的切片里各加一行。
+ * 工具的材质档（见 CONTEXT.md 的「材质档」）：目前有木、石、铁。金、钻石在各自的切片里各加一行。
  *
  * 倍率与最大耐久按材质档查（`TOOL_MATERIALS`），不按每件工具各记一份：同一档的镐斧铲三件数值相同，
  * 记三遍就是三处可能对不上。值是字符串，理由同 `ToolClass`：它不进存档。
  *
- * 材质档有先后（木 < 石），先后记在 `TOOL_MATERIAL_ORDER` 里而不是这里的键顺序：对象键的顺序
+ * 材质档有先后（木 < 石 < 铁），先后记在 `TOOL_MATERIAL_ORDER` 里而不是这里的键顺序：对象键的顺序
  * 不是拿来表达语义的地方。
  */
 export const ToolMaterial = {
   Wood: 'wood',
   Stone: 'stone',
+  Iron: 'iron',
 } as const;
 
 export type ToolMaterial = (typeof ToolMaterial)[keyof typeof ToolMaterial];
 
 /**
- * 材质档从低到高的顺序：木 < 石。加铁在石后面追加一项即可。
+ * 材质档从低到高的顺序：木 < 石 < 铁。金、钻石进来时按原版的先后排进去。
  *
  * 方块表的「最低材质档」一列（`BlockDef.minimumMaterial`）按它比大小：手上工具的档在这张表上
  * 不在方块要求的那一档之前，才算合格工具（见 CONTEXT.md）。
@@ -95,9 +101,10 @@ export type ToolMaterial = (typeof ToolMaterial)[keyof typeof ToolMaterial];
 export const TOOL_MATERIAL_ORDER: readonly ToolMaterial[] = Object.freeze([
   ToolMaterial.Wood,
   ToolMaterial.Stone,
+  ToolMaterial.Iron,
 ]);
 
-/** 一档材质不低于另一档吗：石不低于木，木不低于木，木低于石。 */
+/** 一档材质不低于另一档吗：铁不低于石，木不低于木，木低于石。 */
 export function materialAtLeast(material: ToolMaterial, minimum: ToolMaterial): boolean {
   return TOOL_MATERIAL_ORDER.indexOf(material) >= TOOL_MATERIAL_ORDER.indexOf(minimum);
 }
@@ -119,7 +126,7 @@ export interface MiningTool {
    * 空手对任何方块都不合格，谈不上够不够档。
    */
   readonly material: ToolMaterial | undefined;
-  /** 挖掘速度倍率：木 2、石 4（见 #15 的物品属性表）。空手是 1。 */
+  /** 挖掘速度倍率：木 2、石 4、铁 6（见 #15 的物品属性表）。空手是 1。 */
   readonly speed: number;
 }
 
@@ -139,11 +146,12 @@ export interface ToolMaterialDef {
 }
 
 /**
- * 材质档属性表——纯数据，数值与原版一致（#15 的物品属性表）。铁、金、钻石各加一行。
+ * 材质档属性表——纯数据，数值与原版一致（#15 的物品属性表）。金、钻石各加一行。
  */
 export const TOOL_MATERIALS: Readonly<Record<ToolMaterial, ToolMaterialDef>> = {
   [ToolMaterial.Wood]: { speed: 2, durability: 59 },
   [ToolMaterial.Stone]: { speed: 4, durability: 131 },
+  [ToolMaterial.Iron]: { speed: 6, durability: 250 },
 };
 
 /**
@@ -195,6 +203,10 @@ export const ITEMS: Readonly<Record<ItemType, ItemDef>> = {
   [ItemType.Furnace]: STACKABLE,
   [ItemType.Coal]: STACKABLE,
   [ItemType.RawIron]: STACKABLE,
+  [ItemType.IronIngot]: STACKABLE,
+  [ItemType.IronPickaxe]: tool(ToolClass.Pickaxe, ToolMaterial.Iron),
+  [ItemType.IronAxe]: tool(ToolClass.Axe, ToolMaterial.Iron),
+  [ItemType.IronShovel]: tool(ToolClass.Shovel, ToolMaterial.Iron),
 };
 
 /** 这种物品一格最多堆多少个。 */

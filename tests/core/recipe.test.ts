@@ -190,11 +190,12 @@ function axePattern(head: ItemType): Array<Array<ItemType | undefined>> {
 /**
  * 一档工具那三条配方的规则：图案、摆放位置、镜像、材料。
  *
- * 两档共用一个函数，与配方表那边一样（`toolRecipes` 只写一遍图案、材料当参数）：
+ * 三档共用一个函数，与配方表那边一样（`toolRecipes` 只写一遍图案、材料当参数）：
  * 图案不因材质档而变，所以断言也不该抄两遍。
  *
- * `material` 是「木」或「石」，测试名里的成品名（木镐、石镐）由它拼出来，与 `ITEM_NAMES`
- * 里的说法一致；`headName` 与 `headCounter` 是头部材料的名字与量词（木板用「块」，圆石用「个」）。
+ * `material` 是「木」「石」或「铁」，测试名里的成品名（木镐、石镐、铁镐）由它拼出来，与
+ * `ITEM_NAMES` 里的说法一致；`headName` 与 `headCounter` 是头部材料的名字与量词（木板用「块」，
+ * 圆石与铁锭用「个」）。
  */
 function describeToolTier(
   material: string,
@@ -274,7 +275,13 @@ describeToolTier('石', ItemType.Cobblestone, '圆石', '个', {
   shovel: ItemType.StoneShovel,
 });
 
-describe('两档工具的材料不能混用（issue #23）', () => {
+describeToolTier('铁', ItemType.IronIngot, '铁锭', '个', {
+  pickaxe: ItemType.IronPickaxe,
+  axe: ItemType.IronAxe,
+  shovel: ItemType.IronShovel,
+});
+
+describe('木板与圆石不能混用（issue #23）', () => {
   const P = ItemType.OakPlanks;
   const C = ItemType.Cobblestone;
 
@@ -314,6 +321,42 @@ describe('两档工具的材料不能混用（issue #23）', () => {
       [undefined, C, undefined],
     ];
     expect(matchRecipe(placed(stoneHandle, 0, 0), THREE_BY_THREE)).toBeUndefined();
+  });
+});
+
+describe('铁锭与圆石不能混用（issue #32）', () => {
+  const I = ItemType.IronIngot;
+  const C = ItemType.Cobblestone;
+
+  it('镐的图案里两个铁锭一个圆石，什么都不出', () => {
+    const mixed = [
+      [I, C, I],
+      [undefined, S, undefined],
+      [undefined, S, undefined],
+    ];
+    expect(matchRecipe(placed(mixed, 0, 0), THREE_BY_THREE)).toBeUndefined();
+  });
+
+  it('斧的图案里两个铁锭一个圆石，原图案与镜像都不出', () => {
+    const mixed = [
+      [I, I],
+      [C, S],
+      [undefined, S],
+    ];
+    const mirrored = mixed.map((row) => [...row].reverse());
+    expect(matchRecipe(placed(mixed, 0, 0), THREE_BY_THREE)).toBeUndefined();
+    expect(matchRecipe(placed(mirrored, 0, 1), THREE_BY_THREE)).toBeUndefined();
+  });
+
+  it('铲的头部是铁锭出铁铲，是圆石出石铲：同一图案按材料分', () => {
+    expect(matchRecipe(placed(shovelPattern(I), 0, 2), THREE_BY_THREE)).toEqual({
+      item: ItemType.IronShovel,
+      count: 1,
+    });
+    expect(matchRecipe(placed(shovelPattern(C), 0, 2), THREE_BY_THREE)).toEqual({
+      item: ItemType.StoneShovel,
+      count: 1,
+    });
   });
 });
 

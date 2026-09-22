@@ -70,6 +70,10 @@ const COAL = [34, 34, 38];
 const COAL_SHINE = [78, 78, 84];
 const IRON_RAW = [196, 158, 122];
 const IRON_SHINE = [228, 198, 166];
+/** 铁锭是炼过的铁：比粗铁的浅棕亮、偏冷的银灰，顶面再亮一档，棱边暗一档。 */
+const INGOT = [214, 214, 220];
+const INGOT_SHINE = [240, 240, 244];
+const INGOT_EDGE = [146, 146, 156];
 
 /**
  * 矿石贴图上矿点落在哪些像素：每格 8 个矿点，各是一个 2×2 的方块加一个突出的角，位置写死，
@@ -118,6 +122,25 @@ function lumpIcon(color, shine) {
 }
 
 /**
+ * 铁锭的图标：透明底上一块斜着看的梯形锭，顶面窄、亮，正面宽，左右两端与底边一条暗边。
+ * 顶面第 5 到 7 行，每往下一行向两边各宽一格；正面第 8 到 11 行，与顶面最宽那一行同宽。
+ */
+function ingotIcon(x, y, rand) {
+  const noise = Math.floor(rand() * 12) - 6;
+  if (y >= 5 && y <= 7) {
+    const left = 5 - (y - 5);
+    const right = 10 + (y - 5);
+    if (x < left || x > right) return [0, 0, 0, 0];
+    return shade(x === left || x === right ? INGOT : INGOT_SHINE, noise);
+  }
+  if (y >= 8 && y <= 11 && x >= 3 && x <= 12) {
+    const edge = x === 3 || x === 12 || y === 11;
+    return shade(edge ? INGOT_EDGE : INGOT, noise);
+  }
+  return [0, 0, 0, 0];
+}
+
+/**
  * 熔炉正面炉口的范围：横向居中 6 格宽，竖向从第 4 行到第 12 行。
  * 玩家平视时视线落在方块的第 6 行上（眼高 1.62，取小数部分），端到端测试读画面正中的颜色时
  * 读到的就是炉口，上下各留两行余量。
@@ -145,11 +168,13 @@ function toolHandle(x, y, rand) {
 /**
  * 一档材质的工具头用哪两种颜色：亮面与暗面。暗的那一条边让头看着有厚度、与柄分得开。
  *
- * 木制那两色沿用木板与工作台面的色号，石制沿用石头与圆石缝的色号——那几个常量是按方块
- * 取的名字，工具头借用它们的色值，所以在这里另起一对名字，用的时候读到的是「亮面/暗面」。
+ * 木制那两色沿用木板与工作台面的色号，石制沿用石头与圆石缝的色号，铁制沿用铁锭正面与棱边的
+ * 色号——那几个常量是按方块与材料取的名字，工具头借用它们的色值，所以在这里另起一对名字，
+ * 用的时候读到的是「亮面/暗面」。
  */
 const WOOD_HEAD = { light: TABLE_TOP, dark: PLANKS_SEAM };
 const STONE_HEAD = { light: STONE, dark: COBBLE_GAP };
+const IRON_HEAD = { light: INGOT, dark: INGOT_EDGE };
 
 /**
  * 镐头：横着一条与柄垂直的头（沿主对角线 x − y = 7 方向），两端略垂。
@@ -319,6 +344,12 @@ const TILES = {
   // coal、raw_iron：两种矿物的物品图标，一块矿块
   26: lumpIcon(COAL, COAL_SHINE),
   27: lumpIcon(IRON_RAW, IRON_SHINE),
+  // iron_ingot
+  28: ingotIcon,
+  // iron_pickaxe、iron_axe、iron_shovel：与木石两档同形状，头换成铁锭的银灰
+  29: toolIcon(pickaxeHead, IRON_HEAD),
+  30: toolIcon(axeHead, IRON_HEAD),
+  31: toolIcon(shovelHead, IRON_HEAD),
 };
 
 /** 这一像素落在熔炉正面的炉口里吗。 */

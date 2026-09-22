@@ -477,6 +477,11 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   // 煤炭与粗铁只是材料：矿石挖掉不掉矿石方块本身，所以它们没有对应的方块。
   [ItemType.Coal]: null,
   [ItemType.RawIron]: null,
+  // 铁锭同样只是材料；三件铁制工具与木石两档一样放不下去（#32）。
+  [ItemType.IronIngot]: null,
+  [ItemType.IronPickaxe]: null,
+  [ItemType.IronAxe]: null,
+  [ItemType.IronShovel]: null,
 };
 
 /**

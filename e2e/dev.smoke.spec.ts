@@ -1898,6 +1898,91 @@ test('攒 3 个圆石在工作台造出石镐：快捷栏画石镐的图标与�
   expect(errors).toEqual([]);
 });
 
+test('调试句柄把铁镐放进熔炉、空手挖掉熔炉拾取到选中格：快捷栏画铁镐的图标与中文名，右下角画平面图标，挖石头 8 tick', async ({
+  page,
+}) => {
+  await waitForFullViewDistance(page);
+  // issue #32 的数值：铁镐挖石头 8 tick。直接写字面值，页面这一层也独立核对这个数
+  const stoneTicks = miningTicks(BlockType.Stone, miningToolOf({ item: ItemType.IronPickaxe, count: 1 }));
+  expect(stoneTicks).toBe(8);
+
+  // 核心没有往背包里放物品的入口，铁锭又要等熔炼（#34）才有，所以改用熔炉：调试句柄往眼前那个
+  // 熔炉的原料格放一把铁镐（原料格在游戏里只收可炼物，这里是调试路径），空手挖掉熔炉，里面的
+  // 东西在原位掉出，拾取后进开局选中的第一格。
+  // 整段跑在一次同步的 evaluate 里，渲染层直接调，读到的就是刚画的那一帧。
+  const seen = await page.evaluate(
+    ({ furnace, stone, ironPickaxe, eyeHeight, furnaceTicks, stoneTicks, pickupTicks }) => {
+      const { core, renderer, hud } = window.__VOXEL__!;
+      core.turn(-core.player.yaw, -core.player.pitch);
+      const spot = {
+        x: Math.floor(core.player.position.x),
+        y: Math.floor(core.player.position.y + eyeHeight),
+        z: Math.floor(core.player.position.z) - 1,
+      };
+
+      core.setBlock(spot.x, spot.y, spot.z, furnace);
+      core.blockStateAt(spot.x, spot.y, spot.z)!.input = { item: ironPickaxe, count: 1 };
+      core.tick();
+      const target = core.mining.target;
+      if (!target || target.z !== spot.z) throw new Error('平视时应该对准眼前那个熔炉');
+      core.setMining(true);
+      core.tick(furnaceTicks);
+      core.setMining(false);
+      core.tick(pickupTicks);
+      if (core.inventory.held?.item !== ironPickaxe) throw new Error('拾取的铁镐应该在选中格里');
+
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      const tool = renderer.heldItem;
+
+      // 持铁镐挖眼前那块石头：第 7 tick 还在，第 8 tick 碎
+      core.setBlock(spot.x, spot.y, spot.z, stone);
+      core.tick();
+      core.setMining(true);
+      core.tick(stoneTicks - 1);
+      const standing = core.getBlock(spot.x, spot.y, spot.z) === stone;
+      core.tick(1);
+      const broken = core.getBlock(spot.x, spot.y, spot.z) !== stone;
+      core.setMining(false);
+      core.tick(pickupTicks);
+      hud.update();
+      return { tool, standing, broken, hotbar: core.inventory.hotbar() };
+    },
+    {
+      furnace: BlockType.Furnace,
+      stone: BlockType.Stone,
+      ironPickaxe: ItemType.IronPickaxe,
+      eyeHeight: PLAYER_EYE_HEIGHT,
+      furnaceTicks: miningTicks(BlockType.Furnace, BARE_HAND),
+      stoneTicks,
+      pickupTicks: PICKUP_DELAY_TICKS + 2,
+    },
+  );
+
+  // 右下角画的是铁镐的平面图标
+  expect(seen.tool).toMatchObject({ item: ItemType.IronPickaxe, shape: HeldItemShape.Flat });
+  expect(seen.tool!.screen.x).toBeGreaterThan(0.2);
+  expect(seen.tool!.screen.y).toBeLessThan(-0.2);
+  // 铁镐挖石头 8 tick（石镐 12、木镐 23），挖穿后铁镐损耗 1 点，圆石进第二格
+  expect(seen.standing).toBe(true);
+  expect(seen.broken).toBe(true);
+  expect(seen.hotbar[0]).toEqual({ item: ItemType.IronPickaxe, count: 1, damage: 1 });
+  expect(seen.hotbar[1]).toEqual({ item: ItemType.Cobblestone, count: 1 });
+
+  // 快捷栏第一格：图集里铁镐那一格、简体中文名、损耗 1 点的耐久条
+  const max = TOOL_MATERIALS[ToolMaterial.Iron].durability;
+  const slot = page.locator('#hotbar .hotbar__slot[data-slot="0"]');
+  await expect(slot).toHaveAttribute('data-item', String(ItemType.IronPickaxe));
+  await expect(slot).toHaveAttribute('title', durabilityLabel(ITEM_NAMES[ItemType.IronPickaxe], max - 1, max));
+  await expect(slot.locator('.hotbar__durability')).toHaveCSS('--durability', String((max - 1) / max));
+  const { col, row } = tileCell(ITEM_TILES[ItemType.IronPickaxe].side);
+  const icon = slot.locator('.hotbar__icon');
+  await expect(icon).toBeVisible();
+  await expect(icon).toHaveCSS('--tile-col', String(col));
+  await expect(icon).toHaveCSS('--tile-row', String(row));
+  expect(errors).toEqual([]);
+});
+
 test('贴着墙站着，手上那块方块不会被墙切穿', async ({ page }) => {
   await waitForFullViewDistance(page);
   // 先挖来一块泥土（顺带把东边那一条铺平）

@@ -72,11 +72,11 @@ describe('方块到贴图格号的映射表', () => {
     expect(new Set([off.top, off.side, off.front, lit.front]).size).toBe(4);
   });
 
-  it('图集是 8x8，64 格里现在用了 28 格', () => {
+  it('图集是 8x8，64 格里现在用了 32 格', () => {
     expect(ATLAS_COLS).toBe(8);
     expect(ATLAS_ROWS).toBe(8);
-    expect(Object.keys(TILE)).toHaveLength(28);
-    expect(new Set(Object.values(TILE)).size).toBe(28);
+    expect(Object.keys(TILE)).toHaveLength(32);
+    expect(new Set(Object.values(TILE)).size).toBe(32);
   });
 
   it('两种矿石各自六面同一张，与石头不是同一格（issue #31）', () => {
@@ -119,7 +119,7 @@ describe('物品到贴图格号的映射表', () => {
     }
   });
 
-  it('六件工具各有自己的一格，六面同图', () => {
+  it('九件工具各有自己的一格，六面同图', () => {
     const tools = [
       ItemType.WoodenPickaxe,
       ItemType.WoodenAxe,
@@ -127,9 +127,12 @@ describe('物品到贴图格号的映射表', () => {
       ItemType.StonePickaxe,
       ItemType.StoneAxe,
       ItemType.StoneShovel,
+      ItemType.IronPickaxe,
+      ItemType.IronAxe,
+      ItemType.IronShovel,
     ];
     const icons = tools.map((item) => ITEM_TILES[item]);
-    // 六张互不相同：石镐与木镐是两件物品，图标不能共用一格
+    // 九张互不相同：铁镐、石镐与木镐是三件物品，图标不能共用一格
     expect(new Set(icons.map((tiles) => tiles.side)).size).toBe(tools.length);
     for (const tiles of icons) {
       expect(tiles.top).toBe(tiles.side);
@@ -146,6 +149,15 @@ describe('物品到贴图格号的映射表', () => {
       expect(ITEM_TILES[item]).toEqual({ top: tile, bottom: tile, side: tile });
       expect(tile).not.toBe(ore);
     }
+  });
+
+  it('铁锭有自己的一格图标，六面同图，与粗铁不是同一格（issue #32）', () => {
+    expect(ITEM_TILES[ItemType.IronIngot]).toEqual({
+      top: TILE.ironIngot,
+      bottom: TILE.ironIngot,
+      side: TILE.ironIngot,
+    });
+    expect(TILE.ironIngot).not.toBe(TILE.rawIron);
   });
 
   it('熔炉物品的图标是熄火那个正面，小方块六面与熔炉方块相同', () => {
@@ -239,7 +251,7 @@ describe('手持物品画立方体还是平面图标', () => {
     }
   });
 
-  it('木棍、工具与煤炭、粗铁这类材料没有对应的方块，画平面图标', () => {
+  it('木棍、工具与煤炭、粗铁、铁锭这类材料没有对应的方块，画平面图标', () => {
     for (const item of [
       ItemType.Stick,
       ItemType.WoodenPickaxe,
@@ -248,8 +260,12 @@ describe('手持物品画立方体还是平面图标', () => {
       ItemType.StonePickaxe,
       ItemType.StoneAxe,
       ItemType.StoneShovel,
+      ItemType.IronPickaxe,
+      ItemType.IronAxe,
+      ItemType.IronShovel,
       ItemType.Coal,
       ItemType.RawIron,
+      ItemType.IronIngot,
     ]) {
       expect(heldItemShape(item), `物品 ${item}`).toBe(HeldItemShape.Flat);
     }

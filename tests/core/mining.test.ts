@@ -997,6 +997,75 @@ describe('挖矿石（issue #31）', () => {
   });
 });
 
+describe('铁制工具（issue #32）', () => {
+  /**
+   * issue #32 给的关键数值，直接写字面值：倍率 6，石头 8、矿石 15、原木 10、泥土 3 tick；
+   * 铁铲挖原木不是合格工具，与空手一样 60 tick。满耐久 250。
+   */
+  const IRON_PICKAXE_STONE_TICKS = 8;
+  const IRON_PICKAXE_ORE_TICKS = 15;
+  const IRON_AXE_LOG_TICKS = 10;
+  const IRON_SHOVEL_DIRT_TICKS = 3;
+  const IRON_DURABILITY = 250;
+
+  it('持铁镐挖石头第 7 tick 仍在，第 8 tick 碎、掉 1 个圆石', () => {
+    const { world, mining, spawned } = miningTowards(BlockType.Stone, fresh(ItemType.IronPickaxe));
+    hold(mining, IRON_PICKAXE_STONE_TICKS - 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Stone);
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([{ stack: { item: ItemType.Cobblestone, count: 1 }, at: TARGET }]);
+  });
+
+  it('持铁镐挖铁矿石 15 tick 碎、掉 1 个粗铁：铁档高于石也合格', () => {
+    const { world, mining, spawned, experience } = miningTowards(BlockType.IronOre, fresh(ItemType.IronPickaxe));
+    hold(mining, IRON_PICKAXE_ORE_TICKS - 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.IronOre);
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([{ stack: { item: ItemType.RawIron, count: 1 }, at: TARGET }]);
+    expect(experience).toEqual([{ amount: 120, at: TARGET }]);
+  });
+
+  it('持铁斧挖原木 10 tick', () => {
+    const { world, mining } = miningTowards(BlockType.OakLog, fresh(ItemType.IronAxe));
+    hold(mining, IRON_AXE_LOG_TICKS - 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.OakLog);
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+  });
+
+  it('持铁铲挖泥土 3 tick，挖原木 60 tick：拿错工具与空手一样慢', () => {
+    const dug = miningTowards(BlockType.Dirt, fresh(ItemType.IronShovel));
+    hold(dug.mining, IRON_SHOVEL_DIRT_TICKS - 1);
+    expect(dug.world.getBlock(...TARGET)).toBe(BlockType.Dirt);
+    hold(dug.mining, 1);
+    expect(dug.world.getBlock(...TARGET)).toBe(BlockType.Air);
+
+    const wrong = miningTowards(BlockType.OakLog, fresh(ItemType.IronShovel));
+    hold(wrong.mining, LOG_TICKS - 1);
+    expect(wrong.world.getBlock(...TARGET)).toBe(BlockType.OakLog);
+    hold(wrong.mining, 1);
+    expect(wrong.world.getBlock(...TARGET)).toBe(BlockType.Air);
+  });
+
+  it('铁镐挖 250 块石头后消失：第 249 块之后还剩 1 点，第 250 块挖穿那一 tick 选中格清空', () => {
+    const { world, mining, hand } = miningTowards(BlockType.Stone, fresh(ItemType.IronPickaxe));
+    // 每挖穿一块就在原地再摆一块：一直对着同一格挖
+    for (let dug = 0; dug < IRON_DURABILITY - 1; dug++) {
+      hold(mining, IRON_PICKAXE_STONE_TICKS);
+      expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+      world.setBlock(...TARGET, BlockType.Stone);
+    }
+    expect(hand.held).toEqual(worn(ItemType.IronPickaxe, IRON_DURABILITY - 1));
+
+    hold(mining, IRON_PICKAXE_STONE_TICKS);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(hand.held).toBeUndefined();
+    expect(hand.slot(0)).toBeUndefined();
+  });
+});
+
 describe('持工具连锁挖掘一柱相连的石头（issue #23）', () => {
   /** 一柱 height 块相连的石头，手上拿着 `held`，对准最下面那块。 */
   function miningStoneColumn(

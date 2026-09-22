@@ -22,8 +22,8 @@ import {
 
 describe('物品表里的工具', () => {
   /**
-   * issue #21 的三件木制工具与 issue #23 的三件石制工具：哪一类、哪一档。写死字面值，
-   * 不从 `ITEMS` 反读——改坏数据表这条也照样通过的测试等于没写。
+   * issue #21 的三件木制工具、issue #23 的三件石制工具与 issue #32 的三件铁制工具：哪一类、
+   * 哪一档。写死字面值，不从 `ITEMS` 反读——改坏数据表这条也照样通过的测试等于没写。
    */
   const TOOLS: Array<[string, ItemType, ToolClass, ToolMaterial]> = [
     ['木镐是木档的镐', ItemType.WoodenPickaxe, ToolClass.Pickaxe, ToolMaterial.Wood],
@@ -32,6 +32,9 @@ describe('物品表里的工具', () => {
     ['石镐是石档的镐', ItemType.StonePickaxe, ToolClass.Pickaxe, ToolMaterial.Stone],
     ['石斧是石档的斧', ItemType.StoneAxe, ToolClass.Axe, ToolMaterial.Stone],
     ['石铲是石档的铲', ItemType.StoneShovel, ToolClass.Shovel, ToolMaterial.Stone],
+    ['铁镐是铁档的镐', ItemType.IronPickaxe, ToolClass.Pickaxe, ToolMaterial.Iron],
+    ['铁斧是铁档的斧', ItemType.IronAxe, ToolClass.Axe, ToolMaterial.Iron],
+    ['铁铲是铁档的铲', ItemType.IronShovel, ToolClass.Shovel, ToolMaterial.Iron],
   ];
 
   for (const [name, item, toolClass, material] of TOOLS) {
@@ -66,6 +69,7 @@ describe('物品表里的工具', () => {
       ItemType.Furnace,
       ItemType.Coal,
       ItemType.RawIron,
+      ItemType.IronIngot,
     ]) {
       expect(toolOf(item), `物品 ${item}`).toBeUndefined();
       expect(stackLimit(item)).toBe(DEFAULT_STACK_SIZE);
@@ -95,6 +99,10 @@ describe('材质档的倍率与最大耐久', () => {
     expect(TOOL_MATERIALS[ToolMaterial.Stone]).toEqual({ speed: 4, durability: 131 });
   });
 
+  it('铁档倍率 6、耐久 250：同一张表的铁制那一行（issue #32）', () => {
+    expect(TOOL_MATERIALS[ToolMaterial.Iron]).toEqual({ speed: 6, durability: 250 });
+  });
+
   it('每一档都填了正的倍率与耐久', () => {
     for (const material of Object.values(ToolMaterial)) {
       const def = TOOL_MATERIALS[material];
@@ -116,6 +124,13 @@ describe('材质档的倍率与最大耐久', () => {
     expect(maxDurability(ItemType.StoneAxe)).toBe(131);
     expect(maxDurability(ItemType.StoneShovel)).toBe(131);
     expect(maxDurability(ItemType.Cobblestone)).toBeUndefined();
+  });
+
+  it('三件铁制工具都是 250，铁锭是材料没有耐久', () => {
+    expect(maxDurability(ItemType.IronPickaxe)).toBe(250);
+    expect(maxDurability(ItemType.IronAxe)).toBe(250);
+    expect(maxDurability(ItemType.IronShovel)).toBe(250);
+    expect(maxDurability(ItemType.IronIngot)).toBeUndefined();
   });
 });
 
@@ -160,11 +175,24 @@ describe('手上那一堆在挖掘里算什么工具', () => {
       speed: 4,
     });
   });
+
+  it('铁镐是铁档、倍率 6 的镐，铁铲是铁档、倍率 6 的铲', () => {
+    expect(miningToolOf({ item: ItemType.IronPickaxe, count: 1 })).toEqual({
+      toolClass: ToolClass.Pickaxe,
+      material: ToolMaterial.Iron,
+      speed: 6,
+    });
+    expect(miningToolOf({ item: ItemType.IronShovel, count: 1, damage: 200 })).toEqual({
+      toolClass: ToolClass.Shovel,
+      material: ToolMaterial.Iron,
+      speed: 6,
+    });
+  });
 });
 
-describe('材质档有先后：木 < 石（issue #28）', () => {
+describe('材质档有先后：木 < 石 < 铁（issue #28、#32）', () => {
   it('顺序表从低到高列出每一档，一档一次不多不少', () => {
-    expect(TOOL_MATERIAL_ORDER).toEqual([ToolMaterial.Wood, ToolMaterial.Stone]);
+    expect(TOOL_MATERIAL_ORDER).toEqual([ToolMaterial.Wood, ToolMaterial.Stone, ToolMaterial.Iron]);
     expect([...TOOL_MATERIAL_ORDER].sort()).toEqual(Object.values(ToolMaterial).sort());
   });
 
@@ -172,6 +200,13 @@ describe('材质档有先后：木 < 石（issue #28）', () => {
     expect(materialAtLeast(ToolMaterial.Stone, ToolMaterial.Wood)).toBe(true);
     expect(materialAtLeast(ToolMaterial.Wood, ToolMaterial.Wood)).toBe(true);
     expect(materialAtLeast(ToolMaterial.Wood, ToolMaterial.Stone)).toBe(false);
+  });
+
+  it('铁不低于石也不低于木，石与木都低于铁', () => {
+    expect(materialAtLeast(ToolMaterial.Iron, ToolMaterial.Stone)).toBe(true);
+    expect(materialAtLeast(ToolMaterial.Iron, ToolMaterial.Wood)).toBe(true);
+    expect(materialAtLeast(ToolMaterial.Stone, ToolMaterial.Iron)).toBe(false);
+    expect(materialAtLeast(ToolMaterial.Wood, ToolMaterial.Iron)).toBe(false);
   });
 
   it('每一档都不低于自己，且顺序表上靠后的一档不低于靠前的任何一档', () => {
@@ -213,6 +248,13 @@ describe('耐久是格子里那一堆的状态（ADR-0010）', () => {
     expect(durabilityOf({ ...pickaxe, damage: 130 })).toEqual({ left: 1, max: 131 });
     expect(wornTool(pickaxe, 130)).toEqual({ ...pickaxe, damage: 130 });
     expect(wornTool(pickaxe, 131)).toBeUndefined();
+  });
+
+  it('铁制满耐久 250：铁镐损耗 249 点还剩 1/250，第 250 点才消失', () => {
+    const pickaxe: ItemStack = { item: ItemType.IronPickaxe, count: 1 };
+    expect(durabilityOf(pickaxe)).toEqual({ left: 250, max: 250 });
+    expect(wornTool(pickaxe, 249)).toEqual({ ...pickaxe, damage: 249 });
+    expect(wornTool({ ...pickaxe, damage: 249 }, 1)).toBeUndefined();
   });
 
   it('损耗超过剩余耐久同样是消失，不会出负数', () => {

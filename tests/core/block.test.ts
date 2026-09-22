@@ -25,12 +25,13 @@ import {
 } from '../../src/core/item';
 
 /**
- * 木制与石制两档：材质档加它的挖掘速度倍率，倍率来自 #15 的物品属性表，写死字面值。
+ * 木、石、铁三档：材质档加它的挖掘速度倍率，倍率来自 #15 的物品属性表，写死字面值。
  * 不从 `TOOL_MATERIALS` 反读：这个文件断言的是「某档挖某块要几 tick」，倍率是输入的一部分。
  */
 type MaterialWithSpeed = Pick<MiningTool, 'material' | 'speed'>;
 const WOODEN: MaterialWithSpeed = { material: ToolMaterial.Wood, speed: 2 };
 const STONE: MaterialWithSpeed = { material: ToolMaterial.Stone, speed: 4 };
+const IRON: MaterialWithSpeed = { material: ToolMaterial.Iron, speed: 6 };
 
 /** 手上拿着某一类、某一档的工具。 */
 function tool(toolClass: ToolClass, material: MaterialWithSpeed): MiningTool {
@@ -138,8 +139,17 @@ describe('手持工具时的挖掘耗时', () => {
     ['持石镐挖铁矿石', BlockType.IronOre, tool(ToolClass.Pickaxe, STONE), 23],
     // 铁矿石最低档石：木镐类别对但档不够，按需要工具那一档算，与空手相同
     ['持木镐挖铁矿石', BlockType.IronOre, tool(ToolClass.Pickaxe, WOODEN), 300],
+    // 铁档（issue #32）：倍率 6。石头 1.5 × 30 ÷ 6 = 7.5、熔炉 17.5、泥土 2.5，都向上取整
+    ['持铁镐挖石头', BlockType.Stone, tool(ToolClass.Pickaxe, IRON), 8],
+    ['持铁镐挖煤矿石', BlockType.CoalOre, tool(ToolClass.Pickaxe, IRON), 15],
+    // 铁矿石最低档石：铁档高于石，同样合格
+    ['持铁镐挖铁矿石', BlockType.IronOre, tool(ToolClass.Pickaxe, IRON), 15],
+    ['持铁镐挖熔炉', BlockType.Furnace, tool(ToolClass.Pickaxe, IRON), 18],
+    ['持铁斧挖原木', BlockType.OakLog, tool(ToolClass.Axe, IRON), 10],
+    ['持铁铲挖泥土', BlockType.Dirt, tool(ToolClass.Shovel, IRON), 3],
     // 拿错工具与空手一样慢
     ['持木铲挖原木', BlockType.OakLog, tool(ToolClass.Shovel, WOODEN), 60],
+    ['持铁铲挖原木', BlockType.OakLog, tool(ToolClass.Shovel, IRON), 60],
     ['持木斧挖泥土', BlockType.Dirt, tool(ToolClass.Axe, WOODEN), 15],
     // 需要工具的方块拿错工具仍按「需要工具」那一档算，倍率不起作用
     ['持石斧挖石头', BlockType.Stone, tool(ToolClass.Axe, STONE), 150],
@@ -335,6 +345,15 @@ describe('掉落看手上的工具', () => {
     });
   });
 
+  it('铁档高于石：持铁镐挖铁矿石同样掉 1 个粗铁（issue #32）', () => {
+    expect(blockDrop(BlockType.IronOre, tool(ToolClass.Pickaxe, IRON))).toEqual({
+      item: ItemType.RawIron,
+      count: 1,
+    });
+    // 类别不对，档再高也不合格
+    expect(blockDrop(BlockType.IronOre, tool(ToolClass.Axe, IRON))).toBeNull();
+  });
+
   it('铁矿石最低档石：持木镐挖得动但什么都不掉，持石斧也不掉', () => {
     expect(blockDrop(BlockType.IronOre, tool(ToolClass.Pickaxe, WOODEN))).toBeNull();
     expect(blockDrop(BlockType.IronOre, tool(ToolClass.Axe, STONE))).toBeNull();
@@ -418,6 +437,11 @@ describe('放置表', () => {
     // 煤炭与粗铁只是材料（issue #31），没有对应的方块
     ['煤炭放不下去', ItemType.Coal, null],
     ['粗铁放不下去', ItemType.RawIron, null],
+    // 铁锭只是材料、三件铁制工具与别的工具一样（issue #32）
+    ['铁锭放不下去', ItemType.IronIngot, null],
+    ['铁镐放不下去', ItemType.IronPickaxe, null],
+    ['铁斧放不下去', ItemType.IronAxe, null],
+    ['铁铲放不下去', ItemType.IronShovel, null],
   ];
 
   it('上面这张表覆盖了物品表的每一行：加一种物品就得在这里补一条', () => {
@@ -515,6 +539,7 @@ describe('挖掘耗时看手上的工具', () => {
     ['原木持石斧', BlockType.OakLog, tool(ToolClass.Axe, STONE), 15],
     ['石头持木镐', BlockType.Stone, tool(ToolClass.Pickaxe, WOODEN), 23],
     ['石头持石镐', BlockType.Stone, tool(ToolClass.Pickaxe, STONE), 12],
+    ['石头持铁镐', BlockType.Stone, tool(ToolClass.Pickaxe, IRON), 8],
   ];
 
   for (const [name, block, held, ticks] of TIMINGS) {

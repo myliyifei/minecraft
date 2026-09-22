@@ -28,6 +28,10 @@ export const BlockType = {
    * 共用同一条方块状态。
    */
   LitFurnace: 11,
+  /** 煤矿石（见 CONTEXT.md 的「矿石」，issue #31）：嵌在石层里，持任何镐挖掉后掉煤炭。 */
+  CoalOre: 12,
+  /** 铁矿石（issue #31）：最低材质档石，持木镐挖得动但什么都不掉。 */
+  IronOre: 13,
 } as const;
 
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
@@ -87,8 +91,8 @@ export interface BlockDef {
    * 类别对但档不够视同没有合格工具——需要工具的方块按每点硬度 100 tick 且什么都不掉，
    * 不需要工具的方块按倍率 1。
    *
-   * 现有方块全部为木，所以任何镐、斧、铲在它们上面都合格；铁矿石（第三切片）要石。没有合格工具
-   * 的方块（树叶）与不是挖掘目标的方块（空气、基岩）也填木，只是占位。
+   * 铁矿石记石：持木镐挖它挖得动，但按没有合格工具算。其余方块全部为木，任何镐、斧、铲在它们上面
+   * 都合格。没有合格工具的方块（树叶）与不是挖掘目标的方块（空气、基岩）也填木，只是占位。
    */
   readonly minimumMaterial: ToolMaterial;
   /**
@@ -107,8 +111,8 @@ export interface BlockDef {
    * 挖掉它生成的经验球给几点经验值（见 CONTEXT.md 的「经验球」），0 表示不生成经验球。
    *
    * 与 `drop` 是两列，不是一列：任何挖得动的方块都给经验，掉落却可能是空的——空手挖
-   * 石头什么都拿不到，经验照给 30 点。矿石那几档（煤 90 到钻石 240）见
-   * docs/design-decisions.md，等有矿石了往这里加行。
+   * 石头什么都拿不到，经验照给 30 点。矿石各有自己的档（煤 90、铁 120，整张表见
+   * docs/design-decisions.md）。
    */
   readonly experience: number;
   /**
@@ -155,6 +159,27 @@ const FURNACE: BlockDef = {
   use: BlockUse.None,
   state: BlockStateKind.Furnace,
 };
+
+/**
+ * 一种矿石（见 CONTEXT.md 的「矿石」，issue #31）那一行：石制、硬度 3、要镐、需要工具。
+ * 两种矿石只差最低材质档、掉什么、给几点经验，其余写两遍就是两处可能对不上。
+ *
+ * 硬度 3 是石头的两倍：持木镐 45 tick、石镐 23 tick，比挖石头慢但仍在一两秒内。
+ */
+function ore(minimumMaterial: ToolMaterial, drop: ItemType, experience: number): BlockDef {
+  return {
+    opaque: true,
+    solid: true,
+    hardness: 3,
+    qualifiedToolClass: ToolClass.Pickaxe,
+    minimumMaterial,
+    requiresTool: true,
+    drop: one(drop),
+    experience,
+    use: BlockUse.None,
+    state: BlockStateKind.None,
+  };
+}
 
 /** 方块属性表——纯数据。加方块只加一行。 */
 export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
@@ -296,6 +321,10 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
   },
   [BlockType.Furnace]: FURNACE,
   [BlockType.LitFurnace]: FURNACE,
+  // 煤矿石：木镐就合格，掉煤炭，经验是普通方块的三倍。
+  [BlockType.CoalOre]: ore(ToolMaterial.Wood, ItemType.Coal, 90),
+  // 铁矿石：最低档石，持木镐挖得动却什么都不掉（`dropFor`），持石镐掉粗铁。
+  [BlockType.IronOre]: ore(ToolMaterial.Stone, ItemType.RawIron, 120),
 };
 
 export function isAir(block: BlockType): boolean {
@@ -354,8 +383,8 @@ function isQualifiedTool(def: BlockDef, tool: MiningTool): boolean {
  * 拿铲挖原木与空手一样慢，拿木镐挖最低档为石的方块也一样慢。需要工具的方块在没有合格工具时另走
  * 一档（每点硬度 100 tick），这条优先于倍率：拿着石斧挖石头仍是 150 tick。
  *
- * 接一份定义而不是方块种类，是让测试拿一份改了最低档的定义验证材质档门槛——方块表里现在没有
- * 一行最低档高于木。游戏里走的是 `miningTicks`。
+ * 接一份定义而不是方块种类，是让测试拿一份改了最低档的定义验证材质档门槛，不必依赖方块表里
+ * 恰好有铁矿石那一行。游戏里走的是 `miningTicks`。
  */
 export function miningTicksFor(def: BlockDef, tool: MiningTool): number {
   const qualified = isQualifiedTool(def, tool);
@@ -445,6 +474,9 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   [ItemType.StoneShovel]: null,
   // 放置永远是熄火那个编号：燃烧中的熔炉没有对应的物品，它挖掉也掉这一种。
   [ItemType.Furnace]: BlockType.Furnace,
+  // 煤炭与粗铁只是材料：矿石挖掉不掉矿石方块本身，所以它们没有对应的方块。
+  [ItemType.Coal]: null,
+  [ItemType.RawIron]: null,
 };
 
 /**

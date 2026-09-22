@@ -65,6 +65,57 @@ const FURNACE_BODY = [108, 108, 108];
 const FURNACE_MOUTH = [28, 28, 28];
 const FIRE = [232, 118, 22];
 const FIRE_BRIGHT = [252, 208, 64];
+/** 矿点的颜色：煤近黑，铁是浅棕；物品图标上再各配一个亮面。 */
+const COAL = [34, 34, 38];
+const COAL_SHINE = [78, 78, 84];
+const IRON_RAW = [196, 158, 122];
+const IRON_SHINE = [228, 198, 166];
+
+/**
+ * 矿石贴图上矿点落在哪些像素：每格 8 个矿点，各是一个 2×2 的方块加一个突出的角，位置写死，
+ * 让矿点分散在整格里而不是集中在一处。两种矿石共用同一份布局，只是颜色不同——煤点与铁点位于
+ * 同样的位置，玩家凭颜色就能分辨。
+ */
+const ORE_SPECKS = [
+  [2, 2],
+  [9, 1],
+  [12, 5],
+  [4, 7],
+  [1, 11],
+  [8, 9],
+  [13, 12],
+  [6, 13],
+];
+
+/** 这一像素落在矿点上吗。 */
+function onSpeck(x, y) {
+  return ORE_SPECKS.some(
+    ([sx, sy]) =>
+      (x >= sx && x <= sx + 1 && y >= sy && y <= sy + 1) || (x === sx + 2 && y === sy + 1),
+  );
+}
+
+/** 一种矿石的贴图：以石头贴图为底，矿点用矿的颜色。 */
+function oreTile(color) {
+  return (x, y, rand) => {
+    if (onSpeck(x, y)) return shade(color, Math.floor(rand() * 14) - 7);
+    return TILES[3](x, y, rand);
+  };
+}
+
+/**
+ * 矿物物品的图标：透明底上一块不规则的矿块，左上一小片亮面。矿块的轮廓是 16 格里一块
+ * 居中的八边形，与工具图标一样留出四周的透明边。
+ */
+function lumpIcon(color, shine) {
+  return (x, y, rand) => {
+    const inside = x >= 3 && x <= 12 && y >= 3 && y <= 12 && x + y >= 8 && x + y <= 22 && x - y <= 7 && y - x <= 7;
+    if (!inside) return [0, 0, 0, 0];
+    const lit = x >= 5 && x <= 7 && y >= 4 && y <= 6;
+    const dark = x === 12 || y === 12 || x + y === 22;
+    return shade(lit ? shine : color, (dark ? -16 : 0) + Math.floor(rand() * 16) - 8);
+  };
+}
 
 /**
  * 熔炉正面炉口的范围：横向居中 6 格宽，竖向从第 4 行到第 12 行。
@@ -262,6 +313,12 @@ const TILES = {
     }
     return TILES[22](x, y, rand);
   },
+  // coal_ore、iron_ore：以石头贴图为底加矿点，煤近黑、铁浅棕
+  24: oreTile(COAL),
+  25: oreTile(IRON_RAW),
+  // coal、raw_iron：两种矿物的物品图标，一块矿块
+  26: lumpIcon(COAL, COAL_SHINE),
+  27: lumpIcon(IRON_RAW, IRON_SHINE),
 };
 
 /** 这一像素落在熔炉正面的炉口里吗。 */

@@ -59,6 +59,9 @@ const HAND_MINING: Array<[string, BlockType, number, number]> = [
   // 熔炉要镐（issue #30），硬度 3.5；燃烧中的那个编号与它同一行数据
   ['熔炉', BlockType.Furnace, 3.5, 350],
   ['燃烧中的熔炉', BlockType.LitFurnace, 3.5, 350],
+  // 两种矿石要镐（issue #31），硬度 3；空手按每点硬度 100 tick
+  ['煤矿石', BlockType.CoalOre, 3, 300],
+  ['铁矿石', BlockType.IronOre, 3, 300],
 ];
 
 describe('方块的硬度表', () => {
@@ -95,12 +98,14 @@ describe('方块的硬度表', () => {
     expect(isBreakable(BlockType.OakLeaves)).toBe(true);
   });
 
-  it('石头、圆石与两个编号的熔炉需要工具', () => {
+  it('石头、圆石、两个编号的熔炉与两种矿石需要工具', () => {
     const needsTool = new Set<BlockType>([
       BlockType.Stone,
       BlockType.Cobblestone,
       BlockType.Furnace,
       BlockType.LitFurnace,
+      BlockType.CoalOre,
+      BlockType.IronOre,
     ]);
     for (const block of Object.values(BlockType)) {
       expect(BLOCKS[block].requiresTool, `方块 ${block}`).toBe(needsTool.has(block));
@@ -127,6 +132,12 @@ describe('手持工具时的挖掘耗时', () => {
     // 熔炉要镐：持木斧按需要工具那一档算，与空手相同
     ['持木斧挖熔炉', BlockType.Furnace, tool(ToolClass.Axe, WOODEN), 350],
     ['持石斧挖原木', BlockType.OakLog, tool(ToolClass.Axe, STONE), 15],
+    // 矿石（issue #31）：硬度 3 × 30 ÷ 2 = 45，÷ 4 = 22.5 向上取整
+    ['持木镐挖煤矿石', BlockType.CoalOre, tool(ToolClass.Pickaxe, WOODEN), 45],
+    ['持石镐挖煤矿石', BlockType.CoalOre, tool(ToolClass.Pickaxe, STONE), 23],
+    ['持石镐挖铁矿石', BlockType.IronOre, tool(ToolClass.Pickaxe, STONE), 23],
+    // 铁矿石最低档石：木镐类别对但档不够，按需要工具那一档算，与空手相同
+    ['持木镐挖铁矿石', BlockType.IronOre, tool(ToolClass.Pickaxe, WOODEN), 300],
     // 拿错工具与空手一样慢
     ['持木铲挖原木', BlockType.OakLog, tool(ToolClass.Shovel, WOODEN), 60],
     ['持木斧挖泥土', BlockType.Dirt, tool(ToolClass.Axe, WOODEN), 15],
@@ -154,6 +165,8 @@ describe('方块表的合格工具类别一列', () => {
     ['泥土', BlockType.Dirt, ToolClass.Shovel],
     ['石头', BlockType.Stone, ToolClass.Pickaxe],
     ['圆石', BlockType.Cobblestone, ToolClass.Pickaxe],
+    ['煤矿石', BlockType.CoalOre, ToolClass.Pickaxe],
+    ['铁矿石', BlockType.IronOre, ToolClass.Pickaxe],
     ['原木', BlockType.OakLog, ToolClass.Axe],
     ['木板', BlockType.OakPlanks, ToolClass.Axe],
     ['工作台', BlockType.CraftingTable, ToolClass.Axe],
@@ -177,9 +190,11 @@ describe('方块表的合格工具类别一列', () => {
 });
 
 describe('方块表的最低材质档一列（issue #28）', () => {
-  it('现有方块全部为木：任何镐、斧、铲在它们上面都合格', () => {
+  it('只有铁矿石记石，其余方块全部为木：任何镐、斧、铲在它们上面都合格', () => {
     for (const block of Object.values(BlockType)) {
-      expect(BLOCKS[block].minimumMaterial, `方块 ${block}`).toBe(ToolMaterial.Wood);
+      expect(BLOCKS[block].minimumMaterial, `方块 ${block}`).toBe(
+        block === BlockType.IronOre ? ToolMaterial.Stone : ToolMaterial.Wood,
+      );
     }
   });
 
@@ -247,6 +262,8 @@ describe('空手挖掘的掉落表', () => {
     ['空手挖圆石什么都不掉', BlockType.Cobblestone, null],
     ['空手挖熔炉什么都不掉', BlockType.Furnace, null],
     ['空手挖燃烧中的熔炉什么都不掉', BlockType.LitFurnace, null],
+    ['空手挖煤矿石什么都不掉', BlockType.CoalOre, null],
+    ['空手挖铁矿石什么都不掉', BlockType.IronOre, null],
     ['基岩什么都不掉', BlockType.Bedrock, null],
   ];
 
@@ -307,6 +324,24 @@ describe('掉落看手上的工具', () => {
     expect(blockDrop(BlockType.LitFurnace, tool(ToolClass.Pickaxe, WOODEN))).toEqual(furnace);
   });
 
+  it('持木镐挖煤矿石掉 1 个煤炭，持石镐挖铁矿石掉 1 个粗铁（issue #31）', () => {
+    expect(blockDrop(BlockType.CoalOre, tool(ToolClass.Pickaxe, WOODEN))).toEqual({
+      item: ItemType.Coal,
+      count: 1,
+    });
+    expect(blockDrop(BlockType.IronOre, tool(ToolClass.Pickaxe, STONE))).toEqual({
+      item: ItemType.RawIron,
+      count: 1,
+    });
+  });
+
+  it('铁矿石最低档石：持木镐挖得动但什么都不掉，持石斧也不掉', () => {
+    expect(blockDrop(BlockType.IronOre, tool(ToolClass.Pickaxe, WOODEN))).toBeNull();
+    expect(blockDrop(BlockType.IronOre, tool(ToolClass.Axe, STONE))).toBeNull();
+    // 煤矿石最低档木：木镐就合格
+    expect(blockDrop(BlockType.CoalOre, tool(ToolClass.Pickaxe, WOODEN))).not.toBeNull();
+  });
+
   it('草方块持镐挖照样掉泥土：镐不是它的合格工具，也不影响掉落', () => {
     expect(blockDrop(BlockType.Grass, tool(ToolClass.Pickaxe, WOODEN))).toEqual({
       item: ItemType.Dirt,
@@ -317,9 +352,8 @@ describe('掉落看手上的工具', () => {
 
 describe('挖掉一块给多少经验', () => {
   /**
-   * issue #26 给的经验表（#9 的数值乘 10）：普通方块 30、原木 60。同样写死字面值，不从
-   * `BLOCKS` 反读。矿石那几档（煤 90 到钻石 240，见 docs/design-decisions.md）等有矿石了
-   * 再往这里加行。
+   * issue #26 给的经验表（#9 的数值乘 10）：普通方块 30、原木 60；矿石那几档见
+   * docs/design-decisions.md，煤 90、铁 120（issue #31）。同样写死字面值，不从 `BLOCKS` 反读。
    */
   const EXPERIENCE: Array<[string, BlockType, number]> = [
     ['草方块', BlockType.Grass, 30],
@@ -330,6 +364,8 @@ describe('挖掉一块给多少经验', () => {
     ['木板', BlockType.OakPlanks, 30],
     ['工作台', BlockType.CraftingTable, 30],
     ['原木', BlockType.OakLog, 60],
+    ['煤矿石', BlockType.CoalOre, 90],
+    ['铁矿石', BlockType.IronOre, 120],
   ];
 
   for (const [name, block, amount] of EXPERIENCE) {
@@ -379,6 +415,9 @@ describe('放置表', () => {
     ['石镐放不下去', ItemType.StonePickaxe, null],
     ['石斧放不下去', ItemType.StoneAxe, null],
     ['石铲放不下去', ItemType.StoneShovel, null],
+    // 煤炭与粗铁只是材料（issue #31），没有对应的方块
+    ['煤炭放不下去', ItemType.Coal, null],
+    ['粗铁放不下去', ItemType.RawIron, null],
   ];
 
   it('上面这张表覆盖了物品表的每一行：加一种物品就得在这里补一条', () => {

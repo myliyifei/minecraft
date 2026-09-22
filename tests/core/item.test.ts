@@ -64,6 +64,8 @@ describe('物品表里的工具', () => {
       ItemType.Stick,
       ItemType.Cobblestone,
       ItemType.Furnace,
+      ItemType.Coal,
+      ItemType.RawIron,
     ]) {
       expect(toolOf(item), `物品 ${item}`).toBeUndefined();
       expect(stackLimit(item)).toBe(DEFAULT_STACK_SIZE);

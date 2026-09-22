@@ -72,11 +72,23 @@ describe('方块到贴图格号的映射表', () => {
     expect(new Set([off.top, off.side, off.front, lit.front]).size).toBe(4);
   });
 
-  it('图集是 8x8，64 格里现在用了 24 格', () => {
+  it('图集是 8x8，64 格里现在用了 28 格', () => {
     expect(ATLAS_COLS).toBe(8);
     expect(ATLAS_ROWS).toBe(8);
-    expect(Object.keys(TILE)).toHaveLength(24);
-    expect(new Set(Object.values(TILE)).size).toBe(24);
+    expect(Object.keys(TILE)).toHaveLength(28);
+    expect(new Set(Object.values(TILE)).size).toBe(28);
+  });
+
+  it('两种矿石各自六面同一张，与石头不是同一格（issue #31）', () => {
+    for (const [block, tile] of [
+      [BlockType.CoalOre, TILE.coalOre],
+      [BlockType.IronOre, TILE.ironOre],
+    ] as const) {
+      const tiles = BLOCK_TILES[block]!;
+      expect(tiles).toEqual({ top: tile, bottom: tile, side: tile });
+      expect(tile).not.toBe(TILE.stone);
+    }
+    expect(TILE.coalOre).not.toBe(TILE.ironOre);
   });
 
   it('不同格的 uv 矩形互不重叠，且都在 [0, 1] 内', () => {
@@ -123,6 +135,16 @@ describe('物品到贴图格号的映射表', () => {
       expect(tiles.top).toBe(tiles.side);
       expect(tiles.bottom).toBe(tiles.side);
       expect(faceTile(tiles, 'front')).toBe(tiles.side);
+    }
+  });
+
+  it('煤炭与粗铁各有自己的一格图标，六面同图，与矿石方块那一格不同', () => {
+    for (const [item, tile, ore] of [
+      [ItemType.Coal, TILE.coal, TILE.coalOre],
+      [ItemType.RawIron, TILE.rawIron, TILE.ironOre],
+    ] as const) {
+      expect(ITEM_TILES[item]).toEqual({ top: tile, bottom: tile, side: tile });
+      expect(tile).not.toBe(ore);
     }
   });
 
@@ -217,7 +239,7 @@ describe('手持物品画立方体还是平面图标', () => {
     }
   });
 
-  it('木棍与工具没有对应的方块，画平面图标', () => {
+  it('木棍、工具与煤炭、粗铁这类材料没有对应的方块，画平面图标', () => {
     for (const item of [
       ItemType.Stick,
       ItemType.WoodenPickaxe,
@@ -226,6 +248,8 @@ describe('手持物品画立方体还是平面图标', () => {
       ItemType.StonePickaxe,
       ItemType.StoneAxe,
       ItemType.StoneShovel,
+      ItemType.Coal,
+      ItemType.RawIron,
     ]) {
       expect(heldItemShape(item), `物品 ${item}`).toBe(HeldItemShape.Flat);
     }

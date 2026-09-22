@@ -2657,6 +2657,69 @@ test('调试句柄放一块熔炉在玩家面前：画布上正面是熄火那�
   expect(errors).toEqual([]);
 });
 
+test('调试句柄放一块煤矿石在玩家面前：画布上那一块用的是煤矿石那一格，持木镐挖穿后快捷栏出现煤炭的图标与中文名', async ({
+  page,
+}) => {
+  await waitForFullViewDistance(page);
+  const at = await craftPickaxeIntoHand(page);
+
+  // 整段跑在一次同步的 evaluate 里。玩家站在造镐留下的坑里，眼前那一格摆煤矿石；先读一次送上显卡
+  // 的网格用到了哪些贴图格号（那是「画的是哪一格」的直接证据），再持木镐挖穿它、拾起煤炭。
+  const seen = await page.evaluate(
+    ({ x, eyeY, z, coalOre, coalTicks, pickupTicks, chunkSize }) => {
+      const { core, renderer, hud } = window.__VOXEL__!;
+      const spot = { x, y: eyeY, z: z - 1 };
+      const cx = Math.floor(spot.x / chunkSize);
+      const cz = Math.floor(spot.z / chunkSize);
+      core.turn(-core.player.yaw, -core.player.pitch);
+      core.tick();
+      renderer.syncChunkMeshes();
+      const before = renderer.chunkMeshTiles(cx, cz);
+
+      core.setBlock(spot.x, spot.y, spot.z, coalOre);
+      core.tick();
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      const placed = { block: core.getBlock(spot.x, spot.y, spot.z), tiles: renderer.chunkMeshTiles(cx, cz) };
+
+      const target = core.mining.target;
+      if (!target || target.z !== spot.z) throw new Error('平视时应该对准眼前那块煤矿石');
+      core.setMining(true);
+      core.tick(coalTicks);
+      core.setMining(false);
+      core.tick(pickupTicks);
+      hud.update();
+      return { before, placed, after: core.getBlock(spot.x, spot.y, spot.z), hotbar: core.inventory.hotbar() };
+    },
+    {
+      ...at,
+      coalOre: BlockType.CoalOre,
+      coalTicks: miningTicks(BlockType.CoalOre, miningToolOf({ item: ItemType.WoodenPickaxe, count: 1 })),
+      pickupTicks: PICKUP_DELAY_TICKS + 2,
+      chunkSize: CHUNK_SIZE,
+    },
+  );
+  // 摆上之前这个区块的网格里没有煤矿石那一格（天然矿石埋在泥土之下，没有露出的面），摆上之后有
+  expect(seen.before).not.toContain(TILE.coalOre);
+  expect(seen.placed.block).toBe(BlockType.CoalOre);
+  expect(seen.placed.tiles).toContain(TILE.coalOre);
+  // 挖穿了：那一格空了，煤炭进第二格，木镐损耗 1 点
+  expect(seen.after).toBe(BlockType.Air);
+  expect(seen.hotbar[0]).toEqual({ item: ItemType.WoodenPickaxe, count: 1, damage: 1 });
+  expect(seen.hotbar[1]).toEqual({ item: ItemType.Coal, count: 1 });
+
+  // 快捷栏第二格画的是煤炭的图标，提示是简体中文名
+  const slot = page.locator('#hotbar .hotbar__slot[data-slot="1"]');
+  await expect(slot).toHaveAttribute('data-item', String(ItemType.Coal));
+  await expect(slot).toHaveAttribute('title', ITEM_NAMES[ItemType.Coal]);
+  const { col, row } = tileCell(ITEM_TILES[ItemType.Coal].side);
+  const icon = slot.locator('.hotbar__icon');
+  await expect(icon).toBeVisible();
+  await expect(icon).toHaveCSS('--tile-col', String(col));
+  await expect(icon).toHaveCSS('--tile-row', String(row));
+  expect(errors).toEqual([]);
+});
+
 test('核心以固定步长推进', async ({ page }) => {
   const before = await page.evaluate(() => window.__VOXEL__!.core.tickCount);
   await page.waitForTimeout(1000);

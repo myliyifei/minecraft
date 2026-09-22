@@ -914,6 +914,89 @@ describe('手持工具挖穿方块损耗耐久', () => {
   });
 });
 
+describe('挖矿石（issue #31）', () => {
+  /**
+   * issue #31 给的耗时与掉落。写死字面值：持木镐挖煤矿石 45 tick，持石镐挖铁矿石 23 tick，
+   * 持木镐挖铁矿石按需要工具那一档 300 tick。
+   */
+  const WOODEN_PICKAXE_COAL_TICKS = 45;
+  const STONE_PICKAXE_IRON_TICKS = 23;
+  const UNQUALIFIED_ORE_TICKS = 300;
+
+  it('持木镐挖煤矿石 45 tick 碎：掉 1 个煤炭、给 90 经验', () => {
+    const { world, mining, spawned, experience } = miningTowards(BlockType.CoalOre, fresh(ItemType.WoodenPickaxe));
+
+    hold(mining, WOODEN_PICKAXE_COAL_TICKS - 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.CoalOre);
+    hold(mining, 1);
+
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([{ stack: { item: ItemType.Coal, count: 1 }, at: TARGET }]);
+    expect(experience).toEqual([{ amount: 90, at: TARGET }]);
+  });
+
+  it('持石镐挖铁矿石 23 tick 碎：掉 1 个粗铁、给 120 经验', () => {
+    const { world, mining, spawned, experience } = miningTowards(BlockType.IronOre, fresh(ItemType.StonePickaxe));
+
+    hold(mining, STONE_PICKAXE_IRON_TICKS - 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.IronOre);
+    hold(mining, 1);
+
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([{ stack: { item: ItemType.RawIron, count: 1 }, at: TARGET }]);
+    expect(experience).toEqual([{ amount: 120, at: TARGET }]);
+  });
+
+  it('持木镐挖铁矿石：300 tick 才碎，什么都不掉，经验照给，木镐照样损耗 1 点', () => {
+    const { world, mining, hand, spawned, experience } = miningTowards(BlockType.IronOre, fresh(ItemType.WoodenPickaxe));
+
+    hold(mining, UNQUALIFIED_ORE_TICKS - 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.IronOre);
+    hold(mining, 1);
+
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([]);
+    expect(experience).toEqual([{ amount: 120, at: TARGET }]);
+    expect(hand.held).toEqual(worn(ItemType.WoodenPickaxe, 1));
+  });
+
+  it('空手挖两种矿石都是 300 tick、什么都不掉', () => {
+    for (const block of [BlockType.CoalOre, BlockType.IronOre]) {
+      const { world, mining, spawned } = miningTowards(block);
+      hold(mining, UNQUALIFIED_ORE_TICKS - 1);
+      expect(world.getBlock(...TARGET), `方块 ${block}`).toBe(block);
+      hold(mining, 1);
+      expect(world.getBlock(...TARGET), `方块 ${block}`).toBe(BlockType.Air);
+      expect(spawned, `方块 ${block}`).toEqual([]);
+    }
+  });
+
+  it('持石镐连锁挖一团 5 块铁矿石：掉 5 个粗铁、给 5 份经验、石镐损耗 5 点', () => {
+    // 一团：目标那一格加上它前后左右与上面那一格，26 向连通
+    const cluster: BlockCoord[] = [
+      TARGET,
+      [TARGET[0] + 1, TARGET[1], TARGET[2]],
+      [TARGET[0] + 1, TARGET[1] + 1, TARGET[2]],
+      [TARGET[0], TARGET[1], TARGET[2] + 1],
+      [TARGET[0] + 2, TARGET[1] + 1, TARGET[2] + 1],
+    ];
+    const world = worldWith(...cluster.map((cell) => [cell, BlockType.IronOre] as [BlockCoord, BlockType]));
+    const drops = dropLog();
+    const xp = xpLog();
+    const hand = handHolding(fresh(ItemType.StonePickaxe));
+    const mining = new Mining(world, turntable().aim, hand, drops.sink, xp.sink);
+
+    hold(mining, STONE_PICKAXE_IRON_TICKS, CHAINED);
+
+    expect(remaining(world, cluster)).toEqual([]);
+    const rawIron = drops.spawned.filter(({ stack }) => stack.item === ItemType.RawIron && stack.count === 1);
+    expect(rawIron).toHaveLength(5);
+    expect(rawIron.map(({ at }) => at).sort()).toEqual([...cluster].sort());
+    expect(xp.spawned.map(({ amount }) => amount)).toEqual([120, 120, 120, 120, 120]);
+    expect(hand.held).toEqual(worn(ItemType.StonePickaxe, 5));
+  });
+});
+
 describe('持工具连锁挖掘一柱相连的石头（issue #23）', () => {
   /** 一柱 height 块相连的石头，手上拿着 `held`，对准最下面那块。 */
   function miningStoneColumn(

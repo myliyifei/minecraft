@@ -19,6 +19,10 @@ export const ItemType = {
   StoneAxe: 11,
   StoneShovel: 12,
   Furnace: 13,
+  /** 煤矿石掉的材料（issue #31）：可堆叠，放不下去，第三切片里是熔炉的燃料。 */
+  Coal: 14,
+  /** 铁矿石掉的材料（issue #31）：可堆叠，放不下去，熔炉里炼成铁锭。 */
+  RawIron: 15,
 } as const;
 
 export type ItemType = (typeof ItemType)[keyof typeof ItemType];
@@ -189,6 +193,8 @@ export const ITEMS: Readonly<Record<ItemType, ItemDef>> = {
   [ItemType.StoneAxe]: tool(ToolClass.Axe, ToolMaterial.Stone),
   [ItemType.StoneShovel]: tool(ToolClass.Shovel, ToolMaterial.Stone),
   [ItemType.Furnace]: STACKABLE,
+  [ItemType.Coal]: STACKABLE,
+  [ItemType.RawIron]: STACKABLE,
 };
 
 /** 这种物品一格最多堆多少个。 */

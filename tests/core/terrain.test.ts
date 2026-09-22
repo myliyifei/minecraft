@@ -18,6 +18,16 @@ import {
 } from '../../src/core/terrain';
 import { ABOVE_SURFACE } from '../helpers/above-surface';
 
+/**
+ * 石层里可能出现的方块：石头，以及嵌在石头里的两种矿石（issue #31）。
+ * 矿脉的形状与分布断言在 tests/core/ore.test.ts，这里只确认石层除了石头就只有矿石。
+ */
+const STONE_LAYER: ReadonlySet<BlockType> = new Set([
+  BlockType.Stone,
+  BlockType.CoalOre,
+  BlockType.IronOre,
+]);
+
 // 两个与 DEFAULT_SEED 无关的种子：地形的性质不该只在默认种子下成立。
 const SEED = 314_159;
 const OTHER_SEED = 777;
@@ -130,7 +140,7 @@ describe('plainsTerrain 生成的区块', () => {
     expect(firstDifference(generate(0, 0), generate(1, 0))).not.toBeNull();
   });
 
-  it('每一列自上而下是 草 → 泥土（3–4 层）→ 石头', () => {
+  it('每一列自上而下是 草 → 泥土（3–4 层）→ 石层', () => {
     const chunk = generate(-2, 4);
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
@@ -140,7 +150,8 @@ describe('plainsTerrain 生成的区块', () => {
         const dirt = dirtDepthBelow(chunk, lx, surface, lz);
         expect(dirt).toBeGreaterThanOrEqual(DIRT_DEPTH_MIN);
         expect(dirt).toBeLessThanOrEqual(DIRT_DEPTH_MAX);
-        expect(chunk.get(lx, surface - dirt - 1, lz)).toBe(BlockType.Stone);
+        // 泥土之下就是石层：大多数是石头，煤矿脉伸到这么高时也可能是煤矿石
+        expect(STONE_LAYER).toContain(chunk.get(lx, surface - dirt - 1, lz));
       }
     }
   });
@@ -156,15 +167,48 @@ describe('plainsTerrain 生成的区块', () => {
     expect([...depths].sort()).toEqual([DIRT_DEPTH_MIN, DIRT_DEPTH_MAX]);
   });
 
-  it('石头一直铺到基岩之上', () => {
+  it('石层一直铺到基岩之上：除石头只有矿石', () => {
     const chunk = generate(3, -7);
+    const strays: string[] = [];
+    let stone = 0;
     for (const y of [WORLD_MIN_Y + 1, -32, 0, 32]) {
-      for (let lx = 0; lx < CHUNK_SIZE; lx += 5) {
-        for (let lz = 0; lz < CHUNK_SIZE; lz += 5) {
-          expect(chunk.get(lx, y, lz)).toBe(BlockType.Stone);
+      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+          const block = chunk.get(lx, y, lz);
+          if (block === BlockType.Stone) stone++;
+          if (!STONE_LAYER.has(block)) strays.push(`(${lx}, ${y}, ${lz}) 是 ${block}`);
         }
       }
     }
+    expect(strays).toEqual([]);
+    // 矿石只是石层里的少数：四层一千多格里绝大多数仍是石头
+    expect(stone).toBeGreaterThan(4 * CHUNK_SIZE * CHUNK_SIZE * 0.9);
+  });
+
+  it('石层里嵌着煤矿石与铁矿石，煤偏浅、铁偏深', () => {
+    // 密度是一区块几十条，扫几个区块两种都找得到。矿脉的形状与分布断言在 tests/core/ore.test.ts。
+    const coalYs: number[] = [];
+    const ironYs: number[] = [];
+    for (let cx = 0; cx < 2; cx++) {
+      for (let cz = 0; cz < 2; cz++) {
+        const chunk = generate(cx, cz);
+        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+          for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+            for (let y = WORLD_MIN_Y; y <= MIN_SURFACE_Y; y++) {
+              const block = chunk.get(lx, y, lz);
+              if (block === BlockType.CoalOre) coalYs.push(y);
+              if (block === BlockType.IronOre) ironYs.push(y);
+            }
+          }
+        }
+      }
+    }
+    expect(coalYs.length).toBeGreaterThan(0);
+    expect(ironYs.length).toBeGreaterThan(0);
+    expect(Math.min(...coalYs)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...coalYs)).toBeLessThanOrEqual(64);
+    expect(Math.min(...ironYs)).toBeGreaterThanOrEqual(-63);
+    expect(Math.max(...ironYs)).toBeLessThanOrEqual(32);
   });
 
   it('y = −64 整层是基岩', () => {

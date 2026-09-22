@@ -2,7 +2,7 @@ import { BlockType, placedBlock } from '../core/block';
 import { ItemType } from '../core/item';
 
 /**
- * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 8 行，目前用了前 24 格。
+ * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 8 行，目前用了前 28 格。
  *
  * 行列数都取 2 的幂：uv 是格号除以行列数，除以 8 在 float32 里是精确的，除以 5 就不是
  * ——顶点属性存的是 Float32Array，1/5 一进去就带上舍入误差，一个面的边缘会取到相邻那一格的像素。
@@ -42,6 +42,10 @@ export const TILE = {
   furnaceSide: 21,
   furnaceFront: 22,
   litFurnaceFront: 23,
+  coalOre: 24,
+  ironOre: 25,
+  coal: 26,
+  rawIron: 27,
 } as const;
 
 /**
@@ -95,6 +99,11 @@ const FURNACE_TILES: FaceTiles = {
 
 const LIT_FURNACE_TILES: FaceTiles = { ...FURNACE_TILES, front: TILE.litFurnaceFront };
 
+/** 六面同一张图的方块（矿石）与物品（木棍、工具、材料）在两张表里那一行。 */
+function flat(tile: number): FaceTiles {
+  return { top: tile, bottom: tile, side: tile };
+}
+
 /**
  * 方块到贴图格号的映射——纯数据。后续切片加方块只往这张表加行。
  * 空气没有贴图。
@@ -120,12 +129,10 @@ export const BLOCK_TILES: Readonly<Record<BlockType, FaceTiles | null>> = {
   [BlockType.Cobblestone]: COBBLESTONE_TILES,
   [BlockType.Furnace]: FURNACE_TILES,
   [BlockType.LitFurnace]: LIT_FURNACE_TILES,
+  // 矿石：以石头贴图为底加矿点，六面同一张。
+  [BlockType.CoalOre]: flat(TILE.coalOre),
+  [BlockType.IronOre]: flat(TILE.ironOre),
 };
-
-/** 六面同一张图标的物品（木棍、工具）在 `ITEM_TILES` 里那一行。 */
-function flat(tile: number): FaceTiles {
-  return { top: tile, bottom: tile, side: tile };
-}
 
 /**
  * 物品在图集里的贴图格号——纯数据。
@@ -155,6 +162,9 @@ export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
   [ItemType.StoneShovel]: flat(TILE.stoneShovel),
   // 熔炉物品的图标是熄火那个正面：放下去永远是熄火的编号，图标画的就是它。
   [ItemType.Furnace]: FURNACE_TILES,
+  // 煤炭与粗铁是材料，没有对应的方块：与木棍一样六面同一张图标，手持画平面图标。
+  [ItemType.Coal]: flat(TILE.coal),
+  [ItemType.RawIron]: flat(TILE.rawIron),
 };
 
 /**

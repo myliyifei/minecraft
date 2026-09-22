@@ -2,6 +2,7 @@ import { BlockType } from './block';
 import { Chunk } from './chunk';
 import { CHUNK_SIZE, MIN_SURFACE_Y, WORLD_MIN_Y } from './constants';
 import { fbm2, hashCoords } from './noise';
+import { plantOreVeins } from './ore';
 import { plantOakTrees, type TreePlacement } from './tree';
 
 /**
@@ -82,7 +83,8 @@ export function plainsTreePlacement(seed: number): TreePlacement {
  * 由种子生成平原地形的生成器。
  *
  * 每一列自上而下是：一层草方块、3–4 层泥土、一路石头到 y = −63、最底层 y = −64 基岩；
- * 地表之上散布橡树。同一个种子与区块坐标永远得到同样的区块——这是 ADR-0003 的核心约束。
+ * 石层里嵌着煤与铁的矿脉，地表之上散布橡树。同一个种子与区块坐标永远得到同样的区块——这是
+ * ADR-0003 的核心约束。
  */
 export function plainsTerrain(seed: number): TerrainGenerator {
   const trees = plainsTreePlacement(seed);
@@ -105,7 +107,9 @@ export function plainsTerrain(seed: number): TerrainGenerator {
       }
     }
 
-    // 土石铺完再种树：树叶只往空气里长，得先有地面才知道哪里是空气。
+    // 土石铺完再嵌矿脉：矿石只替换石头，得先有石头。
+    plantOreVeins(seed, chunk);
+    // 再种树：树叶只往空气里长，得先有地面才知道哪里是空气。
     plantOakTrees(trees, chunk);
     return chunk;
   };

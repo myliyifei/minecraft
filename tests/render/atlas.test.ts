@@ -72,11 +72,11 @@ describe('方块到贴图格号的映射表', () => {
     expect(new Set([off.top, off.side, off.front, lit.front]).size).toBe(4);
   });
 
-  it('图集是 8x8，64 格里现在用了 32 格', () => {
+  it('图集是 8x8，64 格里现在用了 33 格', () => {
     expect(ATLAS_COLS).toBe(8);
     expect(ATLAS_ROWS).toBe(8);
-    expect(Object.keys(TILE)).toHaveLength(32);
-    expect(new Set(Object.values(TILE)).size).toBe(32);
+    expect(Object.keys(TILE)).toHaveLength(33);
+    expect(new Set(Object.values(TILE)).size).toBe(33);
   });
 
   it('两种矿石各自六面同一张，与石头不是同一格（issue #31）', () => {
@@ -158,6 +158,15 @@ describe('物品到贴图格号的映射表', () => {
       side: TILE.ironIngot,
     });
     expect(TILE.ironIngot).not.toBe(TILE.rawIron);
+  });
+
+  it('木炭有自己的一格图标，六面同图，与煤炭不是同一格（issue #34）', () => {
+    expect(ITEM_TILES[ItemType.Charcoal]).toEqual({
+      top: TILE.charcoal,
+      bottom: TILE.charcoal,
+      side: TILE.charcoal,
+    });
+    expect(TILE.charcoal).not.toBe(TILE.coal);
   });
 
   it('熔炉物品的图标是熄火那个正面，小方块六面与熔炉方块相同', () => {
@@ -251,7 +260,7 @@ describe('手持物品画立方体还是平面图标', () => {
     }
   });
 
-  it('木棍、工具与煤炭、粗铁、铁锭这类材料没有对应的方块，画平面图标', () => {
+  it('木棍、工具与煤炭、粗铁、铁锭、木炭这类材料没有对应的方块，画平面图标', () => {
     for (const item of [
       ItemType.Stick,
       ItemType.WoodenPickaxe,
@@ -266,6 +275,7 @@ describe('手持物品画立方体还是平面图标', () => {
       ItemType.Coal,
       ItemType.RawIron,
       ItemType.IronIngot,
+      ItemType.Charcoal,
     ]) {
       expect(heldItemShape(item), `物品 ${item}`).toBe(HeldItemShape.Flat);
     }

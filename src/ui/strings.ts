@@ -81,4 +81,5 @@ export const ITEM_NAMES: Readonly<Record<ItemType, string>> = {
   [ItemType.IronPickaxe]: '铁镐',
   [ItemType.IronAxe]: '铁斧',
   [ItemType.IronShovel]: '铁铲',
+  [ItemType.Charcoal]: '木炭',
 };

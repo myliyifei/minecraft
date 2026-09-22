@@ -70,6 +70,9 @@ const COAL = [34, 34, 38];
 const COAL_SHINE = [78, 78, 84];
 const IRON_RAW = [196, 158, 122];
 const IRON_SHINE = [228, 198, 166];
+/** 木炭是烧过的木头：与煤同样暗，但偏棕，亮面也带一点木色，放在一起分得开。 */
+const CHARCOAL = [58, 44, 34];
+const CHARCOAL_SHINE = [112, 88, 68];
 /** 铁锭是炼过的铁：比粗铁的浅棕亮、偏冷的银灰，顶面再亮一档，棱边暗一档。 */
 const INGOT = [214, 214, 220];
 const INGOT_SHINE = [240, 240, 244];
@@ -350,6 +353,8 @@ const TILES = {
   29: toolIcon(pickaxeHead, IRON_HEAD),
   30: toolIcon(axeHead, IRON_HEAD),
   31: toolIcon(shovelHead, IRON_HEAD),
+  // charcoal：与煤炭同形状的一块，颜色偏棕
+  32: lumpIcon(CHARCOAL, CHARCOAL_SHINE),
 };
 
 /** 这一像素落在熔炉正面的炉口里吗。 */

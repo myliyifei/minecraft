@@ -1,5 +1,5 @@
 import { isSlotIndex } from './inventory';
-import { withCount, type ItemStack, type ItemType } from './item';
+import { withoutOne, type ItemStack, type ItemType } from './item';
 import { matchRecipe, type GridSize } from './recipe';
 import type { Crafting, RuledSlotBatch } from './slot-batch';
 
@@ -53,6 +53,9 @@ export class CraftingGrid implements RuledSlotBatch, Crafting {
     return false;
   }
 
+  /** 没有只取格，所以不会被调。 */
+  taken(_index: number, _count: number): void {}
+
   slot(index: number): ItemStack | undefined {
     return this.cells[index];
   }
@@ -84,7 +87,7 @@ export class CraftingGrid implements RuledSlotBatch, Crafting {
     for (let i = 0; i < this.cells.length; i++) {
       const stack = this.cells[i];
       if (!stack) continue;
-      this.cells[i] = stack.count > 1 ? withCount(stack, stack.count - 1) : undefined;
+      this.cells[i] = withoutOne(stack);
     }
   }
 }

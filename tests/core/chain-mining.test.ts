@@ -60,6 +60,17 @@ describe('连锁集合按 26 向连通展开', () => {
     expect(chainConnectedBlocks(world, ROOT)).toEqual([ROOT, above(1)]);
   });
 
+  it('熄火与燃烧中的熔炉是同一类型：一排三座只点着中间那座，从哪一端起都连上三座（issue #34、ADR-0012）', () => {
+    const cells = [ROOT, above(1), above(2)];
+    const world = worldWith(
+      placement(cells[0]!, BlockType.Furnace),
+      placement(cells[1]!, BlockType.LitFurnace),
+      placement(cells[2]!, BlockType.Furnace),
+    );
+    expect(chainConnectedBlocks(world, cells[0]!)).toEqual(cells);
+    expect(chainConnectedBlocks(world, cells[1]!)).toHaveLength(3);
+  });
+
   it('隔着一格的同种方块不连上', () => {
     const world = worldWith(
       placement(ROOT, BlockType.OakLog),

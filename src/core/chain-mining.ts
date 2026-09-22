@@ -1,4 +1,4 @@
-import { isBreakable, type BlockView } from './block';
+import { baseBlock, isBreakable, type BlockView } from './block';
 import type { Vec3 } from './vec3';
 
 /**
@@ -36,8 +36,9 @@ function chainNeighbors(): Vec3[] {
  * 先发现的一定不比后发现的远。起点是空气或挖不动的方块（基岩）时集合是空的。
  *
  * 搜索跨区块，未加载的区块自然成为边界：那里读出来的是空气（见 `World`），与任何
- * 挖得动的方块都不同种。判据是「方块种类完全相同」而不是「都是原木」——同种才连锁，
- * 挨着树干的树叶、挨着煤矿的石头都不跟着碎。
+ * 挖得动的方块都不同种。判据是「方块种类相同」而不是「都是原木」——同种才连锁，
+ * 挨着树干的树叶、挨着煤矿的石头都不跟着碎。外观变体算同种（`baseBlock`）：熄火与燃烧中的
+ * 熔炉排在一起时连成一片，不因为其中一个在烧就断开。
  *
  * 写成函数而不是类：它没有跨 tick 的状态，与 `raycastBlocks`、`placeBlock` 一样。
  */
@@ -48,6 +49,7 @@ export function chainConnectedBlocks(
 ): Vec3[] {
   const block = blocks.getBlock(origin.x, origin.y, origin.z);
   if (!isBreakable(block)) return [];
+  const kind = baseBlock(block);
 
   const found: Vec3[] = [{ x: origin.x, y: origin.y, z: origin.z }];
   // 已经看过的格子，包括判定为异种的那些：同一格无论从哪个邻居走到，答案都一样，
@@ -63,7 +65,7 @@ export function chainConnectedBlocks(
       const key = cellKey(next);
       if (seen.has(key)) continue;
       seen.add(key);
-      if (blocks.getBlock(next.x, next.y, next.z) !== block) continue;
+      if (baseBlock(blocks.getBlock(next.x, next.y, next.z)) !== kind) continue;
       found.push(next);
     }
   }

@@ -11,6 +11,7 @@ import { INVENTORY_SIZE, Inventory } from '../../src/core/inventory';
 import { InventoryScreen } from '../../src/core/inventory-screen';
 import { ItemType, type ItemStack } from '../../src/core/item';
 import { SMELT_TICKS } from '../../src/core/smelting';
+import { XpOrbs } from '../../src/core/xp-orb';
 
 function stack(item: ItemType, count: number): ItemStack {
   return { item, count };
@@ -21,6 +22,9 @@ const ingots = (count: number): ItemStack => stack(ItemType.IronIngot, count);
 const coal = (count: number): ItemStack => stack(ItemType.Coal, count);
 const logs = (count: number): ItemStack => stack(ItemType.OakLog, count);
 const dirt = (count: number): ItemStack => stack(ItemType.Dirt, count);
+
+/** 绑着的那个熔炉在世界里的哪一格：取走成品时经验球在这里生成。 */
+const SPOT = { x: 4, y: 71, z: -3 };
 
 /** 三格在界面里的格号：接在背包 36 格之后。 */
 const INPUT = INVENTORY_SIZE + FURNACE_INPUT_SLOT;
@@ -36,8 +40,8 @@ function opened(
 ): { state: FurnaceState; inventory: Inventory; screen: InventoryScreen } {
   const state = newFurnaceState();
   furnace(state);
-  const slots = new FurnaceSlots();
-  slots.bind(state);
+  const slots = new FurnaceSlots(new XpOrbs());
+  slots.bind(state, SPOT);
   const inventory = new Inventory();
   fill(inventory);
   const screen = new InventoryScreen(inventory, slots);
@@ -51,8 +55,8 @@ describe('熔炉三格是状态表里那条状态的三个格子', () => {
     state.input = rawIron(3);
     state.fuel = coal(2);
     state.output = ingots(4);
-    const slots = new FurnaceSlots();
-    slots.bind(state);
+    const slots = new FurnaceSlots(new XpOrbs());
+    slots.bind(state, SPOT);
     expect(slots.size).toBe(3);
     expect(slots.slot(FURNACE_INPUT_SLOT)).toEqual(rawIron(3));
     expect(slots.slot(FURNACE_FUEL_SLOT)).toEqual(coal(2));
@@ -61,8 +65,8 @@ describe('熔炉三格是状态表里那条状态的三个格子', () => {
 
   it('写一格就是写状态里那一格', () => {
     const state = newFurnaceState();
-    const slots = new FurnaceSlots();
-    slots.bind(state);
+    const slots = new FurnaceSlots(new XpOrbs());
+    slots.bind(state, SPOT);
     slots.setSlot(FURNACE_INPUT_SLOT, rawIron(1));
     slots.setSlot(FURNACE_FUEL_SLOT, coal(1));
     slots.setSlot(FURNACE_RESULT_SLOT, ingots(1));
@@ -75,8 +79,8 @@ describe('熔炉三格是状态表里那条状态的三个格子', () => {
 
   it('指不到格子的下标什么都不写、读出来是 undefined', () => {
     const state = newFurnaceState();
-    const slots = new FurnaceSlots();
-    slots.bind(state);
+    const slots = new FurnaceSlots(new XpOrbs());
+    slots.bind(state, SPOT);
     slots.setSlot(3, rawIron(1));
     slots.setSlot(-1, rawIron(1));
     slots.setSlot(0.5, rawIron(1));
@@ -89,9 +93,9 @@ describe('熔炉三格是状态表里那条状态的三个格子', () => {
     a.input = rawIron(3);
     const b = newFurnaceState();
     b.fuel = coal(5);
-    const slots = new FurnaceSlots();
-    slots.bind(a);
-    slots.bind(b);
+    const slots = new FurnaceSlots(new XpOrbs());
+    slots.bind(a, SPOT);
+    slots.bind(b, SPOT);
     expect(slots.slot(FURNACE_INPUT_SLOT)).toBeUndefined();
     expect(slots.slot(FURNACE_FUEL_SLOT)).toEqual(coal(5));
     slots.setSlot(FURNACE_INPUT_SLOT, logs(1));
@@ -100,7 +104,7 @@ describe('熔炉三格是状态表里那条状态的三个格子', () => {
   });
 
   it('还没绑到任何熔炉时三格都是空的，写了也不留下', () => {
-    const slots = new FurnaceSlots();
+    const slots = new FurnaceSlots(new XpOrbs());
     slots.setSlot(FURNACE_INPUT_SLOT, rawIron(1));
     expect(slots.slot(FURNACE_INPUT_SLOT)).toBeUndefined();
     expect(slots.smelting.fuelRatio).toBe(0);
@@ -108,7 +112,7 @@ describe('熔炉三格是状态表里那条状态的三个格子', () => {
   });
 
   it('关闭界面时留在原处，没有合成能力', () => {
-    const slots = new FurnaceSlots();
+    const slots = new FurnaceSlots(new XpOrbs());
     expect(slots.returnsOnClose).toBe(false);
     expect(slots.crafting).toBeUndefined();
   });
@@ -371,6 +375,70 @@ describe('关闭熔炉界面', () => {
     screen.clickSlot(RESULT);
     expect(screen.toggle()).toEqual([ingots(10)]);
     expect(inventory.slot(0)).toEqual(dirt(64));
+  });
+});
+
+describe('从成品格取走成品时结算经验（issue #34）', () => {
+  /** 开着的熔炉界面，成品格里 3 个铁锭、待结算 21 点，外加它的经验球列表。 */
+  function openedWithIngots(fill: (inventory: Inventory) => void = () => {}) {
+    const state = newFurnaceState();
+    state.output = ingots(3);
+    state.pendingExperience = 21;
+    const orbs = new XpOrbs();
+    const slots = new FurnaceSlots(orbs);
+    slots.bind(state, SPOT);
+    const inventory = new Inventory();
+    fill(inventory);
+    const screen = new InventoryScreen(inventory, slots);
+    screen.toggle();
+    return { state, orbs, screen };
+  }
+
+  it('一次取走 3 个：一个 21 点的经验球生成在熔炉那一格的中心', () => {
+    const { state, orbs, screen } = openedWithIngots();
+    screen.clickSlot(RESULT);
+    expect(state.pendingExperience).toBe(0);
+    expect(orbs.all()).toHaveLength(1);
+    const orb = orbs.all()[0]!;
+    expect(orb.amount).toBe(21);
+    expect(Math.floor(orb.position.x)).toBe(SPOT.x);
+    expect(Math.floor(orb.position.y)).toBe(SPOT.y);
+    expect(Math.floor(orb.position.z)).toBe(SPOT.z);
+  });
+
+  it('光标 62 个铁锭并进 2 个：14 点，格里剩 1 个、待结算剩 7 点', () => {
+    const { state, orbs, screen } = openedWithIngots((inv) => inv.setSlot(0, ingots(62)));
+    screen.clickSlot(0);
+    screen.clickSlot(RESULT);
+    expect(state.output).toEqual(ingots(1));
+    expect(orbs.all().map((orb) => orb.amount)).toEqual([14]);
+    expect(state.pendingExperience).toBe(7);
+  });
+
+  it('取不走时不生成经验球：光标上是煤炭', () => {
+    const { state, orbs, screen } = openedWithIngots((inv) => inv.setSlot(0, coal(1)));
+    screen.clickSlot(0);
+    screen.clickSlot(RESULT);
+    expect(orbs.count).toBe(0);
+    expect(state.pendingExperience).toBe(21);
+  });
+
+  it('从原料格与燃料格拿起不结算', () => {
+    const { state, orbs, screen } = openedWithIngots();
+    state.input = rawIron(2);
+    state.fuel = coal(2);
+    screen.clickSlot(INPUT);
+    screen.clickSlot(0);
+    screen.clickSlot(FUEL);
+    expect(orbs.count).toBe(0);
+    expect(state.pendingExperience).toBe(21);
+  });
+
+  it('调试路径放进去、没有待结算经验的成品：取走不生成经验球', () => {
+    const { state, orbs, screen } = openedWithIngots();
+    state.pendingExperience = 0;
+    screen.clickSlot(RESULT);
+    expect(orbs.count).toBe(0);
   });
 });
 

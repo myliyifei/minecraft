@@ -1,6 +1,7 @@
 import {
   stackLimit,
   withCount,
+  withoutOne,
   wornTool,
   type Hand,
   type ItemSink,
@@ -104,7 +105,7 @@ export class Inventory implements InventoryView, ItemSink, Hand, ToolHand, SlotS
   takeOne(): void {
     const stack = this.slots[this.selected];
     if (!stack) return;
-    this.slots[this.selected] = stack.count > 1 ? withCount(stack, stack.count - 1) : undefined;
+    this.slots[this.selected] = withoutOne(stack);
   }
 
   /**

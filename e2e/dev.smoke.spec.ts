@@ -1918,7 +1918,7 @@ test('调试句柄把铁镐放进熔炉、空手挖掉熔炉拾取到选中格�
   const stoneTicks = miningTicks(BlockType.Stone, miningToolOf({ item: ItemType.IronPickaxe, count: 1 }));
   expect(stoneTicks).toBe(8);
 
-  // 核心没有往背包里放物品的入口，铁锭又要等熔炼（#34）才有，所以改用熔炉：调试句柄往眼前那个
+  // 核心没有往背包里放物品的入口，铁锭又要挖铁矿、炼上 200 tick 才有，所以改用熔炉：调试句柄往眼前那个
   // 熔炉的原料格放一把铁镐（原料格在游戏里只收可炼物，这里是调试路径），空手挖掉熔炉，里面的
   // 东西在原位掉出，拾取后进开局选中的第一格。
   // 整段跑在一次同步的 evaluate 里，渲染层直接调，读到的就是刚画的那一帧。
@@ -2699,7 +2699,7 @@ test('右键对着熔炉打开熔炉界面：三格、两条进度条、36 格�
   await expect(page.locator('#furnace-screen [data-output]')).toHaveCount(0);
   await expect(page.locator('#furnace-screen .invscreen__recipes')).toHaveCount(0);
 
-  // 两条进度条都在，本 issue 里熔炉不推进，长度都是 0
+  // 两条进度条都在，空熔炉不点火，长度都是 0
   for (const label of [STRINGS.fuelLeft, STRINGS.smeltProgress]) {
     const bar = screen.getByRole('progressbar', { name: label });
     await expect(bar).toBeVisible();
@@ -2874,6 +2874,82 @@ test('调试句柄放一块熔炉在玩家面前：画布上正面是熄火那�
   expect(seen.lit.stateCount).toBe(1);
   expect(seen.off.entries).toEqual(seen.lit.entries);
   expect(seen.lit.entries).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test('调试句柄往熔炉放粗铁与煤炭：推进后区块网格用到燃烧正面，界面两条进度条长度非零；1600 tick 后网格回到熄火正面', async ({
+  page,
+}) => {
+  const spot = await setUsableAhead(page, BlockType.Furnace);
+  // 放东西、推进、开界面都在一次同步的 evaluate 里：游戏循环在两次 evaluate 之间也在推进，读数得
+  // 在同一段里取，才对得上刚推进的那几 tick。网格读回送上显卡的贴图格号，那是「画的是哪一格」的
+  // 直接证据。8 个粗铁够一件煤炭炼满 1600 tick，这期间熔炼进度不会停在 0。
+  const burning = await page.evaluate(
+    ({ spot, input, fuel, chunkSize, progressTicks, fuelLabel, progressLabel }) => {
+      const { core, renderer, hud } = window.__VOXEL__!;
+      const cx = Math.floor(spot.x / chunkSize);
+      const cz = Math.floor(spot.z / chunkSize);
+      const state = core.blockStateAt(spot.x, spot.y, spot.z)!;
+      state.input = input;
+      state.fuel = fuel;
+      core.tick();
+      renderer.syncChunkMeshes();
+      const lit = { block: core.getBlock(spot.x, spot.y, spot.z), tiles: renderer.chunkMeshTiles(cx, cz) };
+
+      core.use();
+      core.tick(progressTicks);
+      hud.update();
+      const bar = (label: string) => {
+        const track = document.querySelector(`#furnace-screen [role="progressbar"][aria-label="${label}"]`)!;
+        return {
+          valueNow: Number(track.getAttribute('aria-valuenow')),
+          fillWidth: track.firstElementChild!.getBoundingClientRect().width,
+        };
+      };
+      return { lit, open: core.furnaceScreen.open, fuel: bar(fuelLabel), progress: bar(progressLabel) };
+    },
+    {
+      spot,
+      input: { item: ItemType.RawIron, count: 8 },
+      fuel: { item: ItemType.Coal, count: 1 },
+      chunkSize: CHUNK_SIZE,
+      progressTicks: 50,
+      fuelLabel: STRINGS.fuelLeft,
+      progressLabel: STRINGS.smeltProgress,
+    },
+  );
+  expect(burning.lit.block).toBe(BlockType.LitFurnace);
+  expect(burning.lit.tiles).toContain(TILE.litFurnaceFront);
+  expect(burning.lit.tiles).not.toContain(TILE.furnaceFront);
+  expect(burning.open).toBe(true);
+  for (const bar of [burning.fuel, burning.progress]) {
+    expect(bar.valueNow).toBeGreaterThan(0);
+    expect(bar.fillWidth).toBeGreaterThan(0);
+  }
+  await expect(page.locator('#furnace-screen')).toBeVisible();
+
+  const out = await page.evaluate(
+    ({ spot, chunkSize, coalTicks }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      core.toggleInventory();
+      core.tick();
+      core.tick(coalTicks);
+      renderer.syncChunkMeshes();
+      return {
+        open: core.furnaceScreen.open,
+        block: core.getBlock(spot.x, spot.y, spot.z),
+        tiles: renderer.chunkMeshTiles(Math.floor(spot.x / chunkSize), Math.floor(spot.z / chunkSize)),
+        output: core.blockStateAt(spot.x, spot.y, spot.z)!.output,
+      };
+    },
+    { spot, chunkSize: CHUNK_SIZE, coalTicks: 1600 },
+  );
+  // 关掉界面照样烧：一件煤炭烧完，8 个粗铁全炼成铁锭，方块换回熄火的编号
+  expect(out.open).toBe(false);
+  expect(out.block).toBe(BlockType.Furnace);
+  expect(out.tiles).toContain(TILE.furnaceFront);
+  expect(out.tiles).not.toContain(TILE.litFurnaceFront);
+  expect(out.output).toEqual({ item: ItemType.IronIngot, count: 8 });
   expect(errors).toEqual([]);
 });
 

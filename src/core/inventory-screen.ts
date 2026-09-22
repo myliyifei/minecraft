@@ -3,6 +3,7 @@ import {
   isUnstackable,
   stackLimit,
   withCount,
+  withoutOne,
   type ItemStack,
   type ItemType,
   type SlotBatch,
@@ -54,6 +55,7 @@ interface SlotRef {
 const INVENTORY_RULES: SlotRules = Object.freeze({
   accepts: () => true,
   isTakeOnly: () => false,
+  taken: () => {},
 });
 
 /** 关闭界面时一样东西都不用交出去。共用一份，免得每次关界面都分配一个空数组。 */
@@ -283,6 +285,8 @@ export class InventoryScreen implements InventoryScreenView {
    * 光标空着时拿起的那一堆没有「原格」（`CursorHold.from` 为 undefined）：只取格不收东西，关闭界面
    * 时它直接走入包规则。并进光标的那部分则跟着光标原来的来源格——从背包第 20 格拿起的木板并进了
    * 只取格里的几块，关闭时整堆回第 20 格。两条都与输出格的成品相同（`clickOutput`）。
+   *
+   * 取走之后告诉格子批取走了几个（`SlotRules.taken`）：熔炉按这个数结算成品的经验。
    */
   private takeFrom(ref: SlotRef): void {
     const inSlot = ref.batch.slot(ref.local);
@@ -292,6 +296,7 @@ export class InventoryScreen implements InventoryScreenView {
     if (!holding) {
       this.holding = { stack: inSlot, from: undefined };
       ref.batch.setSlot(ref.local, undefined);
+      ref.rules.taken(ref.local, inSlot.count);
       return;
     }
 
@@ -302,6 +307,7 @@ export class InventoryScreen implements InventoryScreenView {
     this.holding = { stack: withCount(cursor, cursor.count + moved), from: holding.from };
     const rest = inSlot.count - moved;
     ref.batch.setSlot(ref.local, rest > 0 ? withCount(inSlot, rest) : undefined);
+    ref.rules.taken(ref.local, moved);
   }
 
   /**
@@ -398,7 +404,7 @@ export class InventoryScreen implements InventoryScreenView {
     for (let i = 0; i < this.slots.size; i++) {
       const stack = this.slots.slot(i);
       if (!stack || stack.item !== item) continue;
-      this.slots.setSlot(i, stack.count > 1 ? withCount(stack, stack.count - 1) : undefined);
+      this.slots.setSlot(i, withoutOne(stack));
       return;
     }
   }

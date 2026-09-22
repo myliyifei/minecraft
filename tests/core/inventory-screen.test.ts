@@ -958,6 +958,13 @@ class FakeRuledSlotBatch implements RuledSlotBatch {
   isTakeOnly(index: number): boolean {
     return index === 2;
   }
+
+  /** 每次 `taken` 被调时的参数与那一刻格里剩下的东西，按调用顺序。 */
+  readonly takes: Array<{ index: number; count: number; left: ItemStack | undefined }> = [];
+
+  taken(index: number, count: number): void {
+    this.takes.push({ index, count, left: this.cells[index] });
+  }
 }
 
 /** 测试专用格子批的三格在界面里的格号。 */
@@ -1107,6 +1114,52 @@ describe('格子批的规则：只取格点击与拆堆全拿走、同一类型�
     expect(screen.toggle()).toEqual([]);
     expect(inventory.slot(0)).toEqual(planks(10));
     expect(batch.slot(2)).toBeUndefined();
+  });
+});
+
+describe('格子批的规则：从只取格取走之后告诉格子批取走了几个（issue #34）', () => {
+  it('光标空着全拿走：报取走 10 个，那时格里已经空了', () => {
+    const batch = new FakeRuledSlotBatch(false);
+    batch.setSlot(2, planks(10));
+    const { screen } = opened(undefined, batch);
+    screen.clickSlot(TAKE_ONLY);
+    expect(batch.takes).toEqual([{ index: 2, count: 10, left: undefined }]);
+  });
+
+  it('光标 60 个并到 64：报取走 4 个，格里剩 6 个', () => {
+    const batch = new FakeRuledSlotBatch(false);
+    batch.setSlot(2, planks(10));
+    const { screen } = opened((inv) => inv.setSlot(0, planks(60)), batch);
+    screen.clickSlot(0);
+    screen.splitSlot(TAKE_ONLY);
+    expect(batch.takes).toEqual([{ index: 2, count: 4, left: planks(6) }]);
+  });
+
+  it('什么都没取走时不报：光标上是别的东西、光标上那一堆已满', () => {
+    const batch = new FakeRuledSlotBatch(false);
+    batch.setSlot(2, planks(10));
+    const { screen } = opened(
+      (inv) => {
+        inv.setSlot(0, dirt(10));
+        inv.setSlot(1, planks(64));
+      },
+      batch,
+    );
+    screen.clickSlot(0);
+    screen.clickSlot(TAKE_ONLY);
+    screen.clickSlot(0);
+    screen.clickSlot(1);
+    screen.clickSlot(TAKE_ONLY);
+    expect(batch.slot(2)).toEqual(planks(10));
+    expect(batch.takes).toEqual([]);
+  });
+
+  it('普通格拿起不报：只取格才有这一条', () => {
+    const batch = new FakeRuledSlotBatch(false);
+    batch.setSlot(1, dirt(7));
+    const { screen } = opened(undefined, batch);
+    screen.clickSlot(ANYTHING);
+    expect(batch.takes).toEqual([]);
   });
 });
 

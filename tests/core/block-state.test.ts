@@ -17,6 +17,7 @@ describe('熔炉的方块状态（issue #30）', () => {
       burnTicksLeft: 0,
       burnTicksTotal: 0,
       smeltProgress: 0,
+      progressItem: undefined,
       pendingExperience: 0,
     });
   });

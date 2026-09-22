@@ -5,6 +5,7 @@ import {
   BlockType,
   BlockUse,
   UNBREAKABLE,
+  baseBlock,
   blockDrop,
   blockExperience,
   blockStateKind,
@@ -414,6 +415,16 @@ describe('挖掉一块给多少经验', () => {
   });
 });
 
+describe('外观变体归到的编号（ADR-0012）', () => {
+  it('燃烧中的熔炉归到熔炉，其余方块都是自己', () => {
+    expect(baseBlock(BlockType.LitFurnace)).toBe(BlockType.Furnace);
+    for (const block of Object.values(BlockType)) {
+      if (block === BlockType.LitFurnace) continue;
+      expect(baseBlock(block), `方块 ${block}`).toBe(block);
+    }
+  });
+});
+
 describe('放置表', () => {
   /**
    * issue #15 的放置表：哪种物品放下去是哪种方块，`null` 是放不下去。
@@ -442,6 +453,8 @@ describe('放置表', () => {
     ['铁镐放不下去', ItemType.IronPickaxe, null],
     ['铁斧放不下去', ItemType.IronAxe, null],
     ['铁铲放不下去', ItemType.IronShovel, null],
+    // 木炭是原木炼出来的材料（issue #34），没有对应的方块
+    ['木炭放不下去', ItemType.Charcoal, null],
   ];
 
   it('上面这张表覆盖了物品表的每一行：加一种物品就得在这里补一条', () => {

@@ -28,6 +28,8 @@ export const ItemType = {
   IronPickaxe: 17,
   IronAxe: 18,
   IronShovel: 19,
+  /** 橡木原木在熔炉里炼成的材料（issue #34）：可堆叠，放不下去，与煤炭一样是 1600 tick 的燃料。 */
+  Charcoal: 20,
 } as const;
 
 export type ItemType = (typeof ItemType)[keyof typeof ItemType];
@@ -54,6 +56,11 @@ export interface ItemStack {
  */
 export function withCount(stack: ItemStack, count: number): ItemStack {
   return { ...stack, count };
+}
+
+/** 一堆里用掉 1 个之后剩下的：数量减 1，减到 0 是空格（undefined）。 */
+export function withoutOne(stack: ItemStack): ItemStack | undefined {
+  return stack.count > 1 ? withCount(stack, stack.count - 1) : undefined;
 }
 
 /**
@@ -207,6 +214,7 @@ export const ITEMS: Readonly<Record<ItemType, ItemDef>> = {
   [ItemType.IronPickaxe]: tool(ToolClass.Pickaxe, ToolMaterial.Iron),
   [ItemType.IronAxe]: tool(ToolClass.Axe, ToolMaterial.Iron),
   [ItemType.IronShovel]: tool(ToolClass.Shovel, ToolMaterial.Iron),
+  [ItemType.Charcoal]: STACKABLE,
 };
 
 /** 这种物品一格最多堆多少个。 */

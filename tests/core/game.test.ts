@@ -1672,6 +1672,11 @@ describe('GameCore 的熔炉界面（issue #33）', () => {
   const RAW_IRON_X3 = { item: ItemType.RawIron, count: 3 };
   const COAL_X2 = { item: ItemType.Coal, count: 2 };
   const INGOTS_X10 = { item: ItemType.IronIngot, count: 10 };
+  /**
+   * 调试路径放进成品格的 10 个木炭。成品格装着木炭，粗铁的成品放不进去，熔炉因此不点火：这一组测的是
+   * 界面，三格内容不随 tick 变。熔炼本身在「GameCore 的熔炼」那一组里。
+   */
+  const CHARCOAL_X10 = { item: ItemType.Charcoal, count: 10 };
 
   /**
    * 站在平地上、正前方摆着一个熔炉、朝它平视的核心。熔炉由 `setBlock` 直接摆进世界，状态表随之
@@ -1705,7 +1710,7 @@ describe('GameCore 的熔炉界面（issue #33）', () => {
     const state = core.blockStateAt(...at)!;
     state.input = RAW_IRON_X3;
     state.fuel = COAL_X2;
-    state.output = INGOTS_X10;
+    state.output = CHARCOAL_X10;
     return state;
   }
 
@@ -1765,7 +1770,7 @@ describe('GameCore 的熔炉界面（issue #33）', () => {
     expect(core.blockStateAt(...FAR_AHEAD)).toEqual(newFurnaceState());
   });
 
-  it('界面三格就是那个熔炉的三格：调试路径放进成品格的 10 个铁锭，光标空点它全拿走', () => {
+  it('界面三格就是那个熔炉的三格：调试路径放进成品格的 10 个木炭，光标空点它全拿走', () => {
     const core = facingFurnace();
     const state = fillFurnace(core);
     useOnce(core);
@@ -1773,15 +1778,15 @@ describe('GameCore 的熔炉界面（issue #33）', () => {
     expect(smelting.firstSlot).toBe(INVENTORY_SIZE);
     expect(smelting.slot(FURNACE_INPUT_SLOT)).toEqual(RAW_IRON_X3);
     expect(smelting.slot(FURNACE_FUEL_SLOT)).toEqual(COAL_X2);
-    expect(smelting.slot(FURNACE_RESULT_SLOT)).toEqual(INGOTS_X10);
+    expect(smelting.slot(FURNACE_RESULT_SLOT)).toEqual(CHARCOAL_X10);
 
     core.clickSlot(RESULT);
     core.tick();
-    expect(core.furnaceScreen.cursor).toEqual(INGOTS_X10);
+    expect(core.furnaceScreen.cursor).toEqual(CHARCOAL_X10);
     expect(state.output).toBeUndefined();
   });
 
-  it('没有合成网格、输出格与配方书；本 issue 里状态不推进，两条进度条恒为空', () => {
+  it('没有合成网格、输出格与配方书；不点火时两条进度条为空', () => {
     const core = facingFurnace();
     fillFurnace(core);
     useOnce(core);
@@ -1804,13 +1809,13 @@ describe('GameCore 的熔炉界面（issue #33）', () => {
     expect(core.furnaceScreen.open).toBe(false);
     expect(state.input).toEqual(RAW_IRON_X3);
     expect(state.fuel).toEqual(COAL_X2);
-    expect(state.output).toEqual(INGOTS_X10);
+    expect(state.output).toEqual(CHARCOAL_X10);
     for (let i = 0; i < INVENTORY_SIZE; i++) expect(core.inventory.slot(i)).toBeUndefined();
     expect(core.drops.count).toBe(0);
 
     useOnce(core);
     expect(core.furnaceScreen.open).toBe(true);
-    expect(core.furnaceScreen.smelting!.slot(FURNACE_RESULT_SLOT)).toEqual(INGOTS_X10);
+    expect(core.furnaceScreen.smelting!.slot(FURNACE_RESULT_SLOT)).toEqual(CHARCOAL_X10);
   });
 
   it('关闭界面时光标物品退回原格：从原料格拿起的粗铁回原料格', () => {
@@ -1877,7 +1882,7 @@ describe('GameCore 的熔炉界面（issue #33）', () => {
     east.fuel = { item: ItemType.Stick, count: 7 };
 
     useOnce(core);
-    expect(core.furnaceScreen.smelting!.slot(FURNACE_RESULT_SLOT)).toEqual(INGOTS_X10);
+    expect(core.furnaceScreen.smelting!.slot(FURNACE_RESULT_SLOT)).toEqual(CHARCOAL_X10);
     toggleOnce(core);
 
     look(core, EAST_YAW, 0);
@@ -1916,6 +1921,152 @@ describe('GameCore 的熔炉界面（issue #33）', () => {
     toggleOnce(core);
     expect(core.inventoryScreen.open).toBe(true);
     expect(core.furnaceScreen.open).toBe(false);
+  });
+});
+
+describe('GameCore 的熔炼（issue #34）', () => {
+  /** 站在出生点朝 −Z 平视时正前方紧挨着的那一格：熔炉摆在这儿。 */
+  const AHEAD: [number, number, number] = [0, FLAT_GROUND_Y + 2, -1];
+  /** 熔炉三格里成品格在界面里的格号，原料格同理。 */
+  const INPUT = INVENTORY_SIZE + FURNACE_INPUT_SLOT;
+  const RESULT = INVENTORY_SIZE + FURNACE_RESULT_SLOT;
+  /** 每件 200 tick、一件煤 1600 tick，写死字面值：数值本身在 smelting.test.ts 里断言。 */
+  const SMELT = 200;
+  const COAL_TICKS = 1600;
+
+  /** 平地上正前方摆着一个熔炉、朝它平视的核心，熔炉里是 `input` 个粗铁与 `coal` 个煤炭。 */
+  function smeltingAhead(input: number, coal = 1): { core: GameCore; state: FurnaceState } {
+    const core = coreOnFlatGround();
+    core.setBlock(...AHEAD, BlockType.Furnace);
+    look(core, 0, 0);
+    core.tick();
+    const state = core.blockStateAt(...AHEAD)!;
+    state.input = { item: ItemType.RawIron, count: input };
+    state.fuel = { item: ItemType.Coal, count: coal };
+    return { core, state };
+  }
+
+  /** 按一次使用键打开眼前的熔炉界面。 */
+  function openFurnace(core: GameCore): void {
+    core.use();
+    core.tick();
+    expect(core.furnaceScreen.open).toBe(true);
+  }
+
+  it('原料 1 个粗铁、燃料 1 个煤炭：第 1 tick 燃料格空、方块变燃烧中；第 200 tick 出 1 个铁锭、原料空；第 1600 tick 变回熔炉', () => {
+    const { core, state } = smeltingAhead(1);
+    core.takeChangedBlocks();
+
+    core.tick();
+    expect(state.fuel).toBeUndefined();
+    expect(core.getBlock(...AHEAD)).toBe(BlockType.LitFurnace);
+    // 换编号走正常的写方块路径：渲染层据此重建那个区块的网格
+    expect(core.takeChangedBlocks()).toContainEqual(toVec(AHEAD));
+    // 换编号不换状态
+    expect(core.blockStateAt(...AHEAD)).toBe(state);
+
+    core.tick(SMELT - 2);
+    expect(state.output).toBeUndefined();
+    core.tick();
+    expect(state.output).toEqual({ item: ItemType.IronIngot, count: 1 });
+    expect(state.input).toBeUndefined();
+
+    core.tick(COAL_TICKS - SMELT - 1);
+    expect(core.getBlock(...AHEAD)).toBe(BlockType.LitFurnace);
+    core.tick();
+    expect(core.getBlock(...AHEAD)).toBe(BlockType.Furnace);
+    expect(core.blockStateAt(...AHEAD)).toBe(state);
+  });
+
+  it('界面开着时照样推进：两条进度条长度非零、随 tick 变化，成品格实时增加', () => {
+    const { core } = smeltingAhead(2);
+    openFurnace(core);
+    const smelting = core.furnaceScreen.smelting!;
+    expect(smelting.fuelRatio).toBeGreaterThan(0);
+    expect(smelting.progressRatio).toBeGreaterThan(0);
+    const fuel = smelting.fuelRatio;
+    const progress = smelting.progressRatio;
+
+    core.tick(10);
+    expect(smelting.fuelRatio).toBeLessThan(fuel);
+    expect(smelting.progressRatio).toBeGreaterThan(progress);
+    core.tick(SMELT);
+    expect(smelting.slot(FURNACE_RESULT_SLOT)).toEqual({ item: ItemType.IronIngot, count: 1 });
+  });
+
+  it('关闭界面后继续推进', () => {
+    const { core, state } = smeltingAhead(2);
+    openFurnace(core);
+    core.toggleInventory();
+    core.tick();
+    expect(core.uiMode).toBe(false);
+
+    core.tick(2 * SMELT);
+    expect(state.output).toEqual({ item: ItemType.IronIngot, count: 2 });
+    expect(state.input).toBeUndefined();
+  });
+
+  it('炼出 3 个铁锭一次取走：得 21 点，经验球生成在熔炉那一格', () => {
+    const { core, state } = smeltingAhead(3);
+    core.tick(3 * SMELT);
+    expect(state.output).toEqual({ item: ItemType.IronIngot, count: 3 });
+    openFurnace(core);
+    expect(core.xpOrbs.count).toBe(0);
+
+    core.clickSlot(RESULT);
+    core.tick();
+    expect(core.furnaceScreen.cursor).toEqual({ item: ItemType.IronIngot, count: 3 });
+    const orbs = core.xpOrbs.all();
+    expect(orbs).toHaveLength(1);
+    expect(orbs[0]!.amount).toBe(21);
+    // 生成那一 tick 已经朝玩家飞了一步，还在熔炉那一格里
+    const { x, y, z } = orbs[0]!.position;
+    expect([Math.floor(x), Math.floor(y), Math.floor(z)]).toEqual(AHEAD);
+
+    core.tick(3 * TICK_RATE);
+    expect(core.xpOrbs.count).toBe(0);
+    expect(core.experience.total).toBe(21);
+  });
+
+  it('先取 1 个再取 2 个：7 点加 14 点，合计 21', () => {
+    const { core, state } = smeltingAhead(3);
+    core.tick(3 * SMELT);
+    openFurnace(core);
+    // 核心没有往背包放物品的入口：借原料格把 63 个铁锭拿到光标上（调试路径，原料格在游戏里不收铁锭）
+    state.input = { item: ItemType.IronIngot, count: 63 };
+    core.clickSlot(INPUT);
+    core.clickSlot(RESULT);
+    core.tick();
+    expect(core.furnaceScreen.cursor).toEqual({ item: ItemType.IronIngot, count: 64 });
+    expect(state.output).toEqual({ item: ItemType.IronIngot, count: 2 });
+    expect(core.xpOrbs.all().map((orb) => orb.amount)).toEqual([7]);
+
+    core.clickSlot(0);
+    core.clickSlot(RESULT);
+    core.tick();
+    expect(state.output).toBeUndefined();
+    core.tick(3 * TICK_RATE);
+    expect(core.experience.total).toBe(21);
+  });
+
+  it('挖掉熔炉后待结算经验作废：成品掉出来，经验只有熔炉方块本身那 30 点', () => {
+    const { core, state } = smeltingAhead(3);
+    core.tick(3 * SMELT);
+    expect(state.pendingExperience).toBe(21);
+
+    core.setMining(true);
+    core.tick(miningTicks(BlockType.Furnace, BARE_HAND));
+    core.setMining(false);
+    expect(core.getBlock(...AHEAD)).toBe(BlockType.Air);
+    expect(core.blockStateAt(...AHEAD)).toBeUndefined();
+    // 空手拿不到熔炉，里面的铁锭照样掉；煤炭已经烧着了，燃料格是空的
+    expect(core.drops.all().map((drop) => ({ item: drop.item, count: drop.count }))).toEqual([
+      { item: ItemType.IronIngot, count: 3 },
+    ]);
+
+    core.tick(PICKUP_TICKS + 3 * TICK_RATE);
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.IronIngot, count: 3 });
+    expect(core.experience.total).toBe(30);
   });
 });
 
@@ -2719,6 +2870,36 @@ describe('GameCore 的已改区块在玩家走远再回来之后', () => {
 
     // 重新生成的话这里是空气：平地的地表只到 FLAT_GROUND_Y
     expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Dirt);
+  });
+
+  it('熔炉所在区块卸载后暂停：500 tick 进度与燃料不变，重新加载后接着推进（issue #34）', () => {
+    const core = coreForRoundTrip();
+    digUnderfoot(core, BlockType.Grass);
+    core.setBlock(...ABOVE_ASIDE, BlockType.Furnace);
+    const state = core.blockStateAt(...ABOVE_ASIDE)!;
+    // 8 个粗铁够炼 1600 tick，走出去再走回来的这一路上一直在炼
+    state.input = { item: ItemType.RawIron, count: 8 };
+    state.fuel = { item: ItemType.Coal, count: 1 };
+    core.tick();
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.LitFurnace);
+
+    look(core, 0, 0);
+    walkUntil(core, 'away', () => !core.isChunkLoaded(0, 0));
+    const paused = { ...state };
+    // 走的这一路上炼过，不是刚点着
+    expect(paused.burnTicksLeft).toBeLessThan(1600 - 1);
+    expect(paused.burnTicksLeft).toBeGreaterThan(0);
+
+    core.tick(500);
+    expect(state).toEqual(paused);
+
+    // 重新加载的那一 tick 就推进了一步。那一步可能正好炼完一件，所以比的是全部原料还要炼多少 tick
+    walkUntil(core, 'back', () => core.isChunkLoaded(0, 0));
+    expect(state.burnTicksLeft).toBe(paused.burnTicksLeft - 1);
+    expect(state.input!.count * 200 - state.smeltProgress).toBe(
+      paused.input!.count * 200 - paused.smeltProgress - 1,
+    );
+    expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.LitFurnace);
   });
 
   it('旁边放一块熔炉并往原料格放 3 块圆石，走远到那个区块卸载再走回来，方块与状态都还在（issue #30、ADR-0011）', () => {

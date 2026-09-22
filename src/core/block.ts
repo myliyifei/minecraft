@@ -24,8 +24,8 @@ export const BlockType = {
   Furnace: 10,
   /**
    * 燃烧中的熔炉（见 CONTEXT.md 的「熔炉」）：与 `Furnace` 是同一种方块的两个编号，只有正面贴图
-   * 不同。放置永远放熄火那个编号；点火与熄火在两个编号之间切换（#34），两者挖掉都掉熔炉物品，
-   * 共用同一条方块状态。
+   * 不同。放置永远放熄火那个编号；点火与熄火在两个编号之间切换（`stepFurnaces`、ADR-0012），
+   * 两者挖掉都掉熔炉物品，共用同一条方块状态。
    */
   LitFurnace: 11,
   /** 煤矿石（见 CONTEXT.md 的「矿石」，issue #31）：嵌在石层里，持任何镐挖掉后掉煤炭。 */
@@ -441,6 +441,22 @@ export function blockUse(block: BlockType): BlockUse {
 }
 
 /**
+ * 外观变体（ADR-0012）归到的那个编号：燃烧中的熔炉归到熔炉。不在表里的方块归到自己。
+ */
+const VARIANT_BASE: Readonly<Partial<Record<BlockType, BlockType>>> = {
+  [BlockType.LitFurnace]: BlockType.Furnace,
+};
+
+/**
+ * 这个编号是哪一种方块：外观变体归到它的基本编号，其余方块是自己。
+ *
+ * 「与目标同一类型」按它比（连锁挖掘）：熄火与燃烧中的熔炉只是外观不同，排在一起时连成一片。
+ */
+export function baseBlock(block: BlockType): BlockType {
+  return VARIANT_BASE[block] ?? block;
+}
+
+/**
  * 这种方块带哪一种方块状态，`None` 是没有。世界放下、换掉一个方块时按它维护状态表
  * （见 `World.setBlock`）。
  */
@@ -483,6 +499,8 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   [ItemType.IronPickaxe]: null,
   [ItemType.IronAxe]: null,
   [ItemType.IronShovel]: null,
+  // 木炭同样只是材料：原木炼出来的，没有对应的方块（#34）。
+  [ItemType.Charcoal]: null,
 };
 
 /**

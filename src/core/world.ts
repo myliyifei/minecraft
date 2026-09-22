@@ -68,9 +68,10 @@ export class World implements BlockEdit, BlockStateView {
    * 切换（熄火与燃烧中的熔炉）那条不动。区块卸载不删这里的条目——带状态的方块一定是玩家放的，
    * 那个区块因此是已改区块，卸载后整块留着（ADR-0008），走回来时方块与状态都还在。
    *
-   * 键用 `"x,y,z"` 字符串，理由同 `changed`：这条路每 tick 最多走几次。
+   * 键用 `"x,y,z"` 字符串，理由同 `changed`：放下、挖掉每 tick 最多几次。值连坐标一起存（`BlockStateEntry`），
+   * 每 tick 推进熔炉（`loadedBlockStates`）时不必再从键里解出坐标。
    */
-  private readonly blockStates = new Map<string, BlockState>();
+  private readonly blockStates = new Map<string, BlockStateEntry>();
   private readonly source: ChunkSource;
 
   constructor(source: ChunkSource) {
@@ -181,7 +182,7 @@ export class World implements BlockEdit, BlockStateView {
   }
 
   blockStateAt(x: number, y: number, z: number): BlockState | undefined {
-    return this.blockStates.get(blockKey(Math.floor(x), Math.floor(y), Math.floor(z)));
+    return this.blockStates.get(blockKey(Math.floor(x), Math.floor(y), Math.floor(z)))?.state;
   }
 
   /** 状态表里有几条。调试句柄与测试用它确认放下、挖掉之后表的增减。 */
@@ -189,16 +190,21 @@ export class World implements BlockEdit, BlockStateView {
     return this.blockStates.size;
   }
 
-  /**
-   * 整张状态表：每一条带着它的世界坐标。调试句柄读它看世界里有哪些带状态的方块。
-   *
-   * 坐标从键里解出来而不是另存一份：这条路只有调试与测试走，表里也只有几十条。
-   */
+  /** 整张状态表：每一条带着它的世界坐标。调试句柄读它看世界里有哪些带状态的方块。 */
   allBlockStates(): BlockStateEntry[] {
-    return [...this.blockStates].map(([key, state]) => {
-      const [x, y, z] = key.split(',').map(Number) as [number, number, number];
-      return { x, y, z, state };
-    });
+    return [...this.blockStates.values()];
+  }
+
+  /**
+   * 所在区块已加载的那些状态表条目。熔炉每 tick 按它推进（`stepFurnaces`）：卸载了的区块里的熔炉
+   * 不在其中，暂停到区块重新加载。
+   *
+   * 逐条判区块而不是按区块分桶：整张表也就几十条，每 tick 走一遍的开销可以忽略。
+   */
+  *loadedBlockStates(): IterableIterator<BlockStateEntry> {
+    for (const entry of this.blockStates.values()) {
+      if (this.chunks.has(chunkKey(chunkOf(entry.x), chunkOf(entry.z)))) yield entry;
+    }
   }
 
   /**
@@ -210,7 +216,7 @@ export class World implements BlockEdit, BlockStateView {
     if (blockStateKind(previous) === blockStateKind(block)) return;
     const key = blockKey(x, y, z);
     const state = initialBlockState(block);
-    if (state) this.blockStates.set(key, state);
+    if (state) this.blockStates.set(key, { x, y, z, state });
     else this.blockStates.delete(key);
   }
 

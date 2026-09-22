@@ -5,6 +5,7 @@ import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS } from './constants';
 import { CRAFTING_TABLE_GRID, CraftingGrid, INVENTORY_CRAFTING_GRID } from './crafting-grid';
 import { Drops, type DropsView } from './drop';
 import { Experience, type ExperienceView } from './experience';
+import { stepFurnaces } from './furnace';
 import { FurnaceSlots } from './furnace-slots';
 import { Inventory, wrapHotbarSlot, type InventoryView } from './inventory';
 import { InventoryScreen, type InventoryScreenView } from './inventory-screen';
@@ -56,7 +57,7 @@ export interface GameCoreOptions {
  *
  * 第一切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」「空手挖掘」
  * 「掉落物与背包」「经验球与等级」「放置方块」「背包界面」九件事，第二切片起加「合成」
- * 与「使用（工作台界面）」。生物等系统由后续切片挂进 step()。
+ * 与「使用（工作台界面）」，第三切片加「熔炉界面」与「熔炼」。生物等系统由后续切片挂进 step()。
  */
 export class GameCore implements BlockEdit, BlockStateView {
   private readonly world: World;
@@ -123,7 +124,8 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.inventoryScreenState = new InventoryScreen(this.inventoryState, this.inventoryCraftingGrid);
     this.craftingTableGrid = new CraftingGrid(CRAFTING_TABLE_GRID);
     this.craftingTableState = new InventoryScreen(this.inventoryState, this.craftingTableGrid);
-    this.furnaceSlots = new FurnaceSlots();
+    // 从成品格取走成品时结算的经验，与挖掘给的经验走同一条路：生成经验球，飞向玩家。
+    this.furnaceSlots = new FurnaceSlots(this.xpOrbsState);
     this.furnaceScreenState = new InventoryScreen(this.inventoryState, this.furnaceSlots);
     // 挖掘要看手上的工具、还要让它损耗耐久：背包既是「手」也是收物品的地方。
     this.miningState = new Mining(
@@ -354,7 +356,7 @@ export class GameCore implements BlockEdit, BlockStateView {
    * (x, y, z) 那一格的方块状态（见 CONTEXT.md 的「方块状态」），没有的返回 undefined。
    *
    * 给出的是状态表里那一条本身，不是副本：调试句柄与测试往熔炉里放东西走的就是这条路；
-   * 游戏里改它的是熔炉界面与熔炼状态机（#34）。
+   * 游戏里改它的是熔炉界面与熔炼状态机（`stepFurnaces`）。
    */
   blockStateAt(x: number, y: number, z: number): BlockState | undefined {
     return this.world.blockStateAt(x, y, z);
@@ -448,6 +450,9 @@ export class GameCore implements BlockEdit, BlockStateView {
       this.useQueued = false;
       if (!uiMode) this.useTarget();
     }
+    // 熔炉排在挖掘与使用之后、掉落物与经验球之前（issue #34）。界面开着照样推进：挡的是玩家的输入，
+    // 不是世界。所在区块没加载的熔炉暂停，不补算。
+    stepFurnaces(this.world);
     // 掉落物与经验球都排在挖掘之后：这一 tick 刚挖出来的东西同一 tick 就开始动，而
     // 掉落物的拾取延迟（PICKUP_DELAY_TICKS）也从这里起算。拾取与吸收判的都是玩家走完
     // 之后的碰撞箱。两者互不影响，谁先谁后都一样。
@@ -489,7 +494,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   private openFurnace({ x, y, z }: Vec3): void {
     const state = this.world.blockStateAt(x, y, z);
     if (state?.kind !== BlockStateKind.Furnace) return;
-    this.furnaceSlots.bind(state);
+    this.furnaceSlots.bind(state, { x, y, z });
     this.furnaceScreenState.toggle();
   }
 

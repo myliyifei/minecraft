@@ -1,12 +1,11 @@
 import { BlockStateKind, blockStateKind, type BlockType } from './block';
-import type { ItemStack } from './item';
+import type { ItemStack, ItemType } from './item';
 
 /**
  * 熔炉的方块状态（见 CONTEXT.md 的「方块状态」「熔炉」）：三个格子，加燃烧与熔炼的进度。
  *
- * 字段可写：熔炉界面的三格格子批（#33）与熔炼状态机（#34）直接改它们，世界只负责这条状态
- * 什么时候建、什么时候删（ADR-0011）。本 issue（#30）里所有字段保持初始值，只有测试与
- * 调试路径会写。
+ * 字段可写：熔炉界面的三格格子批（`FurnaceSlots`）与熔炼状态机（`stepFurnace`）直接改它们，世界只负责
+ * 这条状态什么时候建、什么时候删（ADR-0011）。
  */
 export interface FurnaceState {
   readonly kind: typeof BlockStateKind.Furnace;
@@ -22,6 +21,11 @@ export interface FurnaceState {
   burnTicksTotal: number;
   /** 当前这份原料已经熔炼了多少 tick。 */
   smeltProgress: number;
+  /**
+   * 这份熔炼进度是哪种原料炼出来的，还没炼过是 undefined。原料格换成另一种原料时进度从 0 算起：
+   * 炼了 199 tick 的粗铁换成原木，原木不能接着这 199 tick 下一 tick 就出木炭。
+   */
+  progressItem: ItemType | undefined;
   /** 熔炼出的成品还没被取走、因此还没结算给玩家的经验。 */
   pendingExperience: number;
 }
@@ -41,6 +45,7 @@ export function newFurnaceState(): FurnaceState {
     burnTicksLeft: 0,
     burnTicksTotal: 0,
     smeltProgress: 0,
+    progressItem: undefined,
     pendingExperience: 0,
   };
 }

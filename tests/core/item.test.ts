@@ -70,6 +70,7 @@ describe('物品表里的工具', () => {
       ItemType.Coal,
       ItemType.RawIron,
       ItemType.IronIngot,
+      ItemType.Charcoal,
     ]) {
       expect(toolOf(item), `物品 ${item}`).toBeUndefined();
       expect(stackLimit(item)).toBe(DEFAULT_STACK_SIZE);

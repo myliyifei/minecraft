@@ -12,6 +12,11 @@ export interface SlotRules {
   accepts(index: number, item: ItemType): boolean;
   /** 第 index 格是不是只取格：只能从里面拿，不能往里放。 */
   isTakeOnly(index: number): boolean;
+  /**
+   * 从只取格第 index 格取走了 count 个之后调，调用时那一格里已经是取走之后剩下的。熔炉的成品格在这里
+   * 结算经验；没有只取格的格子批不会被调。
+   */
+  taken(index: number, count: number): void;
 }
 
 /**

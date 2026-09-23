@@ -2100,23 +2100,31 @@ test('关掉背包界面之后鼠标自动回到第一人称，视角不被甩�
   expect(errors).toEqual([]);
 });
 
+/**
+ * 补发一次背包键的连发 keydown，再推进 1 个 tick，返回这时有没有界面开着。
+ *
+ * 按住不放，浏览器每几十毫秒补发一次 keydown，带的是 repeat: true。切换型的键必须把
+ * 这些挡掉，否则界面每个 tick 开一次关一次。Playwright 的 keyboard.down 不模拟连发，
+ * 所以这里合成事件——投的是同一个监听器。开合排到下一个 tick 才生效，tick 在同一次
+ * evaluate 里显式推进，不靠 `waitForTimeout` 等游戏循环（理由见 `walkWhileHolding`）：
+ * 挡不住的话这一发之后界面状态就变了。
+ */
+async function sendInventoryRepeat(page: Page): Promise<boolean> {
+  return page.evaluate((code) => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { code, repeat: true }));
+    const core = window.__VOXEL__!.core;
+    core.tick();
+    return core.uiMode;
+  }, KEY_BINDINGS.inventory);
+}
+
 test('按住背包键不放，界面不会反复开关', async ({ page }) => {
   await grabPointer(page);
   const screen = page.locator('#inventory-screen');
   await page.keyboard.press(KEY_BINDINGS.inventory);
   await expect(screen).toBeVisible();
 
-  // 按住不放，浏览器每几十毫秒补发一次 keydown，带的是 repeat: true。切换型的键必须把
-  // 这些挡掉，否则界面每个 tick 开一次关一次。Playwright 的 keyboard.down 不模拟连发，
-  // 所以这里合成事件——投的是同一个监听器。每发之间等过一个 tick（50ms），
-  // 挡不住的话第一发就把界面关了。
-  for (let i = 0; i < 5; i++) {
-    await page.evaluate(
-      (code) => window.dispatchEvent(new KeyboardEvent('keydown', { code, repeat: true })),
-      KEY_BINDINGS.inventory,
-    );
-    await page.waitForTimeout(60);
-  }
+  for (let i = 0; i < 5; i++) expect(await sendInventoryRepeat(page)).toBe(true);
   await expect(screen).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -2734,6 +2742,31 @@ test('熔炉界面开着时按 Esc 也关掉它', async ({ page }) => {
   await expect(screen).toBeHidden();
   await expect.poll(() => readLockedElementId(page)).toBe('game');
   await expect(crosshair).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('按住背包键不放，熔炉界面不会被连发关掉，关掉之后连发也不会打开背包界面', async ({ page }) => {
+  await setUsableAhead(page, BlockType.Furnace);
+  await grabPointer(page);
+  const screen = page.locator('#furnace-screen');
+  const inventory = page.locator('#inventory-screen');
+  await page.evaluate(
+    (useButton) => document.dispatchEvent(new MouseEvent('mousedown', { button: useButton })),
+    MOUSE_BINDINGS.use,
+  );
+  await expect(screen).toBeVisible();
+
+  for (let i = 0; i < 5; i++) expect(await sendInventoryRepeat(page)).toBe(true);
+  await expect(screen).toBeVisible();
+
+  // 第一发 keydown 关掉熔炉界面。要等鼠标重新锁定，连发才会进入背包键那个分支；
+  // 没锁定、也没有界面开着时，无论有没有连发拦截，连发都会被忽略
+  await page.keyboard.down(KEY_BINDINGS.inventory);
+  await expect(screen).toBeHidden();
+  await expect.poll(() => readLockedElementId(page)).toBe('game');
+  for (let i = 0; i < 5; i++) expect(await sendInventoryRepeat(page)).toBe(false);
+  await page.keyboard.up(KEY_BINDINGS.inventory);
+  await expect(inventory).toBeHidden();
   expect(errors).toEqual([]);
 });
 

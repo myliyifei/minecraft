@@ -331,6 +331,16 @@ describe('世界里的熔炉每 tick 推进，只推进已加载区块里的（i
     expect(state.output).toEqual(ingots(1));
   });
 
+  it('原料格空、燃料格有煤：方块一直是熔炉，中间没有换过编号', () => {
+    const { world, state } = worldWithFurnace();
+    state.input = undefined;
+    world.takeChangedBlocks();
+    runWorld(world, SMELT);
+    expect(world.getBlock(...SPOT)).toBe(BlockType.Furnace);
+    // 点火又熄火会留下变过的记录，只看最后的编号查不出来
+    expect(world.takeChangedBlocks()).toEqual([]);
+  });
+
   it('所在区块卸载 500 tick，进度与燃料不变；重新加载后接着推进', () => {
     const { world, state } = worldWithFurnace();
     runWorld(world, 50);

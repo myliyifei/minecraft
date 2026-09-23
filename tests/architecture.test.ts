@@ -136,11 +136,15 @@ describe('键位表是单一数据源', () => {
 describe('网格生成的可测性', () => {
   // buildChunkMesh、图集映射与掉落物的漂浮旋转必须是纯数据变换，否则核心层测试
   // 覆盖不到面剔除，也覆盖不到「漂浮整段都在落点之上」这类要看一整个周期的性质。
-  const pureRenderFiles = ['render/mesh.ts', 'render/atlas.ts', 'render/drop-motion.ts'].map(
-    (f) => join(SRC, f),
-  );
+  // 昼夜的亮度、天空色与太阳方向同理：「一整天都不低于下限」要在整个一天上采样才断言得出。
+  const pureRenderFiles = [
+    'render/mesh.ts',
+    'render/atlas.ts',
+    'render/drop-motion.ts',
+    'render/daylight.ts',
+  ].map((f) => join(SRC, f));
 
-  it('mesh、atlas 与掉落物的运动学不依赖 three', () => {
+  it('mesh、atlas、掉落物的运动学与昼夜不依赖 three', () => {
     for (const file of pureRenderFiles) {
       expect(importedModules(readFileSync(file, 'utf8'))).not.toContain('three');
     }

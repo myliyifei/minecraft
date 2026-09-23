@@ -10,11 +10,26 @@ import { XP_ORB_SIZE } from '../core/xp-orb';
 import {
   CRACK_STAGES,
   HeldItemShape,
+  TILE,
   crackStage,
   heldItemShape,
   itemCubeUvs,
   itemIconUvs,
+  tileQuadUvs,
 } from './atlas';
+import {
+  CELESTIAL_DISTANCE,
+  CELESTIAL_SIZE,
+  DAY_LIGHTING,
+  celestialAngle,
+  celestialVisible,
+  frameTimeOfDay,
+  lightingAt,
+  moonDirection,
+  sunDirection,
+  type Rgb,
+  type SkyEnds,
+} from './daylight';
 import { dropBob, dropSpin } from './drop-motion';
 import { buildChunkMesh, meshTiles, type MeshData } from './mesh';
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes, staleChunksFor } from './mesh-plan';
@@ -52,18 +67,26 @@ const HELD_ICON_SIZE = 0.52;
  */
 const HELD_ITEM_TILT = { x: 0.32, y: -0.72, z: 0.12 } as const;
 
+/** 一个场景里的两盏灯。强度每帧按世界时刻改（`updateSky`），方向固定。 */
+interface SceneLights {
+  readonly ambient: THREE.AmbientLight;
+  readonly directional: THREE.DirectionalLight;
+}
+
 /**
- * 固定光照：环境光打底，方向光让方块的六个面有明暗区分（本切片不做天光）。
- * 两者的比例决定体积感——环境光太强，六个面的明暗差别就没了，方块看上去是平的。
+ * 光照：环境光打底，方向光让方块的六个面有明暗区分（本切片没有光照传播）。强度按世界时刻在白天
+ * 与夜晚两组常量之间插值（`lightingAt`），方向固定，不跟着太阳转。
  *
- * 世界与手持各挂一份（两遍渲染，见 `render`）。手持那一份让它的明暗不随玩家转头变化，
- * 与原版一致：手上那块方块不该因为背对太阳就黑下去。
+ * 世界与手持各挂一份（两遍渲染，见 `render`）。手持那一份的方向相对手持相机固定，明暗不随
+ * 玩家转头变化，与原版一致：手上那块方块不该因为背对太阳就黑下去。强度两份同步，夜里手上
+ * 那块方块与世界一起变暗。
  */
-function addFixedLights(scene: THREE.Scene): void {
-  scene.add(new THREE.AmbientLight(0xffffff, 1.05));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.45);
-  sun.position.set(0.5, 1, 0.28);
-  scene.add(sun);
+function addLights(scene: THREE.Scene): SceneLights {
+  const ambient = new THREE.AmbientLight(0xffffff, DAY_LIGHTING.ambient);
+  const directional = new THREE.DirectionalLight(0xffffff, DAY_LIGHTING.directional);
+  directional.position.set(0.5, 1, 0.28);
+  scene.add(ambient, directional);
+  return { ambient, directional };
 }
 
 /**
@@ -113,6 +136,11 @@ function paletteColor(name: string, fallback: string): THREE.Color {
     .getPropertyValue(name)
     .trim();
   return new THREE.Color(value || fallback);
+}
+
+/** 一个 three 颜色的三个分量（three 的工作色彩空间，线性）。 */
+function rgbOf(color: THREE.Color): Rgb {
+  return [color.r, color.g, color.b];
 }
 
 export interface WorldRendererOptions {
@@ -188,6 +216,23 @@ export interface HeldItemRenderView {
 }
 
 /**
+ * 场景里的天空现在是什么样：背景色、两盏灯的强度、太阳与月亮画不画。
+ * 与 `SelectionView` 一样直接从场景对象上读，端到端测试验的是真摆进场景的东西。
+ */
+export interface SkyView {
+  /** 场景背景色（sRGB 十六进制）。 */
+  readonly background: number;
+  /** 世界那一遍的环境光强度。 */
+  readonly ambient: number;
+  /** 世界那一遍的方向光强度。 */
+  readonly directional: number;
+  /** 手持那一遍的环境光强度。与世界那一遍同步。 */
+  readonly handAmbient: number;
+  readonly sunVisible: boolean;
+  readonly moonVisible: boolean;
+}
+
+/**
  * 渲染适配器：把核心的方块数据画成 Three.js 场景。
  *
  * 相机是第一人称的：跟着核心里的玩家走，位置在两次 tick 之间插值（ADR-0002）。
@@ -257,6 +302,19 @@ export class WorldRenderer {
   /** 经验球的几何体与材质：所有经验球长得一样，各建一份共用就够。 */
   private readonly xpOrbGeometry = new THREE.BoxGeometry(XP_ORB_SIZE, XP_ORB_SIZE, XP_ORB_SIZE);
   private readonly xpOrbMaterial: THREE.Material;
+  /** 场景背景色。每帧按世界时刻在两端之间插值后写回它（`updateSky`）。 */
+  private readonly skyColor: THREE.Color;
+  /** 天空色的两端：白天取世界色板的 `--sky`，夜晚取 `--night-sky`。 */
+  private readonly skyEnds: SkyEnds;
+  private readonly worldLights: SceneLights;
+  private readonly handLights: SceneLights;
+  /**
+   * 太阳与月亮挂在这一层下面：它的位置每帧设成相机的位置，绕 z 轴按时刻转，两张方片分别摆在
+   * 它的 ±X 上。位置随相机，玩家走多远离它们都一样远；朝向不随相机，转头时它们停在天上原处。
+   */
+  private readonly celestialPivot = new THREE.Group();
+  private readonly sun: THREE.Mesh;
+  private readonly moon: THREE.Mesh;
 
   constructor({ canvas, core, texture, crackTexture }: WorldRendererOptions) {
     this.core = core;
@@ -269,7 +327,10 @@ export class WorldRenderer {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    this.scene.background = paletteColor('--sky', '#7fb2e8');
+    const daySky = paletteColor('--sky', '#7fb2e8');
+    this.skyEnds = { day: rgbOf(daySky), night: rgbOf(paletteColor('--night-sky', '#0d1226')) };
+    this.skyColor = daySky.clone();
+    this.scene.background = this.skyColor;
     this.material = new THREE.MeshLambertMaterial({
       map: texture,
       // 树叶贴图有镂空，用 alphaTest 剔掉透明像素，避免半透明排序问题。
@@ -295,8 +356,20 @@ export class WorldRenderer {
     // 远裁剪面只要够装下它自己。
     this.handCamera = new THREE.PerspectiveCamera(FIELD_OF_VIEW, 1, 0.1, 10);
     this.handScene.add(this.handAnchor);
-    addFixedLights(this.scene);
-    addFixedLights(this.handScene);
+    this.worldLights = addLights(this.scene);
+    this.handLights = addLights(this.handScene);
+
+    // 太阳与月亮不参与光照，也不吃光照：方片本身就是发光的样子，夜里不该跟着地形一起变暗。
+    const celestialMaterial = new THREE.MeshBasicMaterial({
+      map: texture,
+      alphaTest: 0.5,
+      depthTest: false,
+      depthWrite: false,
+    });
+    this.sun = celestialQuad(TILE.sun, celestialMaterial, 1);
+    this.moon = celestialQuad(TILE.moon, celestialMaterial, -1);
+    this.celestialPivot.add(this.sun, this.moon);
+    this.scene.add(this.celestialPivot);
     // 两遍渲染各自决定清什么，所以关掉自动清屏，见 render()。
     this.renderer.autoClear = false;
 
@@ -352,6 +425,18 @@ export class WorldRenderer {
   get cameraPosition(): Vec3 {
     const { x, y, z } = this.camera.position;
     return { x, y, z };
+  }
+
+  /** 上一帧画出来的天空：背景色、灯的强度与太阳月亮。 */
+  get sky(): SkyView {
+    return {
+      background: this.skyColor.getHex(),
+      ambient: this.worldLights.ambient.intensity,
+      directional: this.worldLights.directional.intensity,
+      handAmbient: this.handLights.ambient.intensity,
+      sunVisible: this.sun.visible,
+      moonVisible: this.moon.visible,
+    };
   }
 
   /** 上一帧画出来的选框与裂纹。 */
@@ -495,6 +580,7 @@ export class WorldRenderer {
    */
   render(alpha = 1): void {
     this.updateCamera(alpha);
+    this.updateSky(alpha);
     this.updateSelection();
     this.updateChainPreview();
     this.updateDrops(alpha);
@@ -507,6 +593,28 @@ export class WorldRenderer {
     this.renderer.render(this.scene, this.camera);
     this.renderer.clearDepth();
     this.renderer.render(this.handScene, this.handCamera);
+  }
+
+  /**
+   * 按世界时刻更新天空：背景色、两个场景的灯光强度、太阳与月亮的位置。
+   *
+   * 时刻与相机位置一样在上一个 tick 与当前 tick 之间插值（ADR-0002），太阳因此平滑地走，
+   * 黄昏也是连续变暗的。算法都在 `daylight.ts` 里，这里只把结果写进场景对象。
+   * 太阳月亮那一层的位置取相机的位置，所以排在 `updateCamera` 之后。
+   */
+  private updateSky(alpha: number): void {
+    const time = frameTimeOfDay(this.core.timeOfDay, alpha);
+    const { ambient, directional, sky } = lightingAt(time, this.skyEnds);
+    this.skyColor.setRGB(...sky);
+    for (const lights of [this.worldLights, this.handLights]) {
+      lights.ambient.intensity = ambient;
+      lights.directional.intensity = directional;
+    }
+
+    this.celestialPivot.position.copy(this.camera.position);
+    this.celestialPivot.rotation.z = celestialAngle(time);
+    this.sun.visible = celestialVisible(sunDirection(time));
+    this.moon.visible = celestialVisible(moonDirection(time));
   }
 
   /**
@@ -773,6 +881,24 @@ function entityCenter(
     lerp(previousPosition.y, position.y, alpha) + size / 2,
     lerp(previousPosition.z, position.z, alpha),
   );
+}
+
+/**
+ * 太阳或月亮那张方片：摆在绕转那一层的 +X（`side` 为 1）或 −X（`side` 为 −1）上，正面朝向
+ * 那一层的原点，也就是相机。
+ *
+ * 它排在世界那一遍的最前面画（`renderOrder` 为负），且不参与深度：地形随后画上来，总是盖住它。
+ * 靠距离排前后不可靠——从世界底部望向视距边缘的高处，那里的方块比 `CELESTIAL_DISTANCE` 还远。
+ */
+function celestialQuad(tile: number, material: THREE.Material, side: 1 | -1): THREE.Mesh {
+  const geometry = new THREE.PlaneGeometry(CELESTIAL_SIZE, CELESTIAL_SIZE);
+  geometry.setAttribute('uv', new THREE.BufferAttribute(tileQuadUvs(tile), 2));
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.renderOrder = -1;
+  mesh.position.set(side * CELESTIAL_DISTANCE, 0, 0);
+  // PlaneGeometry 的正面朝 +Z，绕 y 轴转 ∓90° 后朝向 ∓X，正对原点。
+  mesh.rotation.y = (-side * Math.PI) / 2;
+  return mesh;
 }
 
 function toGeometry(data: MeshData): THREE.BufferGeometry {

@@ -3051,6 +3051,77 @@ test('调试句柄放一块煤矿石在玩家面前：画布上那一块用的�
   expect(errors).toEqual([]);
 });
 
+test('调试句柄把时刻拨到午夜：背景色与环境光比白天暗，月亮在天上、太阳不在；拨回早晨反过来', async ({
+  page,
+}) => {
+  // 整段跑在一次同步的 evaluate 里，游戏循环插不进来。朝 −Z 抬头看天：太阳与月亮绕 z 轴转，
+  // 始终在东西向的那个竖直面上，画面正中这一块天空因此不会碰上它们，读到的就是背景色。
+  const seen = await page.evaluate(
+    ({ lookUp }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const centerRgb = window.__CENTER_RGB__!;
+      core.turn(-core.player.yaw, lookUp - core.player.pitch);
+      const at = (time: number) => {
+        core.setTimeOfDay(time);
+        renderer.render(1);
+        return { time: core.timeOfDay, night: core.isNight, sky: renderer.sky, rgb: centerRgb() };
+      };
+      return { day: at(6000), night: at(18000), back: at(6000) };
+    },
+    { lookUp: 0.6 },
+  );
+  const brightness = ([r, g, b]: readonly number[]) => r! + g! + b!;
+  const hexBrightness = (hex: number) => brightness([hex >> 16, (hex >> 8) & 0xff, hex & 0xff]);
+
+  expect(seen.day).toMatchObject({ time: 6000, night: false });
+  expect(seen.night).toMatchObject({ time: 18000, night: true });
+  // 午夜：背景色、两盏灯都比白天暗，手持那一份跟着一起暗；月亮可见、太阳不可见
+  expect(hexBrightness(seen.night.sky.background)).toBeLessThan(hexBrightness(seen.day.sky.background));
+  expect(seen.night.sky.ambient).toBeLessThan(seen.day.sky.ambient);
+  expect(seen.night.sky.directional).toBeLessThan(seen.day.sky.directional);
+  expect(seen.night.sky.handAmbient).toBe(seen.night.sky.ambient);
+  expect(seen.night.sky).toMatchObject({ moonVisible: true, sunVisible: false });
+  // 早晨：太阳可见、月亮不可见
+  expect(seen.day.sky).toMatchObject({ moonVisible: false, sunVisible: true });
+  // 画面上的天空也真的暗下去了：读回来的像素与场景背景色一致地变暗
+  expect(brightness(seen.night.rgb)).toBeLessThan(brightness(seen.day.rgb) - 150);
+  // 拨回 6000 与一开始的白天完全相同
+  expect(seen.back.sky).toEqual(seen.day.sky);
+  expect(seen.back.rgb).toEqual(seen.day.rgb);
+  expect(errors).toEqual([]);
+});
+
+test('正午抬头看得见太阳；头顶放一块石头之后，画面正中是石头而不是太阳', async ({ page }) => {
+  // 太阳先画、不参与深度（renderer.ts 的 celestialQuad）：地形必须盖在它上面。画的顺序一旦
+  // 弄反，太阳就会画在头顶那块石头之上。
+  const seen = await page.evaluate(
+    ({ stone, eyeHeight, maxPitch }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const centerRgb = window.__CENTER_RGB__!;
+      core.turn(0, maxPitch - core.player.pitch);
+      core.setTimeOfDay(6000);
+      renderer.render(1);
+      const open = centerRgb();
+      const { x, y, z } = core.player.position;
+      core.setBlock(Math.floor(x), Math.floor(y + eyeHeight) + 3, Math.floor(z), stone);
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      return { open, covered: centerRgb(), sunVisible: renderer.sky.sunVisible };
+    },
+    { stone: BlockType.Stone, eyeHeight: PLAYER_EYE_HEIGHT, maxPitch: MAX_PITCH },
+  );
+  expect(seen.sunVisible).toBe(true);
+  // 太阳是暖黄：红绿都高、蓝明显比红低（天空的蓝正相反，蓝比红高）
+  const [r, g, b] = seen.open;
+  expect(r).toBeGreaterThan(200);
+  expect(g).toBeGreaterThan(150);
+  expect(r - b).toBeGreaterThan(40);
+  // 盖上石头之后是石头的灰：三个分量相近，不再是太阳的黄
+  const [sr, sg, sb] = seen.covered;
+  expect(Math.max(sr, sg, sb) - Math.min(sr, sg, sb)).toBeLessThan(30);
+  expect(errors).toEqual([]);
+});
+
 test('核心以固定步长推进', async ({ page }) => {
   const before = await page.evaluate(() => window.__VOXEL__!.core.tickCount);
   await page.waitForTimeout(1000);

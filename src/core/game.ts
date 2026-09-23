@@ -14,6 +14,7 @@ import { placeBlock } from './placement';
 import { IDLE_INTENT, Player, type MoveIntent, type PlayerView } from './player';
 import { streamChunks } from './streaming';
 import { plainsTerrain } from './terrain';
+import { isNightAt, timeOfDayAt, wrapTimeOfDay } from './time-of-day';
 import type { Vec3 } from './vec3';
 import { XpOrbs, type XpOrbsView } from './xp-orb';
 import {
@@ -84,6 +85,11 @@ export class GameCore implements BlockEdit, BlockStateView {
   private readonly furnaceScreenState: InventoryScreen;
   private readonly miningState: Mining;
   private ticks = 0;
+  /**
+   * 世界时刻相对 tick 计数的偏移（见 `timeOfDayAt`）。进入世界时是 0，所以开局是早晨；
+   * 只有 `setTimeOfDay` 改它。
+   */
+  private timeOffset = 0;
   private intent: MoveIntent = IDLE_INTENT;
   private miningHeld = false;
   private chainHeld = false;
@@ -335,6 +341,29 @@ export class GameCore implements BlockEdit, BlockStateView {
   /** 已推进的 tick 数。世界时间只由 tick 决定，与真实时钟无关。 */
   get tickCount(): number {
     return this.ticks;
+  }
+
+  /**
+   * 世界时刻（见 CONTEXT.md）：一天里的第几个 tick，落在 [0, 24000)。进入世界时是 0（早晨），
+   * 每 tick 加 1，满一天折回 0。渲染层按它调亮度、天空色与太阳月亮的位置。
+   */
+  get timeOfDay(): number {
+    return timeOfDayAt(this.ticks, this.timeOffset);
+  }
+
+  /** 此刻是不是夜晚。分界见 `isNightAt`。 */
+  get isNight(): boolean {
+    return isNightAt(this.timeOfDay);
+  }
+
+  /**
+   * 把世界时刻拨到 t，立即生效。超出一天的值与负值按一天折回。
+   *
+   * 与 `tick(n)` 一样是普通的公开指令，调试句柄与测试都走它。它改的是时刻相对 tick 计数的
+   * 偏移，tick 计数不动：之后每 tick 时刻照样加 1，其他按 tick 计数走的系统不受影响。
+   */
+  setTimeOfDay(t: number): void {
+    this.timeOffset = wrapTimeOfDay(t - this.ticks);
   }
 
   /** 推进 n 个 tick（默认 1）。n ≤ 0 时什么都不做。 */

@@ -2,7 +2,7 @@ import { BlockType, placedBlock } from '../core/block';
 import { ItemType } from '../core/item';
 
 /**
- * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 8 行，目前用了前 33 格。
+ * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 8 行，目前用了前 35 格。
  *
  * 行列数都取 2 的幂：uv 是格号除以行列数，除以 8 在 float32 里是精确的，除以 5 就不是
  * ——顶点属性存的是 Float32Array，1/5 一进去就带上舍入误差，一个面的边缘会取到相邻那一格的像素。
@@ -51,6 +51,9 @@ export const TILE = {
   ironAxe: 30,
   ironShovel: 31,
   charcoal: 32,
+  // 天上的太阳与月亮（#38）：各是一张方片，不属于任何方块或物品。
+  sun: 33,
+  moon: 34,
 } as const;
 
 /**
@@ -291,7 +294,15 @@ const BOX_FACE_UV: readonly (readonly [number, number])[] = [
  * 所以复用 `BOX_FACE_UV`。与 `itemCubeUvs` 一样是纯数据变换，不 import three。
  */
 export function itemIconUvs(item: ItemType): Float32Array {
-  const rect = tileUvRect(faceTile(ITEM_TILES[item], 'front'));
+  return tileQuadUvs(faceTile(ITEM_TILES[item], 'front'));
+}
+
+/**
+ * 一张方片贴图格号那一格的 uv 数组：`PlaneGeometry` 四个顶点各落在那一格的四个角上。
+ * 手持的平面图标与天上的太阳、月亮都用它。
+ */
+export function tileQuadUvs(tile: number): Float32Array {
+  const rect = tileUvRect(tile);
   const uvs = new Float32Array(BOX_FACE_UV.length * 2);
   let i = 0;
   for (const [du, dv] of BOX_FACE_UV) {

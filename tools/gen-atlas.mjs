@@ -77,6 +77,11 @@ const CHARCOAL_SHINE = [112, 88, 68];
 const INGOT = [214, 214, 220];
 const INGOT_SHINE = [240, 240, 244];
 const INGOT_EDGE = [146, 146, 156];
+/** 太阳是一块暖黄的方片，中间更亮；月亮是一块偏冷的灰白方片，带几处暗斑。 */
+const SUN = [255, 214, 92];
+const SUN_CORE = [255, 246, 196];
+const MOON = [214, 220, 232];
+const MOON_SPOT = [168, 176, 194];
 
 /**
  * 矿石贴图上矿点落在哪些像素：每格 8 个矿点，各是一个 2×2 的方块加一个突出的角，位置写死，
@@ -355,7 +360,27 @@ const TILES = {
   31: toolIcon(shovelHead, IRON_HEAD),
   // charcoal：与煤炭同形状的一块，颜色偏棕
   32: lumpIcon(CHARCOAL, CHARCOAL_SHINE),
+  // sun：透明底上居中的一块方片，外圈暖黄、里面一块更亮的方芯
+  33: (x, y, rand) => {
+    if (!inCelestial(x, y)) return [0, 0, 0, 0];
+    const core = x >= 5 && x <= 10 && y >= 5 && y <= 10;
+    return shade(core ? SUN_CORE : SUN, Math.floor(rand() * 10) - 5);
+  },
+  // moon：同样大小的一块灰白方片，上面几处暗斑
+  34: (x, y, rand) => {
+    if (!inCelestial(x, y)) return [0, 0, 0, 0];
+    const spot =
+      (x >= 4 && x <= 6 && y >= 4 && y <= 6) ||
+      (x >= 9 && x <= 10 && y >= 8 && y <= 10) ||
+      (x >= 5 && x <= 6 && y >= 10 && y <= 11);
+    return shade(spot ? MOON_SPOT : MOON, Math.floor(rand() * 10) - 5);
+  },
 };
+
+/** 太阳与月亮那块方片的范围：居中 12×12，四周各留 2 像素透明边。 */
+function inCelestial(x, y) {
+  return x >= 2 && x <= 13 && y >= 2 && y <= 13;
+}
 
 /** 这一像素落在熔炉正面的炉口里吗。 */
 function inMouth(x, y) {

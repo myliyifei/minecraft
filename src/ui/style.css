@@ -3,6 +3,8 @@
  * （tools/gen-atlas.mjs 里的 GRASS / DIRT / STONE / BEDROCK）。
  * renderer.ts 通过 getComputedStyle 读 --sky 与 --xp，天空与经验球不会和界面对不上。
  *
+ * --night-sky 是夜晚的天空色，只有 3D 场景用：renderer.ts 按世界时刻在 --sky 与它之间插值。
+ *
  * --xp 不来自图集：经验球没有贴图，它是一团纯色的光，等级条也用这个颜色。
  *
  * --tile 是一个方块的屏幕尺寸，也是界面的间距单位：贴图是 16×16，
@@ -10,6 +12,7 @@
  */
 :root {
   --sky: #7fb2e8;
+  --night-sky: #0d1226;
   --grass: #60943e;
   --dirt: #866043;
   --stone: #7f7f7f;

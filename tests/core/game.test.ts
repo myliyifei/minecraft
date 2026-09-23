@@ -2902,6 +2902,30 @@ describe('GameCore 的已改区块在玩家走远再回来之后', () => {
     expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.LitFurnace);
   });
 
+  it('挖掉南边三格外的草不去拾取，走远到那个区块卸载再走回来，掉落物还在原位（issue #37、ADR-0013）', () => {
+    const core = coreForRoundTrip();
+    // 站在出生点朝南斜着往下看，视线落在三格外那块草上：离得够远，吸不到掉出来的东西
+    const farGrass: [number, number, number] = [0, FLAT_GROUND_Y, 3];
+    look(core, Math.PI, -Math.PI / 6);
+    core.tick();
+    expect(core.mining.target).toMatchObject(toVec(farGrass));
+    core.setMining(true);
+    core.tick(miningTicks(BlockType.Grass, BARE_HAND));
+    core.setMining(false);
+    expect(core.getBlock(...farGrass)).toBe(BlockType.Air);
+    // 等它落进坑底停住
+    core.tick(40);
+    expect(core.drops.count).toBe(1);
+    const settled = core.drops.all()[0]!.position;
+    expect(settled.y).toBe(FLAT_GROUND_Y);
+
+    roundTripFromOrigin(core);
+
+    // 没有对着「未加载即空气」持续下落，也没到期消失
+    expect(core.drops.count).toBe(1);
+    expect(core.drops.all()[0]!.position).toEqual(settled);
+  });
+
   it('旁边放一块熔炉并往原料格放 3 块圆石，走远到那个区块卸载再走回来，方块与状态都还在（issue #30、ADR-0011）', () => {
     const core = coreForRoundTrip();
     digUnderfoot(core, BlockType.Grass);

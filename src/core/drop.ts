@@ -1,6 +1,6 @@
 import type { BlockView } from './block';
 import { TAU } from './constants';
-import { stepEntities } from './entity';
+import { isBoxInLoadedChunks, stepEntities, type LoadedChunks } from './entity';
 import { withCount, type ItemSink, type ItemStack, type ItemType } from './item';
 import { hashCoords } from './noise';
 import {
@@ -95,15 +95,18 @@ export interface DropSink {
  *
  * 时间只由 `step()` 的调用次数表达（ADR-0002）；水平初速度由种子与坐标哈希出来
  * （ADR-0003），因此同一串 tick 每次都得到同一条轨迹。
+ *
+ * 碰撞箱这一 tick 可能碰到的区块有一个没加载，掉落物就原地暂停：不下落、不计存活时间，区块重新
+ * 加载后接着推进（ADR-0013）。否则它会对着「未加载即空气」持续下落，直到到期消失。
  */
 export class Drops implements DropsView, DropSink {
-  private readonly blocks: BlockView;
+  private readonly blocks: BlockView & LoadedChunks;
   private readonly seed: number;
   private readonly list: Drop[] = [];
   /** 下一个掉落物的编号。同时是哈希初速度的一个输入，同一格掉出的几个因此不重叠。 */
   private nextId = 1;
 
-  constructor(blocks: BlockView, seed: number) {
+  constructor(blocks: BlockView & LoadedChunks, seed: number) {
     this.blocks = blocks;
     this.seed = seed;
   }
@@ -147,10 +150,17 @@ export class Drops implements DropsView, DropSink {
    *
    * 先判拾取再判到期：正好在第 6000 tick 上而玩家就贴着它时，宁可让他拾取到，
    * 而不是在他手边凭空消失。
+   *
+   * 碰撞箱这一 tick 可能碰到的区块有一个没加载，就只原地停住，也不判定拾取：暂停就是这一 tick
+   * 整个跳过它。玩家站在已加载区块的边上、它就在隔壁没加载的区块里时，要等那个区块加载了才拾取得到。
    */
   step(playerBox: Hitbox, into: ItemSink): void {
     const pickupBox = expand(playerBox, PICKUP_MARGIN);
     stepEntities(this.list, (drop) => {
+      if (!isBoxInLoadedChunks(this.blocks, drop.reach)) {
+        drop.hold();
+        return true;
+      }
       drop.step(this.blocks);
       if (drop.collectInto(pickupBox, into)) return false;
       return drop.age < DROP_LIFETIME_TICKS;
@@ -214,6 +224,20 @@ class Drop implements DropView {
   }
 
   /**
+   * 这一 tick 的碰撞可能读到的范围：碰撞箱在水平方向上按当前速度外扩。阻力只会让速度变小，
+   * 按阻力之前的速度外扩因此不会少算。竖直方向不涉及别的区块，不外扩。
+   */
+  get reach(): Hitbox {
+    const { min, max } = this.hitbox;
+    const dx = Math.abs(this.velocityX);
+    const dz = Math.abs(this.velocityZ);
+    return {
+      min: { x: min.x - dx, y: min.y, z: min.z - dz },
+      max: { x: max.x + dx, y: max.y, z: max.z + dz },
+    };
+  }
+
+  /**
    * 试着把自己交给背包。全被收下就返回 true——调用方随即把它从世界里去掉。
    * 收下一部分时留下剩的那些，下一个 tick 再试。
    */
@@ -224,6 +248,16 @@ class Drop implements DropView {
     if (left === 0) return true;
     this.stack = withCount(this.stack, left);
     return false;
+  }
+
+  /**
+   * 原地停一个 tick：位置、速度、存活 tick 都不变，只把上一个 tick 的位置对齐到现在。
+   * 渲染层在两个位置之间插值（ADR-0002），不对齐的话它会一遍遍重放暂停前的最后一步。
+   */
+  hold(): void {
+    this.prevX = this.x;
+    this.prevY = this.y;
+    this.prevZ = this.z;
   }
 
   /** 推进一个 tick：重力、阻力、与方块的碰撞。 */

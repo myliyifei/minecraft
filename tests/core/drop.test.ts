@@ -4,6 +4,7 @@ import {
   DROP_LIFETIME_TICKS,
   DROP_SIZE,
   Drops,
+  type DropView,
   PICKUP_DELAY_TICKS,
   PICKUP_MARGIN,
 } from '../../src/core/drop';
@@ -280,6 +281,114 @@ describe('掉落物的存活时间', () => {
 
     idle(drops, 7);
     expect(drops.all()[0]!.age).toBe(7);
+  });
+});
+
+describe('掉落物所在区块卸载后暂停（ADR-0013）', () => {
+  /** 在 (0, 0) 区块的半空中生成一个掉落物，让它先落几 tick，还没落地。 */
+  function fallingInOriginChunk(): { world: World; drops: Drops } {
+    const scene = dropsOnFlatGround();
+    scene.drops.spawnInBlock(ONE_DIRT, 3, FLAT_STAND_Y + 12, 3);
+    idle(scene.drops, 5);
+    expect(scene.drops.all()[0]!.position.y).toBeGreaterThan(RESTING_Y);
+    return scene;
+  }
+
+  it('卸载后推进 500 tick，位置与存活 tick 数都不变；重新加载后接着落并落地', () => {
+    const { world, drops } = fallingInOriginChunk();
+    const { position, age } = drops.all()[0]!;
+
+    world.unloadChunk(0, 0);
+    idle(drops, 500);
+    const paused = drops.all()[0]!;
+    // 没有对着「未加载即空气」持续下落
+    expect(paused.position).toEqual(position);
+    expect(paused.age).toBe(age);
+    // 暂停的这些 tick 里没有动过：渲染层在两个位置之间插值时它就停在原地
+    expect(paused.previousPosition).toEqual(position);
+
+    world.loadChunk(0, 0);
+    idle(drops, 60);
+    const resumed = drops.all()[0]!;
+    expect(resumed.position.y).toBe(RESTING_Y);
+    expect(resumed.age).toBe(age + 60);
+  });
+
+  it('暂停的 tick 不算进存活时间：重新加载后还要再过剩下的那些 tick 才消失', () => {
+    const { world, drops } = fallingInOriginChunk();
+    const left = DROP_LIFETIME_TICKS - drops.all()[0]!.age;
+    idle(drops, left - 1);
+
+    world.unloadChunk(0, 0);
+    idle(drops, 500);
+    expect(drops.count).toBe(1);
+
+    world.loadChunk(0, 0);
+    idle(drops, 1);
+    expect(drops.count).toBe(0);
+  });
+
+  it('只暂停所在区块未加载的掉落物：隔壁已加载区块里的照常落地', () => {
+    const { world, drops } = fallingInOriginChunk();
+    drops.spawnInBlock(ONE_DIRT, 19, FLAT_STAND_Y + 12, 3);
+
+    world.unloadChunk(0, 0);
+    idle(drops, 60);
+    const [paused, neighbour] = drops.all();
+    expect(paused!.position.y).toBeGreaterThan(RESTING_Y);
+    expect(neighbour!.position.y).toBe(RESTING_Y);
+  });
+});
+
+describe('掉落物碰撞箱伸向未加载区块时暂停（ADR-0013）', () => {
+  /**
+   * 在区块边缘那一列的半空中生成、朝隔壁区块飘的掉落物。种子是挑过的：全程加载时它越过区块边界，
+   * 落进隔壁那个区块。东西两个方向各一例，外扩的范围在速度为负时也要朝负方向伸。
+   */
+  const DRIFTS = [
+    { toward: '东', seed: 13, blockX: 15, neighbour: 1, border: 16, side: 1 },
+    { toward: '西', seed: 30, blockX: 0, neighbour: -1, border: 0, side: -1 },
+  ] as const;
+  type Drift = (typeof DRIFTS)[number];
+
+  function drifting({ seed, blockX }: Drift): { world: World; drops: Drops } {
+    const scene = dropsOnFlatGround(seed);
+    scene.drops.spawnInBlock(ONE_DIRT, blockX, FLAT_STAND_Y + 12, 3);
+    return scene;
+  }
+
+  /** 碰撞箱朝隔壁那一侧的边：向东飘是右边，向西飘是左边。 */
+  function leadingEdge(drift: Drift, drop: DropView): number {
+    return drop.position.x + (drift.side * DROP_SIZE) / 2;
+  }
+
+  it.each(DRIFTS)('朝$toward飘时碰撞箱不伸进没加载的区块：隔壁读成空气的那些方块不参与碰撞', (drift) => {
+    const control = drifting(drift);
+    idle(control.drops, 80);
+    // 全程加载时它确实会越过区块边界，否则下面的断言什么都证明不了
+    expect(drift.side * (control.drops.all()[0]!.position.x - drift.border)).toBeGreaterThan(0);
+
+    const { world, drops } = drifting(drift);
+    world.unloadChunk(drift.neighbour, 0);
+    idle(drops, 80);
+    const paused = drops.all()[0]!;
+    expect(drift.side * (leadingEdge(drift, paused) - drift.border)).toBeLessThanOrEqual(0);
+    // 停在半空，没落地也没被当成撞墙停住
+    expect(paused.position.y).toBeGreaterThan(RESTING_Y);
+  });
+
+  it.each(DRIFTS)('朝$toward飘时隔壁区块重新加载后接着飘，轨迹与全程加载时一样', (drift) => {
+    const { world, drops } = drifting(drift);
+    world.unloadChunk(drift.neighbour, 0);
+    idle(drops, 80);
+    world.loadChunk(drift.neighbour, 0);
+    idle(drops, 80);
+    const resumed = drops.all()[0]!;
+
+    const control = drifting(drift);
+    idle(control.drops, resumed.age);
+    expect(resumed.position).toEqual(control.drops.all()[0]!.position);
+    expect(resumed.position.y).toBe(RESTING_Y);
   });
 });
 

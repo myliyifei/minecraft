@@ -203,7 +203,7 @@ export class World implements BlockEdit, BlockStateView {
    */
   *loadedBlockStates(): IterableIterator<BlockStateEntry> {
     for (const entry of this.blockStates.values()) {
-      if (this.chunks.has(chunkKey(chunkOf(entry.x), chunkOf(entry.z)))) yield entry;
+      if (this.isChunkLoaded(chunkOf(entry.x), chunkOf(entry.z))) yield entry;
     }
   }
 

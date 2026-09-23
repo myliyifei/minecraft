@@ -517,7 +517,9 @@ test('走远到区块卸载再走回来，挖过的洞还在，网格也还带�
 
   // 朝 −Z 走到原点区块被卸载：视距 8、卸载线 9，要走出去 144 格开外
   await walkUntil(page, 'forward', async () => !(await readOriginChunkState(page)).loaded, 2000);
-  expect(await readOriginChunkState(page)).toEqual({ loaded: false, hasMesh: false });
+  // 核心这一侧已经卸载，网格要等下一帧游戏循环调 syncChunkMeshes 才移除（见 planChunkMeshes）。
+  // CPU 负载高时两帧之间隔得很久，所以原地等到网格也没了再断言。
+  await expect.poll(() => readOriginChunkState(page)).toEqual({ loaded: false, hasMesh: false });
 
   // 再往回退，走到原点区块重新进入视距
   await walkUntil(page, 'back', async () => (await readOriginChunkState(page)).loaded, 1000);

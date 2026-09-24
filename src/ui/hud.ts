@@ -1,7 +1,9 @@
 import type { GameCore } from '../core/game';
 import type { InventoryScreenView } from '../core/inventory-screen';
 import { installCrosshair } from './crosshair';
+import { installHealthBar } from './health-bar';
 import { installHotbar } from './hotbar';
+import { installHurtFlash } from './hurt-flash';
 import {
   CRAFTING_TABLE_SCREEN_LABEL,
   FURNACE_SCREEN_LABEL,
@@ -12,13 +14,14 @@ import {
 import { installLevelBar } from './level-bar';
 
 /**
- * 屏幕上那一整套界面：十字准星在正中，等级条在上、快捷栏在下，再加三层覆盖层——按 E
- * 打开的背包界面，与使用键对着工作台、熔炉打开的工作台界面、熔炉界面。
+ * 屏幕上那一整套界面：十字准星在正中，底部自上而下是生命值那一排心、等级条、快捷栏，再加
+ * 受伤时的红闪与三层覆盖层——按 E 打开的背包界面，与使用键对着工作台、熔炉打开的工作台界面、
+ * 熔炉界面。
  *
- * 合成一个句柄，接线层与调试句柄因此不必知道界面由几个部件组成——加一块显示（生命值、
- * 饥饿值）只改这个文件。等级条与快捷栏装在同一个 `#hud` 容器里，等级条的宽度因此自动跟
- * 快捷栏一样宽，不必把 9 格的宽度算式在 CSS 里写第二遍；十字准星与背包界面各自贴着视口
- * 定位，不在那个容器里。
+ * 合成一个句柄，接线层与调试句柄因此不必知道界面由几个部件组成——加一块显示（饥饿值）
+ * 只改这个文件。心、等级条与快捷栏装在同一个 `#hud` 容器里，等级条的宽度因此自动跟
+ * 快捷栏一样宽，不必把 9 格的宽度算式在 CSS 里写第二遍；十字准星、红闪与背包界面各自贴着
+ * 视口定位，不在那个容器里。
  */
 export interface Hud {
   /** 让画面跟上核心。每帧调一次。 */
@@ -31,6 +34,8 @@ export interface Hud {
 export type HudSource = Pick<
   GameCore,
   | 'experience'
+  | 'health'
+  | 'tickCount'
   | 'inventory'
   | 'inventoryScreen'
   | 'craftingTableScreen'
@@ -56,12 +61,18 @@ function screenSource(source: HudSource, screen: InventoryScreenView): Inventory
 
 /** 把 HUD 挂到页面上。返回的句柄要每帧 `update()`。 */
 export function installHud(parent: HTMLElement, source: HudSource): Hud {
+  // 红闪挂在最前面：后挂的元素画在它上面，心、快捷栏、准星与三层界面因此都不被染红，
+  // 受伤那一下照样看得清剩几颗心。它挂在 `parent` 而不是 `#hud` 里，理由见下面准星那一段，
+  // 另外还有一条：界面开着时 `#hud` 整栏收起，而开着背包受伤也要闪。
+  const hurtFlash = installHurtFlash(parent, source);
+
   const root = document.createElement('div');
   root.id = 'hud';
   root.className = 'hud';
   parent.append(root);
 
-  // 顺序就是自上而下的堆叠顺序：等级条压在快捷栏上方，与原版一致。
+  // 顺序就是自上而下的堆叠顺序：心在等级条上方，等级条压在快捷栏上方，与原版一致。
+  const healthBar = installHealthBar(root, source.health);
   const levelBar = installLevelBar(root, source.experience);
   const hotbar = installHotbar(root, source.inventory);
   // 准星与三层界面都挂在 `parent` 而不是 `#hud` 里：那一栏贴在屏幕底部、而且不接收点击
@@ -95,8 +106,10 @@ export function installHud(parent: HTMLElement, source: HudSource): Hud {
         shownOpen = open;
         root.hidden = open;
       }
+      healthBar.update();
       levelBar.update();
       hotbar.update();
+      hurtFlash.update();
       crosshair.update();
       screen.update();
       craftingTable.update();
@@ -104,6 +117,7 @@ export function installHud(parent: HTMLElement, source: HudSource): Hud {
     },
     remove(): void {
       root.remove();
+      hurtFlash.remove();
       crosshair.remove();
       screen.remove();
       craftingTable.remove();

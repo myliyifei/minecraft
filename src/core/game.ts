@@ -7,6 +7,7 @@ import { Drops, type DropsView } from './drop';
 import { Experience, type ExperienceView } from './experience';
 import { stepFurnaces } from './furnace';
 import { FurnaceSlots } from './furnace-slots';
+import { fallDamage, Health, type HealthView } from './health';
 import { Inventory, wrapHotbarSlot, type InventoryView } from './inventory';
 import { InventoryScreen, type InventoryScreenView } from './inventory-screen';
 import { IDLE_MINING, Mining, type MiningView } from './mining';
@@ -68,6 +69,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   private readonly dropsState: Drops;
   private readonly xpOrbsState: XpOrbs;
   private readonly experienceState: Experience;
+  private readonly healthState: Health;
   private readonly inventoryState: Inventory;
   private readonly inventoryCraftingGrid: CraftingGrid;
   private readonly inventoryScreenState: InventoryScreen;
@@ -125,6 +127,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.dropsState = new Drops(this.world, this.worldSeed);
     this.xpOrbsState = new XpOrbs();
     this.experienceState = new Experience();
+    this.healthState = new Health();
     this.inventoryState = new Inventory();
     this.inventoryCraftingGrid = new CraftingGrid(INVENTORY_CRAFTING_GRID);
     this.inventoryScreenState = new InventoryScreen(this.inventoryState, this.inventoryCraftingGrid);
@@ -166,6 +169,15 @@ export class GameCore implements BlockEdit, BlockStateView {
   /** 玩家的经验与等级，只读。HUD 读它画等级条。 */
   get experience(): ExperienceView {
     return this.experienceState;
+  }
+
+  /**
+   * 玩家的生命值，只读。HUD 读它画心与受伤红闪。
+   *
+   * 与背包、经验一样是核心的状态而不是界面层的：扣多少、什么时候回、归零算不算死都是游戏规则。
+   */
+  get health(): HealthView {
+    return this.healthState;
   }
 
   /** 玩家背包的只读视图。HUD 读它画快捷栏。 */
@@ -466,7 +478,8 @@ export class GameCore implements BlockEdit, BlockStateView {
     // 界面模式下移动、挖掘、使用一律不算数（见 CONTEXT.md 的「界面模式」）：玩家在
     // 摆物品，不是在操作世界。挡的是输入而不是世界——重力、掉落物、经验球照旧。
     const uiMode = this.uiMode;
-    this.playerState.step(uiMode ? IDLE_INTENT : this.intent);
+    const fell = this.playerState.step(uiMode ? IDLE_INTENT : this.intent);
+    this.healthState.hurt(fallDamage(fell), this.ticks);
     // 选中格先生效，再瞄准与使用：同一 tick 里切了格又按使用键，放下的是新格里的东西。
     this.inventoryState.select(this.nextSlot);
     // 挖掘必须排在移动之后，理由见 Mining.step。界面一开就换成「什么键都没按」，
@@ -487,6 +500,8 @@ export class GameCore implements BlockEdit, BlockStateView {
     // 之后的碰撞箱。两者互不影响，谁先谁后都一样。
     this.dropsState.step(this.playerState.hitbox, this.inventoryState);
     this.xpOrbsState.step(this.playerState.hitbox, this.experienceState);
+    // 回血排在最后：这一 tick 里所有伤害都结算完了，受伤那一 tick 不会紧跟着回血。
+    this.healthState.regenerate(this.ticks);
   }
 
   /**

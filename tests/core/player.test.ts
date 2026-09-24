@@ -254,6 +254,60 @@ describe('玩家与墙、台阶的碰撞', () => {
     expect(player.position.x).toBeGreaterThan(1 + PLAYER_WIDTH / 2);
   });
 
+  it('走出边缘掉进 3 格深的坑，落地那一 tick 报落差 3，其余 tick 报 0', () => {
+    const world = flatTestWorld();
+    const pitFloor = FLAT_GROUND_Y - 3;
+    for (let x = 1; x <= 12; x++) {
+      for (let z = -3; z <= 4; z++) {
+        for (let y = FLAT_GROUND_Y; y > pitFloor; y--) world.setBlock(x, y, z, BlockType.Air);
+      }
+    }
+    const player = walkerFacingStep(world);
+    const falls: number[] = [];
+    for (let i = 0; i < 40; i++) falls.push(player.step(FORWARD_INTENT));
+
+    expect(falls.filter((fall) => fall !== 0)).toEqual([3]);
+  });
+
+  it('沿一级一格的台阶往下走，每次落地只报这一次的落差，不把几级累计成一段', () => {
+    // x ≥ 1 起每格低一级：x = 1 那一列顶面比平地低 1 格，x = 2 低 2 格……
+    const world = flatTestWorld();
+    for (let x = 1; x <= 12; x++) {
+      for (let z = -3; z <= 4; z++) {
+        for (let y = FLAT_GROUND_Y; y > FLAT_GROUND_Y - Math.min(x, 8); y--) {
+          world.setBlock(x, y, z, BlockType.Air);
+        }
+      }
+    }
+    // 起点偏离格子中心一点：这样有几级会在同一 tick 里先竖直落到这一级、再水平走下它的边缘
+    const player = new Player(world, { x: 0.46, y: FLAT_STAND_Y, z: 0.5 });
+    player.turn(FACING_PLUS_X, 0);
+    const falls: number[] = [];
+    for (let i = 0; i < 80; i++) falls.push(player.step(FORWARD_INTENT));
+
+    expect(player.position.y).toBe(FLAT_STAND_Y - 8);
+    const landings = falls.filter((fall) => fall !== 0);
+    // 下落途中水平走过下一级的边缘时，一次落两级是真实的落差；再多就是把前面几级累计进来了
+    expect(Math.max(...landings)).toBeLessThanOrEqual(2);
+    expect(landings.reduce((sum, fall) => sum + fall, 0)).toBe(8);
+  });
+
+  it('跳上 1 格台阶，落差只算高出台阶顶面的那一段；平地上原地跳，落地报的是跳起的高度', () => {
+    const player = walkerFacingStep(worldWithStep(1));
+    const falls: number[] = [];
+    for (let i = 0; i < 30; i++) falls.push(player.step({ ...FORWARD_INTENT, jump: true }));
+    for (let i = 0; i < 10; i++) falls.push(player.step(FORWARD_INTENT));
+    expect(player.position.y).toBe(FLAT_STAND_Y + 1);
+    // 台阶上还在一下一下地跳，每次落回台阶顶面报的是那一跳的高度，都不到 1.3 格
+    expect(Math.max(...falls)).toBeLessThan(JUMP_HEIGHT_MAX);
+
+    const flat = standingAt();
+    let landed = 0;
+    for (let i = 0; i < 20 && landed === 0; i++) landed = flat.step(JUMP_INTENT);
+    expect(landed).toBeGreaterThan(JUMP_HEIGHT_MIN);
+    expect(landed).toBeLessThan(JUMP_HEIGHT_MAX);
+  });
+
   it('树叶和别的方块一样挡人：树下不会卡进树冠里', () => {
     // 树叶不遮挡视线（opaque 为假），但它是实心的，碰撞规则对所有方块一致
     const player = walkerFacingStep(worldWithStep(3, BlockType.OakLeaves));

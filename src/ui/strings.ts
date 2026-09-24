@@ -13,6 +13,8 @@ export const STRINGS = {
   loadingWorld: '正在生成世界',
   crosshair: '十字准星',
   hotbar: '快捷栏',
+  // 等级条上方那一排心。读屏软件报它时缀上当前点数。
+  health: '生命值',
   levelBar: '等级',
   levelProgress: '到下一级的经验',
   inventory: '背包',

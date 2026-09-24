@@ -14,6 +14,7 @@ import {
   FURNACE_RESULT_SLOT,
 } from '../src/core/furnace-slots';
 import { PICKUP_DELAY_TICKS } from '../src/core/drop';
+import { MAX_HEALTH } from '../src/core/health';
 import { HOTBAR_SIZE, INVENTORY_SIZE } from '../src/core/inventory';
 import {
   BARE_HAND,
@@ -50,6 +51,7 @@ import {
   tileCell,
 } from '../src/render/atlas';
 import { recipesFor, type GridSize } from '../src/core/recipe';
+import { HURT_FLASH_TICKS } from '../src/ui/hurt-flash';
 import { ITEM_NAMES, durabilityLabel, recipeLabel, STRINGS } from '../src/ui/strings';
 import {
   countCanvasColors,
@@ -1216,6 +1218,102 @@ test('挖方块把等级条填起来，攒够就升级', async ({ page }) => {
   expect(Number(samples.levelledUp.level)).toBeGreaterThan(3);
   expect(samples.levelledUp.text).toBe(samples.levelledUp.level);
   expect(Number(samples.levelledUp.valueNow)).toBeLessThan(Number(samples.levelledUp.valueMax));
+  expect(errors).toEqual([]);
+});
+
+test('等级条上方靠左有 10 颗整心，开局满血，红闪藏着', async ({ page }) => {
+  const bar = page.locator('#health-bar');
+  await expect(bar).toBeVisible();
+  await expect(bar).toHaveAttribute('role', 'meter');
+  await expect(bar).toHaveAttribute('aria-label', STRINGS.health);
+  await expect(bar).toHaveAttribute('aria-valuenow', String(MAX_HEALTH));
+  const hearts = page.locator('#health-bar .health__heart');
+  await expect(hearts).toHaveCount(10);
+  for (const heart of await hearts.all()) await expect(heart).toHaveAttribute('data-state', 'full');
+  await expect(page.locator('#hurt-flash')).toBeHidden();
+
+  // 整排心压在等级条之上、与等级条左边对齐，宽度不到快捷栏的一半
+  const barBox = await bar.boundingBox();
+  const levelBox = await page.locator('#level-bar').boundingBox();
+  const hotbarBox = await page.locator('#hotbar').boundingBox();
+  expect(barBox).not.toBeNull();
+  expect(levelBox).not.toBeNull();
+  expect(hotbarBox).not.toBeNull();
+  expect(barBox!.y + barBox!.height).toBeLessThanOrEqual(levelBox!.y);
+  expect(barBox!.x).toBeCloseTo(levelBox!.x, 0);
+  expect(barBox!.width).toBeLessThan(hotbarBox!.width / 2);
+  // 心是红的：取第一颗正中那个像素
+  const fill = await page.evaluate(() => {
+    const heart = document.querySelector('#health-bar .health__heart');
+    if (!(heart instanceof HTMLElement)) throw new Error('缺心');
+    return getComputedStyle(heart).backgroundColor;
+  });
+  expect(fill).toBe('rgb(216, 35, 42)');
+  expect(errors).toEqual([]);
+});
+
+test('调试句柄挖空脚下 6 格：落地后少一颗半心，红色遮罩铺满屏幕，10 tick 后隐藏', async ({
+  page,
+}) => {
+  // 整段跑在一次同步的 evaluate 里，游戏循环插不进来：落地那一 tick 与之后第几 tick 都是精确的。
+  const samples = await page.evaluate(
+    ({ depth, flashTicks, full, air }) => {
+      const { core, hud } = window.__VOXEL__!;
+
+      /** 心与红闪现在画的是什么，加核心里的生命值好对照。 */
+      const read = (): Record<string, unknown> => {
+        const flash = document.querySelector('#hurt-flash');
+        const bar = document.querySelector('#health-bar');
+        if (!(flash instanceof HTMLElement) || !(bar instanceof HTMLElement)) {
+          throw new Error('生命值界面不完整');
+        }
+        const box = flash.getBoundingClientRect();
+        return {
+          points: core.health.points,
+          valueNow: bar.getAttribute('aria-valuenow'),
+          hearts: [...bar.querySelectorAll<HTMLElement>('.health__heart')].map(
+            (heart) => heart.dataset.state,
+          ),
+          flashShown: getComputedStyle(flash).display !== 'none',
+          flashCovers: box.width === window.innerWidth && box.height === window.innerHeight,
+          flashColor: getComputedStyle(flash).backgroundColor,
+        };
+      };
+
+      const { x, z } = core.player.position;
+      const column = { x: Math.floor(x), z: Math.floor(z) };
+      const top = core.highestBlockY(column.x, column.z);
+      for (let y = top; y > top - depth; y--) core.setBlock(column.x, y, column.z, air);
+
+      let ticks = 0;
+      while (core.health.points === full && ticks < 100) {
+        core.tick();
+        ticks++;
+      }
+      hud.update();
+      const landed = read();
+      core.tick(flashTicks - 1);
+      hud.update();
+      const lastFlashTick = read();
+      core.tick();
+      hud.update();
+      return { landed, lastFlashTick, after: read() };
+    },
+    { depth: 6, flashTicks: HURT_FLASH_TICKS, full: MAX_HEALTH, air: BlockType.Air },
+  );
+
+  // 落差 6 格，超出 3 格的部分每格 1 点：20 → 17，8 颗整心、1 颗半心、1 颗空心
+  expect(samples.landed.points).toBe(17);
+  expect(samples.landed.valueNow).toBe('17');
+  expect(samples.landed.hearts).toEqual([...Array(8).fill('full'), 'half', 'empty']);
+  expect(samples.landed.flashShown).toBe(true);
+  expect(samples.landed.flashCovers).toBe(true);
+  // 半透明的红，不是不透明的一块：不透明度 0.35
+  expect(samples.landed.flashColor).toContain('0.35');
+
+  expect(samples.lastFlashTick.flashShown).toBe(true);
+  expect(samples.after.flashShown).toBe(false);
+  expect(samples.after.points).toBe(17);
   expect(errors).toEqual([]);
 });
 

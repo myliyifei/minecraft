@@ -93,6 +93,18 @@ const ZOMBIE_SHIRT = [42, 124, 132];
 const ZOMBIE_SHIRT_SEAM = [30, 92, 98];
 const ZOMBIE_PANTS = [58, 60, 124];
 const ZOMBIE_PANTS_SEAM = [42, 44, 94];
+/** 腐肉：暗红褐的一块肉，边上一圈更暗，面上几处发绿的烂斑。 */
+const FLESH = [150, 66, 52];
+const FLESH_EDGE = [104, 40, 34];
+const FLESH_ROT = [110, 124, 62];
+/** 腐肉上发绿的那几个像素。 */
+const FLESH_ROT_SPOTS = [
+  [6, 8],
+  [7, 8],
+  [9, 5],
+  [10, 6],
+  [4, 10],
+];
 
 /**
  * 矿石贴图上矿点落在哪些像素：每格 8 个矿点，各是一个 2×2 的方块加一个突出的角，位置写死，
@@ -405,6 +417,19 @@ const TILES = {
   38: (x, _y, rand) => {
     if (x % 5 === 2) return shade(ZOMBIE_PANTS_SEAM, Math.floor(rand() * 10) - 5);
     return shade(ZOMBIE_PANTS, Math.floor(rand() * 16) - 8);
+  },
+  // rotten_flesh：透明底上一块斜着的肉，从左下到右上，边缘一圈暗红，几处绿斑
+  39: (x, y, rand) => {
+    // 沿反对角线 x + y = 15 的一条宽带，两端变窄
+    const along = x - y;
+    const across = x + y - 15;
+    if (Math.abs(across) > 4 || Math.abs(along) > 10 - Math.abs(across)) return [0, 0, 0, 0];
+    const noise = Math.floor(rand() * 16) - 8;
+    if (Math.abs(across) === 4 || Math.abs(along) === 10 - Math.abs(across)) {
+      return shade(FLESH_EDGE, noise);
+    }
+    const rot = FLESH_ROT_SPOTS.some(([rx, ry]) => rx === x && ry === y);
+    return shade(rot ? FLESH_ROT : FLESH, noise);
   },
 };
 

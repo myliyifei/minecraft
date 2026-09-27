@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BARE_HAND,
+  BARE_HAND_DAMAGE,
   DEFAULT_STACK_SIZE,
   ITEMS,
   ItemType,
@@ -9,6 +10,8 @@ import {
   TOOL_STACK_SIZE,
   ToolClass,
   ToolMaterial,
+  attackDamageOf,
+  attackWearOf,
   durabilityOf,
   materialAtLeast,
   maxDurability,
@@ -71,6 +74,7 @@ describe('物品表里的工具', () => {
       ItemType.RawIron,
       ItemType.IronIngot,
       ItemType.Charcoal,
+      ItemType.RottenFlesh,
     ]) {
       expect(toolOf(item), `物品 ${item}`).toBeUndefined();
       expect(stackLimit(item)).toBe(DEFAULT_STACK_SIZE);
@@ -279,5 +283,44 @@ describe('耐久是格子里那一堆的状态（ADR-0010）', () => {
   it('改数量时损耗跟着走：withCount 保留 damage', () => {
     expect(withCount({ ...FRESH, damage: 7 }, 1)).toEqual({ ...FRESH, damage: 7 });
     expect(withCount({ item: ItemType.Dirt, count: 10 }, 4)).toEqual({ item: ItemType.Dirt, count: 4 });
+  });
+});
+
+describe('攻击伤害一列与攻击的耐久损耗（#42）', () => {
+  it('空手 1；镐 2/3/4、斧 7/9/9、铲 3/4/5：写死字面值', () => {
+    expect(BARE_HAND_DAMAGE).toBe(1);
+    expect(attackDamageOf(undefined)).toBe(1);
+    const table: Array<[ItemType, number]> = [
+      [ItemType.WoodenPickaxe, 2],
+      [ItemType.StonePickaxe, 3],
+      [ItemType.IronPickaxe, 4],
+      [ItemType.WoodenAxe, 7],
+      [ItemType.StoneAxe, 9],
+      [ItemType.IronAxe, 9],
+      [ItemType.WoodenShovel, 3],
+      [ItemType.StoneShovel, 4],
+      [ItemType.IronShovel, 5],
+    ];
+    for (const [item, damage] of table) {
+      expect(attackDamageOf({ item, count: 1 }), `物品 ${item}`).toBe(damage);
+    }
+  });
+
+  it('不是工具的物品伤害与空手相同', () => {
+    for (const item of Object.values(ItemType)) {
+      if (toolOf(item)) continue;
+      expect(attackDamageOf({ item, count: 5 }), `物品 ${item}`).toBe(BARE_HAND_DAMAGE);
+    }
+  });
+
+  it('损耗过的工具伤害不变', () => {
+    expect(attackDamageOf({ item: ItemType.IronAxe, count: 1, damage: 249 })).toBe(9);
+  });
+
+  it('镐斧铲攻击一下损耗 2；空手与材料不损耗', () => {
+    for (const item of Object.values(ItemType)) {
+      expect(attackWearOf({ item, count: 1 }), `物品 ${item}`).toBe(toolOf(item) ? 2 : 0);
+    }
+    expect(attackWearOf(undefined)).toBe(0);
   });
 });

@@ -121,6 +121,44 @@ export interface HorizontalDelta {
 /** 原地不动的水平位移。 */
 export const NO_WALK: HorizontalDelta = Object.freeze({ x: 0, z: 0 });
 
+/** 受击时获得的水平速度（方块/tick），方向由攻击者指向受击者。 */
+export const KNOCKBACK_SPEED = 0.4;
+
+/** 受击时获得的竖直速度（方块/tick）：带一点上抛。不到跳跃初速 0.42，落回来不受摔落伤害。 */
+export const KNOCKBACK_LIFT = 0.4;
+
+/** 击退的水平速度每 tick 保留的比例。0.4 格/tick 起，一共推出去约 1 格。 */
+export const KNOCKBACK_DECAY = 0.6;
+
+/**
+ * 击退的水平速度低于这个值（方块/tick）直接归零。理由同掉落物的 `MIN_SPEED`：指数衰减本身到不了零，
+ * 不截断的话受过一次击的实体会一直以肉眼看不见的速度被推着走。
+ */
+const KNOCKBACK_MIN_SPEED = 1e-3;
+
+/**
+ * 击退（见 CONTEXT.md）：attacker 打到 target 时 target 获得的水平速度，指向「攻击者到受击者」的
+ * 水平方向，大小 `KNOCKBACK_SPEED`。两者水平位置重合时没有方向，不推。竖直那一下（`KNOCKBACK_LIFT`）
+ * 由受击者自己写进竖直速度。
+ *
+ * 僵尸受玩家攻击与玩家受僵尸攻击（#43）共用这一条。
+ */
+export function knockbackFrom(attacker: Vec3, target: Vec3): HorizontalDelta {
+  const dx = target.x - attacker.x;
+  const dz = target.z - attacker.z;
+  const length = Math.hypot(dx, dz);
+  if (length === 0) return NO_WALK;
+  return { x: (dx / length) * KNOCKBACK_SPEED, z: (dz / length) * KNOCKBACK_SPEED };
+}
+
+/** 击退速度过了一 tick 之后：乘 `KNOCKBACK_DECAY`，小到看不出来就归零。 */
+export function decayedKnockback(knock: HorizontalDelta): HorizontalDelta {
+  if (knock === NO_WALK) return NO_WALK;
+  const x = knock.x * KNOCKBACK_DECAY;
+  const z = knock.z * KNOCKBACK_DECAY;
+  return Math.hypot(x, z) < KNOCKBACK_MIN_SPEED ? NO_WALK : { x, z };
+}
+
 /** 碰撞箱各方向外扩 margin 格。 */
 export function expand(box: Hitbox, margin: number): Hitbox {
   return {

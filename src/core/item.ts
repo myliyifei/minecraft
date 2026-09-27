@@ -30,6 +30,8 @@ export const ItemType = {
   IronShovel: 19,
   /** 橡木原木在熔炉里炼成的材料（issue #34）：可堆叠，放不下去，与煤炭一样是 1600 tick 的燃料。 */
   Charcoal: 20,
+  /** 僵尸死亡掉的材料（issue #42）：可堆叠，放不下去。饥饿值不在第四切片，所以还不能吃。 */
+  RottenFlesh: 21,
 } as const;
 
 export type ItemType = (typeof ItemType)[keyof typeof ItemType];
@@ -177,7 +179,15 @@ export interface ItemDef {
   readonly stackSize: number;
   /** 这种物品是哪一件工具，不是工具的物品是 undefined。 */
   readonly tool: ToolDef | undefined;
+  /**
+   * 拿着它攻击一下造成几点伤害（ADR-0015）。不是工具的物品与空手一样是
+   * `BARE_HAND_DAMAGE`。同一类别的三档各不相同（石斧与铁斧都是 9），所以按物品记，不按材质档查。
+   */
+  readonly attackDamage: number;
 }
+
+/** 空手攻击一下的伤害。拿着材料、方块物品时也是它。 */
+export const BARE_HAND_DAMAGE = 1;
 
 /** 可堆叠物品的堆叠上限。与原版一致。 */
 export const DEFAULT_STACK_SIZE = 64;
@@ -185,36 +195,45 @@ export const DEFAULT_STACK_SIZE = 64;
 /** 工具的堆叠上限：每把占一格。 */
 export const TOOL_STACK_SIZE = 1;
 
-/** 物品表里材料与方块物品那一行的形状：可堆叠、不是工具。 */
-const STACKABLE: ItemDef = Object.freeze({ stackSize: DEFAULT_STACK_SIZE, tool: undefined });
+/** 物品表里材料与方块物品那一行的形状：可堆叠、不是工具、伤害同空手。 */
+const STACKABLE: ItemDef = Object.freeze({
+  stackSize: DEFAULT_STACK_SIZE,
+  tool: undefined,
+  attackDamage: BARE_HAND_DAMAGE,
+});
 
 /** 物品表里一件工具那一行的形状：每把占一格。 */
-function tool(toolClass: ToolClass, material: ToolMaterial): ItemDef {
-  return { stackSize: TOOL_STACK_SIZE, tool: { toolClass, material } };
+function tool(toolClass: ToolClass, material: ToolMaterial, attackDamage: number): ItemDef {
+  return { stackSize: TOOL_STACK_SIZE, tool: { toolClass, material }, attackDamage };
 }
 
-/** 物品属性表——纯数据。耐久、食物回复量是后续切片往这里加的数据列。 */
+/**
+ * 物品属性表——纯数据。食物回复量是后续切片往这里加的数据列。
+ *
+ * 攻击伤害一列（#42）：镐 2/3/4、斧 7/9/9、铲 3/4/5，其余 1。
+ */
 export const ITEMS: Readonly<Record<ItemType, ItemDef>> = {
   [ItemType.Dirt]: STACKABLE,
   [ItemType.OakLog]: STACKABLE,
   [ItemType.OakPlanks]: STACKABLE,
   [ItemType.Stick]: STACKABLE,
   [ItemType.CraftingTable]: STACKABLE,
-  [ItemType.WoodenPickaxe]: tool(ToolClass.Pickaxe, ToolMaterial.Wood),
-  [ItemType.WoodenAxe]: tool(ToolClass.Axe, ToolMaterial.Wood),
-  [ItemType.WoodenShovel]: tool(ToolClass.Shovel, ToolMaterial.Wood),
+  [ItemType.WoodenPickaxe]: tool(ToolClass.Pickaxe, ToolMaterial.Wood, 2),
+  [ItemType.WoodenAxe]: tool(ToolClass.Axe, ToolMaterial.Wood, 7),
+  [ItemType.WoodenShovel]: tool(ToolClass.Shovel, ToolMaterial.Wood, 3),
   [ItemType.Cobblestone]: STACKABLE,
-  [ItemType.StonePickaxe]: tool(ToolClass.Pickaxe, ToolMaterial.Stone),
-  [ItemType.StoneAxe]: tool(ToolClass.Axe, ToolMaterial.Stone),
-  [ItemType.StoneShovel]: tool(ToolClass.Shovel, ToolMaterial.Stone),
+  [ItemType.StonePickaxe]: tool(ToolClass.Pickaxe, ToolMaterial.Stone, 3),
+  [ItemType.StoneAxe]: tool(ToolClass.Axe, ToolMaterial.Stone, 9),
+  [ItemType.StoneShovel]: tool(ToolClass.Shovel, ToolMaterial.Stone, 4),
   [ItemType.Furnace]: STACKABLE,
   [ItemType.Coal]: STACKABLE,
   [ItemType.RawIron]: STACKABLE,
   [ItemType.IronIngot]: STACKABLE,
-  [ItemType.IronPickaxe]: tool(ToolClass.Pickaxe, ToolMaterial.Iron),
-  [ItemType.IronAxe]: tool(ToolClass.Axe, ToolMaterial.Iron),
-  [ItemType.IronShovel]: tool(ToolClass.Shovel, ToolMaterial.Iron),
+  [ItemType.IronPickaxe]: tool(ToolClass.Pickaxe, ToolMaterial.Iron, 4),
+  [ItemType.IronAxe]: tool(ToolClass.Axe, ToolMaterial.Iron, 9),
+  [ItemType.IronShovel]: tool(ToolClass.Shovel, ToolMaterial.Iron, 5),
   [ItemType.Charcoal]: STACKABLE,
+  [ItemType.RottenFlesh]: STACKABLE,
 };
 
 /** 这种物品一格最多堆多少个。 */
@@ -249,6 +268,28 @@ export function miningToolOf(stack: ItemStack | undefined): MiningTool {
     material: tool.material,
     speed: TOOL_MATERIALS[tool.material].speed,
   };
+}
+
+/** 拿着这一堆攻击一下造成几点伤害。空手是 `BARE_HAND_DAMAGE`。损耗不参与。 */
+export function attackDamageOf(stack: ItemStack | undefined): number {
+  return stack ? ITEMS[stack.item].attackDamage : BARE_HAND_DAMAGE;
+}
+
+/**
+ * 攻击一下手上那件东西损耗几点耐久，按工具类别查：镐斧铲是挖掘工具，拿来打人损耗 2。
+ * 「无」那一行是空手与拿着材料：没有耐久可损耗。剑（#45）加进来时在这里加一行 1。
+ */
+const ATTACK_WEAR: Readonly<Record<ToolClass, number>> = {
+  [ToolClass.None]: 0,
+  [ToolClass.Pickaxe]: 2,
+  [ToolClass.Axe]: 2,
+  [ToolClass.Shovel]: 2,
+};
+
+/** 拿着这一堆攻击一下损耗几点耐久。不是工具时是 0。 */
+export function attackWearOf(stack: ItemStack | undefined): number {
+  const tool = stack && toolOf(stack.item);
+  return ATTACK_WEAR[tool ? tool.toolClass : ToolClass.None];
 }
 
 /** 这种物品的满耐久是多少点，不是工具时 undefined。 */

@@ -455,6 +455,7 @@ describe('放置表', () => {
     ['铁铲放不下去', ItemType.IronShovel, null],
     // 木炭是原木炼出来的材料（issue #34），没有对应的方块
     ['木炭放不下去', ItemType.Charcoal, null],
+    ['腐肉放不下去', ItemType.RottenFlesh, null],
   ];
 
   it('上面这张表覆盖了物品表的每一行：加一种物品就得在这里补一条', () => {

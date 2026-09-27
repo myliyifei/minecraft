@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
-import { raycastBlocks } from '../../src/core/raycast';
+import { hitboxAt } from '../../src/core/physics';
+import { raycastBlocks, raycastBox } from '../../src/core/raycast';
 import type { Vec3 } from '../../src/core/vec3';
 import type { World } from '../../src/core/world';
 import {
@@ -128,5 +129,41 @@ describe('体素射线检测的最远距离', () => {
   it('只有远处那块时超出范围就没有目标', () => {
     const world = worldWith([9, LAYER_Y, 0]);
     expect(raycastBlocks(world, EYE, { x: 1, y: 0, z: 0 }, 4.5)).toBeUndefined();
+  });
+});
+
+describe('射线与碰撞箱求交', () => {
+  /** 原点前方 −Z 上一个 0.6 × 1.95 的碰撞箱，正面在 z = −1.7，背面在 z = −2.3。 */
+  const BOX = hitboxAt({ x: 0, y: -1, z: -2 }, 0.6, 1.95);
+  const ORIGIN: Vec3 = { x: 0, y: 0, z: 0 };
+  const AHEAD: Vec3 = { x: 0, y: 0, z: -1 };
+
+  it('正对着：距离是到正面的距离', () => {
+    expect(raycastBox(ORIGIN, AHEAD, BOX, 3)).toBeCloseTo(1.7, 12);
+  });
+
+  it('最远距离含端点：正好够到算碰到，差一点不算', () => {
+    expect(raycastBox(ORIGIN, AHEAD, BOX, 1.7)).toBeCloseTo(1.7, 12);
+    expect(raycastBox(ORIGIN, AHEAD, BOX, 1.69)).toBeUndefined();
+  });
+
+  it('背对着、从旁边擦过：碰不到', () => {
+    expect(raycastBox(ORIGIN, { x: 0, y: 0, z: 1 }, BOX, 10)).toBeUndefined();
+    expect(raycastBox({ x: 0.31, y: 0, z: 0 }, AHEAD, BOX, 10)).toBeUndefined();
+    expect(raycastBox({ x: 0, y: 1, z: 0 }, AHEAD, BOX, 10)).toBeUndefined();
+  });
+
+  it('斜着看：进入面换成侧面', () => {
+    // 从 (1, 0, −2) 沿 −X 看，先碰到 x = 0.3 那一面
+    expect(raycastBox({ x: 1, y: 0, z: -2 }, { x: -1, y: 0, z: 0 }, BOX, 3)).toBeCloseTo(0.7, 12);
+    const diagonal = { x: Math.SQRT1_2, y: 0, z: -Math.SQRT1_2 };
+    // 从 (−2, 0, 0) 斜着朝 +X −Z 走，在 x = −0.3、z = −1.7 那条棱附近进入
+    const distance = raycastBox({ x: -2, y: 0, z: 0 }, diagonal, BOX, 5);
+    expect(distance).toBeDefined();
+    expect(distance!).toBeCloseTo(1.7 * Math.SQRT2, 12);
+  });
+
+  it('起点在碰撞箱里面：距离 0', () => {
+    expect(raycastBox({ x: 0, y: 0, z: -2 }, AHEAD, BOX, 3)).toBe(0);
   });
 });

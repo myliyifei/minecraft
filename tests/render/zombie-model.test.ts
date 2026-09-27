@@ -3,12 +3,16 @@ import { describe, expect, it } from 'vitest';
 import type { ZombieView } from '../../src/core/zombie';
 import { TILE, tileAtUv } from '../../src/render/atlas';
 import {
+  ZOMBIE_HURT_TINT_TICKS,
   ZOMBIE_LIMBS,
   ZOMBIE_SWING_TICKS,
   ZombiePart,
   createZombieModel,
   poseZombieModel,
+  tintZombieModel,
   zombieGeometries,
+  zombieHurtTinted,
+  zombieMaterials,
 } from '../../src/render/zombie-model';
 
 /** 一只僵尸的视图：默认在原点站着不动。 */
@@ -20,6 +24,7 @@ function zombie(overrides: Partial<ZombieView> = {}): ZombieView {
     yaw: 0,
     age: 0,
     health: 20,
+    lastHurtTick: undefined,
     ...overrides,
   };
 }
@@ -150,5 +155,50 @@ describe('僵尸模型跟着核心摆', () => {
     expect(atRest(group)).toBe(false);
     poseZombieModel(group, zombie({ age: 6 }), 0);
     expect(atRest(group)).toBe(true);
+  });
+});
+
+describe('僵尸受击后叠红（#42）', () => {
+  /** 与渲染层同一种基础材质：贴图乘白色，就是贴图本身的颜色。 */
+  function materials() {
+    return zombieMaterials(new THREE.MeshLambertMaterial({ map: new THREE.Texture() }));
+  }
+
+  /** 六个部件此刻各用的是哪一份材质。 */
+  function partMaterials(group: THREE.Group): THREE.Material[] {
+    return group.children.map((child) => (child as THREE.Mesh).material as THREE.Material);
+  }
+
+  it('受伤那一 tick 起 10 tick 内叠红，第 10 tick 起恢复；没受过伤不叠', () => {
+    expect(ZOMBIE_HURT_TINT_TICKS).toBe(10);
+    expect(zombieHurtTinted(undefined, 50)).toBe(false);
+    for (let now = 100; now < 110; now++) {
+      expect(zombieHurtTinted(100, now), `第 ${now} tick`).toBe(true);
+    }
+    expect(zombieHurtTinted(100, 110)).toBe(false);
+    expect(zombieHurtTinted(100, 400)).toBe(false);
+  });
+
+  it('叠红的材质是同一张贴图乘上红色：红分量满，绿与蓝压低', () => {
+    const { normal, hurt } = materials();
+    expect(hurt).not.toBe(normal);
+    expect((hurt as THREE.MeshLambertMaterial).map).toBe((normal as THREE.MeshLambertMaterial).map);
+    const { r, g, b } = (hurt as THREE.MeshLambertMaterial).color;
+    expect(r).toBe(1);
+    expect(g).toBeLessThan(0.7);
+    expect(b).toBeLessThan(0.7);
+  });
+
+  it('受击后 10 tick 内六个部件都换成叠红的材质，之后换回来', () => {
+    const shared = materials();
+    const group = createZombieModel(zombieGeometries(), shared.normal);
+    const hurt = zombie({ lastHurtTick: 200 });
+
+    tintZombieModel(group, hurt, 200, shared);
+    expect(partMaterials(group)).toEqual(Array(6).fill(shared.hurt));
+    tintZombieModel(group, hurt, 209, shared);
+    expect(partMaterials(group)).toEqual(Array(6).fill(shared.hurt));
+    tintZombieModel(group, hurt, 210, shared);
+    expect(partMaterials(group)).toEqual(Array(6).fill(shared.normal));
   });
 });

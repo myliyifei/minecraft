@@ -1,4 +1,5 @@
 import { isAir, type BlockView } from './block';
+import type { Hitbox } from './physics';
 import type { Axis, Vec3 } from './vec3';
 
 /** 视线命中的方块。 */
@@ -95,6 +96,61 @@ export function raycastBlocks(
       distance,
     };
   }
+}
+
+/**
+ * 视线命中的实体：哪一只、从起点到它碰撞箱的距离。
+ */
+export interface EntityHit {
+  /** 实体的编号（见 `ZombieView.id`）。 */
+  readonly id: number;
+  /** 起点到碰撞箱表面的距离（方块）。起点在碰撞箱里面时是 0。 */
+  readonly distance: number;
+}
+
+/**
+ * 一批实体里视线最先碰到的那一只。
+ *
+ * 挖掘依赖它而不是僵尸集合本身：挖掘只要知道「视线在碰到方块之前有没有先碰到实体」，
+ * 攻击还要知道碰到的是哪一只。将来的生物各自实现它，或合成一份。
+ */
+export interface EntityRaycast {
+  /** 从 origin 沿 direction 走最远 maxDistance 格（含），最先碰到的实体。一只都没碰到时 undefined。 */
+  raycast(origin: Vec3, direction: Vec3, maxDistance: number): EntityHit | undefined;
+}
+
+/**
+ * 射线与一个轴对齐碰撞箱求交：从 `origin` 沿 `direction` 走最远 `maxDistance` 格（含）碰得到它的话，
+ * 返回碰到的距离，碰不到返回 undefined。起点在碰撞箱里面（含贴在表面上）时返回 0。
+ *
+ * 走的是分轴求区间（slab）：每个轴上算出射线在两块边界面之间的那一段，三段的交集非空就碰得到，
+ * 交集的起点就是距离。方向分量为 0 的轴上射线与边界面平行，起点落在两面之间才可能碰到。
+ * `direction` 与 `raycastBlocks` 一样要是单位向量，距离才是真实距离。
+ */
+export function raycastBox(
+  origin: Vec3,
+  direction: Vec3,
+  box: Hitbox,
+  maxDistance: number,
+): number | undefined {
+  let near = 0;
+  let far = maxDistance;
+  for (const axis of AXES) {
+    const o = origin[axis];
+    const d = direction[axis];
+    const min = box.min[axis];
+    const max = box.max[axis];
+    if (d === 0) {
+      if (o < min || o > max) return undefined;
+      continue;
+    }
+    const enter = (min - o) / d;
+    const exit = (max - o) / d;
+    near = Math.max(near, Math.min(enter, exit));
+    far = Math.min(far, Math.max(enter, exit));
+    if (near > far) return undefined;
+  }
+  return near;
 }
 
 function nearestAxis(toBoundary: Record<Axis, number>): Axis {

@@ -1,3 +1,4 @@
+import { Attack } from './attack';
 import { BlockStateKind, BlockType, BlockUse, blockUse, type BlockEdit } from './block';
 import type { BlockState, BlockStateEntry, BlockStateView } from './block-state';
 import type { ChunkView } from './chunk';
@@ -62,7 +63,7 @@ export interface GameCoreOptions {
  * 第一切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」「空手挖掘」
  * 「掉落物与背包」「经验球与等级」「放置方块」「背包界面」九件事，第二切片起加「合成」
  * 与「使用（工作台界面）」，第三切片加「熔炉界面」与「熔炼」，第四切片加「世界时刻」「生命值」
- * 「死亡与重生」与「僵尸」。别的生物由后续切片挂进 step()。
+ * 「死亡与重生」「僵尸」与「攻击」。别的生物由后续切片挂进 step()。
  */
 export class GameCore implements BlockEdit, BlockStateView {
   private readonly world: World;
@@ -90,6 +91,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   private readonly furnaceSlots: FurnaceSlots;
   private readonly furnaceScreenState: InventoryScreen;
   private readonly miningState: Mining;
+  private readonly attackState: Attack;
   /**
    * 进入世界时的出生点。原点区块卸载了又没改过时，出生点就是它：地形是种子的纯函数（ADR-0003），
    * 重新生成出来与进入世界时一样。见 `spawnPoint`。
@@ -103,6 +105,11 @@ export class GameCore implements BlockEdit, BlockStateView {
   private timeOffset = 0;
   private intent: MoveIntent = IDLE_INTENT;
   private miningHeld = false;
+  /**
+   * 上一个 tick 边界以来挖掘键从没按到按下过没有（一次性输入，ADR-0004）。攻击按它分派（ADR-0015）：
+   * 两个 tick 之间按下又松开的一下也算。
+   */
+  private miningPressQueued = false;
   private chainHeld = false;
   /**
    * 下一个 tick 生效的选中格。数字键写绝对值，滚轮在它上面加减（ADR-0004：改变持续
@@ -136,7 +143,8 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.playerState = new Player(this.world, this.firstSpawn);
     this.dropsState = new Drops(this.world, this.worldSeed);
     this.xpOrbsState = new XpOrbs();
-    this.zombiesState = new Zombies(this.world, this.worldSeed);
+    // 僵尸死了在原地掉腐肉、被玩家打死的还掉经验球：与挖掘同一条路交给掉落物与经验球。
+    this.zombiesState = new Zombies(this.world, this.worldSeed, this.dropsState, this.xpOrbsState);
     this.experienceState = new Experience();
     this.healthState = new Health();
     this.inventoryState = new Inventory();
@@ -147,13 +155,21 @@ export class GameCore implements BlockEdit, BlockStateView {
     // 从成品格取走成品时结算的经验，与挖掘给的经验走同一条路：生成经验球，飞向玩家。
     this.furnaceSlots = new FurnaceSlots(this.xpOrbsState);
     this.furnaceScreenState = new InventoryScreen(this.inventoryState, this.furnaceSlots);
-    // 挖掘要看手上的工具、还要让它损耗耐久：背包既是「手」也是收物品的地方。
+    // 挖掘要看手上的工具、还要让它损耗耐久：背包既是「手」也是收物品的地方。僵尸挡在视线上时
+    // 挖掘没有目标。
     this.miningState = new Mining(
       this.world,
       this.playerState,
       this.inventoryState,
       this.dropsState,
       this.xpOrbsState,
+      this.zombiesState,
+    );
+    this.attackState = new Attack(
+      this.world,
+      this.playerState,
+      this.inventoryState,
+      this.zombiesState,
     );
   }
 
@@ -175,6 +191,14 @@ export class GameCore implements BlockEdit, BlockStateView {
   /** 世界里现有的经验球，只读。渲染层每帧读它摆那些飞向玩家的小方块。 */
   get xpOrbs(): XpOrbsView {
     return this.xpOrbsState;
+  }
+
+  /**
+   * 上一次按下左键是第几个 tick，不论打中了什么，还没按过是 undefined。渲染层据此让手持物品挥动
+   * 一下；按住挖掘时的持续挥动看 `mining.digging`。
+   */
+  get lastSwingTick(): number | undefined {
+    return this.attackState.lastSwingTick;
   }
 
   /** 世界里现有的僵尸，只读。渲染层每帧读它摆人形模型。 */
@@ -261,8 +285,12 @@ export class GameCore implements BlockEdit, BlockStateView {
   /**
    * 设定挖掘键按着没有，下一个 tick 生效。
    * 与移动意图同一条路：它改变的是持续状态，不是「看向哪里」——见 ADR-0004。
+   *
+   * 从没按到按下的那一次还排成一次按下，同样在下一个 tick 生效：攻击按它分派（ADR-0015），
+   * 下一个 tick 之前就松开了也不丢。
    */
   setMining(held: boolean): void {
+    if (held && !this.miningHeld) this.miningPressQueued = true;
     this.miningHeld = held;
   }
 
@@ -386,6 +414,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.healthState.reset();
     this.intent = IDLE_INTENT;
     this.miningHeld = false;
+    this.miningPressQueued = false;
     this.chainHeld = false;
     this.nextSlot = this.inventoryState.selectedSlot;
     this.useQueued = false;
@@ -569,9 +598,14 @@ export class GameCore implements BlockEdit, BlockStateView {
     // 否则落地那一 tick 按着的使用键还会放下一块，脚边的掉落物也会先被拾起再掉出来。
     const dead = this.healthState.dead;
     const uiMode = this.uiMode;
-    // 挖掘必须排在移动之后，理由见 Mining.step。界面一开就换成「什么键都没按」，
-    // 进度因此当场归零，回头得重挖。
-    this.miningState.step(uiMode ? IDLE_MINING : { held: this.miningHeld, chain: this.chainHeld });
+    // 攻击与挖掘必须排在移动之后，理由见 Mining.step。界面一开就换成「什么键都没按」，
+    // 进度因此当场归零，回头得重挖。攻击排在挖掘之前：左键按下那一 tick 先看视线先碰到的是不是
+    // 僵尸，是的话这一次按住不挖（ADR-0015）。
+    // 按下也一样：界面模式下按的那一下作废，关掉界面时左键还按着也不算按下。
+    const held = uiMode ? IDLE_MINING : { held: this.miningHeld, chain: this.chainHeld };
+    const pressed = this.miningPressQueued && !uiMode;
+    this.miningPressQueued = false;
+    this.miningState.step(this.attackState.step(held, pressed, this.ticks));
     // 使用排在挖掘之后：目标方块是挖掘那一步按走完之后的眼睛位置重投出来的（ADR-0006），
     // 与玩家碰撞箱的判定用的也是这一 tick 走完之后的位置。
     if (this.useQueued) {

@@ -31,14 +31,18 @@ import {
   type SkyEnds,
 } from './daylight';
 import { dropBob, dropSpin } from './drop-motion';
+import { heldSwingPhase, heldSwingPose } from './held-swing';
 import { buildChunkMesh, meshTiles, type MeshData } from './mesh';
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes, staleChunksFor } from './mesh-plan';
 import {
   ZombiePart,
   createZombieModel,
   poseZombieModel,
+  tintZombieModel,
   zombieGeometries,
+  zombieMaterials,
   type ZombieGeometries,
+  type ZombieMaterials,
 } from './zombie-model';
 import { chunkKey, type ChunkCoord } from '../core/world';
 
@@ -222,6 +226,8 @@ export interface ZombieRenderView {
   readonly parts: number;
   /** 右臂此刻摆了多少（弧度）。站着不动时是 0。 */
   readonly armSwing: number;
+  /** 部件材质乘的颜色（sRGB 十六进制）。平时是白色（贴图本色），受击后叠红时偏红。 */
+  readonly tint: number;
 }
 
 /**
@@ -235,6 +241,8 @@ export interface HeldItemRenderView {
   readonly shape: HeldItemShape;
   /** 小方块（或图标）中心投在画布上的位置（归一化设备坐标，x 右为正、y 上为正）。 */
   readonly screen: { readonly x: number; readonly y: number };
+  /** 挥动到了哪一步（`heldSwingPhase`）：0 是原位。 */
+  readonly swing: number;
 }
 
 /**
@@ -265,7 +273,7 @@ export class WorldRenderer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
-  private readonly material: THREE.Material;
+  private readonly material: THREE.MeshLambertMaterial;
   private readonly core: GameCore;
   // 值里带上区块坐标：排网格计划要遍历已有网格是哪些区块，键是打包过的数字，反解麻烦。
   private readonly meshes = new Map<number, ChunkMesh>();
@@ -319,10 +327,14 @@ export class WorldRenderer {
   private heldItemMesh: THREE.Mesh | undefined;
   /** 现在画的是哪种物品。与核心的手持不同就换几何体（与材质、大小）。 */
   private heldItemType: ItemType | undefined;
+  /** 上一帧挥动到了哪一步。 */
+  private heldSwing = 0;
   /** 场景里的僵尸模型，按核心给的编号索引。与掉落物同一套做法，见 ADR-0007。 */
   private readonly zombieModels = new Map<number, THREE.Group>();
   /** 僵尸六个部件的几何体：所有僵尸长得一样，建一份共用，僵尸消失时不销毁。 */
   private readonly zombieGeometries: ZombieGeometries = zombieGeometries();
+  /** 僵尸的两份材质：平时是方块那一份，受击叠红是它乘上红色的克隆。所有僵尸共用。 */
+  private readonly zombieMaterials: ZombieMaterials;
   /** 场景里的经验球小方块，按核心给的编号索引。与掉落物同一套做法，见 ADR-0007。 */
   private readonly xpOrbMeshes = new Map<number, THREE.Mesh>();
   /** 经验球的几何体与材质：所有经验球长得一样，各建一份共用就够。 */
@@ -362,6 +374,7 @@ export class WorldRenderer {
       // 树叶贴图有镂空，用 alphaTest 剔掉透明像素，避免半透明排序问题。
       alphaTest: 0.5,
     });
+    this.zombieMaterials = zombieMaterials(this.material);
     this.iconMaterial = new THREE.MeshLambertMaterial({
       map: texture,
       alphaTest: 0.5,
@@ -512,6 +525,7 @@ export class WorldRenderer {
       position: { x: group.position.x, y: group.position.y, z: group.position.z },
       parts: group.children.length,
       armSwing: group.getObjectByName(ZombiePart.RightArm)!.rotation.x,
+      tint: zombieTint(group),
     }));
   }
 
@@ -526,7 +540,7 @@ export class WorldRenderer {
     const item = this.heldItemType;
     if (!mesh?.visible || item === undefined) return undefined;
     const { x, y } = mesh.getWorldPosition(new THREE.Vector3()).project(this.handCamera);
-    return { item, shape: heldItemShape(item), screen: { x, y } };
+    return { item, shape: heldItemShape(item), screen: { x, y }, swing: this.heldSwing };
   }
 
   /** 这个区块的网格有多少个顶点。没建过网格、或者一个面都没有时是 0。 */
@@ -623,6 +637,7 @@ export class WorldRenderer {
     this.updateXpOrbs(alpha);
     this.updateZombies(alpha);
     this.updateHeldItem();
+    this.updateHeldSwing(alpha);
 
     // 两遍：先画世界，再把深度清掉画手上那块方块。深度一清，手持就永远在世界前面，
     // 贴着墙站着也不会被墙切穿（`handScene` 的注释里记了为什么不能挂在主相机下）。
@@ -694,6 +709,20 @@ export class WorldRenderer {
   }
 
   /**
+   * 让手持物品按核心的挥动状态挥：左键按下挥一下，挖掘中一直挥（`heldSwingPhase`）。挪的是手上那块
+   * 相对摆位那一层的位置与俯仰，摆位那一层本身不动——它管的是「右下角」，与挥不挥无关。
+   */
+  private updateHeldSwing(alpha: number): void {
+    const mesh = this.heldItemMesh;
+    if (!mesh) return;
+    const { lastSwingTick, mining, tickCount } = this.core;
+    this.heldSwing = heldSwingPhase(lastSwingTick, mining.digging, tickCount, alpha);
+    const pose = heldSwingPose(this.heldSwing);
+    mesh.position.set(pose.x, pose.y, pose.z);
+    mesh.rotation.set(HELD_ITEM_TILT.x + pose.pitch, HELD_ITEM_TILT.y, HELD_ITEM_TILT.z);
+  }
+
+  /**
    * 把手持方块摆到画面右下角。
    *
    * 相机坐标里的横向偏移得按宽高比换算：同一个 x 在宽窗口里靠中间、在窄窗口里就出了画面。
@@ -751,14 +780,18 @@ export class WorldRenderer {
    * 摆臂摆腿在 `poseZombieModel` 里，相位按 `age + alpha` 算。
    *
    * 与掉落物同一套做法（ADR-0007）。模型用方块那一份材质：四张贴图在同一张图集里，夜里也与
-   * 地形一起变暗。
+   * 地形一起变暗。受击后 10 tick 内换成叠红的那一份（`tintZombieModel`）。
    */
   private updateZombies(alpha: number): void {
+    const now = this.core.tickCount;
     this.syncEntityObjects(
       this.core.zombies.all(),
       this.zombieModels,
       () => createZombieModel(this.zombieGeometries, this.material),
-      (group, zombie) => poseZombieModel(group, zombie, alpha),
+      (group, zombie) => {
+        poseZombieModel(group, zombie, alpha);
+        tintZombieModel(group, zombie, now, this.zombieMaterials);
+      },
     );
   }
 
@@ -897,6 +930,12 @@ export class WorldRenderer {
     // 手持方块的横向偏移跟着宽高比走，尺寸一变就得重算。
     this.placeHeldItem();
   }
+}
+
+/** 僵尸模型此刻部件材质乘的颜色：六个部件用的是同一份材质，读头那一个就够。 */
+function zombieTint(group: THREE.Group): number {
+  const head = group.getObjectByName(ZombiePart.Head) as THREE.Mesh;
+  return (head.material as THREE.MeshLambertMaterial).color.getHex();
 }
 
 /**

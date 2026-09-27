@@ -11,7 +11,7 @@ import { chainConnectedBlocks } from './chain-mining';
 import type { DropSink } from './drop';
 import { miningToolOf, type MiningTool, type ToolHand } from './item';
 import { PLAYER_REACH, type PlayerView } from './player';
-import { raycastBlocks, type BlockHit } from './raycast';
+import { raycastBlocks, type BlockHit, type EntityRaycast } from './raycast';
 import type { Vec3 } from './vec3';
 import type { XpOrbSink } from './xp-orb';
 
@@ -37,14 +37,22 @@ export interface MiningInput {
 
 /**
  * 挖掘键与连锁键都没按。
- * 界面模式（见 CONTEXT.md）下核心拿它替掉真实的按键状态，进度因此归零。
+ * 界面模式（见 CONTEXT.md）下核心拿它替掉真实的按键状态，进度因此归零。这一次按住分给了攻击时
+ * （`Attack.step`）挖掘收到的也是它。
  */
 export const IDLE_MINING: MiningInput = Object.freeze({ held: false, chain: false });
 
 /** 挖掘状态的只读视图。渲染层读它画选框、裂纹与连锁预览。 */
 export interface MiningView {
-  /** 目标方块（见 CONTEXT.md），触及距离内没有方块时 undefined。 */
+  /**
+   * 目标方块（见 CONTEXT.md），触及距离内没有方块、或者视线在碰到方块之前先碰到了僵尸时 undefined。
+   */
   readonly target: BlockHit | undefined;
+  /**
+   * 挖掘中：这一 tick 挖掘键按着、对着一个目标方块。挖穿一块、按住接着挖下一块时一直为真。
+   * 渲染层据此让手持物品持续挥动。
+   */
+  readonly digging: boolean;
   /**
    * 当前目标的挖掘进度：0 是还没开始，越接近 1 越接近碎掉。
    *
@@ -86,6 +94,9 @@ const NO_CHAIN: readonly Vec3[] = Object.freeze([]);
  * 耗时与掉落都看手上拿着什么工具（`hand`）。耗时每 tick 按当时手上的工具重算——与目标方块
  * 每 tick 重算是同一个思路（ADR-0006）：挖到一半换上木镐，已经挖的那些 tick 留着，剩下的按
  * 木镐算。挖穿那一 tick 读一次手上的工具，用它决定掉什么、损耗几点耐久（ADR-0010）。
+ *
+ * 视线在碰到目标方块之前先穿过一只僵尸（`occluders`）时，这一 tick 没有目标：挖到一半僵尸挡到
+ * 前面，进度就归零，与视线移开同一条规则，也不自动改打它（ADR-0015）。
  */
 export class Mining implements MiningView {
   private readonly blocks: BlockEdit & BlockStateView;
@@ -93,7 +104,9 @@ export class Mining implements MiningView {
   private readonly hand: ToolHand;
   private readonly drops: DropSink;
   private readonly experience: XpOrbSink;
+  private readonly occluders: EntityRaycast;
   private hit: BlockHit | undefined;
+  private isDigging = false;
   /** 已经对着当前目标挖了多少 tick。 */
   private elapsed = 0;
   /**
@@ -110,12 +123,18 @@ export class Mining implements MiningView {
     hand: ToolHand,
     drops: DropSink,
     experience: XpOrbSink,
+    occluders: EntityRaycast,
   ) {
     this.blocks = blocks;
     this.aim = aim;
     this.hand = hand;
     this.drops = drops;
     this.experience = experience;
+    this.occluders = occluders;
+  }
+
+  get digging(): boolean {
+    return this.isDigging;
   }
 
   get target(): BlockHit | undefined {
@@ -148,6 +167,7 @@ export class Mining implements MiningView {
     const previous = this.hit;
     this.hit = this.aimedBlock();
     if (!held || !isSameBlock(previous, this.hit)) this.restart();
+    this.isDigging = held && this.hit !== undefined;
     if (!held || !this.hit) return;
 
     const block = this.blocks.getBlock(this.hit.x, this.hit.y, this.hit.z);
@@ -220,13 +240,12 @@ export class Mining implements MiningView {
     this.chain = undefined;
   }
 
+  /** 视线最先碰到的方块。碰到它之前（含一样远）先碰到了僵尸就没有目标。 */
   private aimedBlock(): BlockHit | undefined {
-    return raycastBlocks(
-      this.blocks,
-      this.aim.eyePosition,
-      this.aim.lookDirection,
-      PLAYER_REACH,
-    );
+    const { eyePosition, lookDirection } = this.aim;
+    const hit = raycastBlocks(this.blocks, eyePosition, lookDirection, PLAYER_REACH);
+    if (!hit) return undefined;
+    return this.occluders.raycast(eyePosition, lookDirection, hit.distance) ? undefined : hit;
   }
 }
 

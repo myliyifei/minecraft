@@ -6,8 +6,9 @@ import { TILE, boxUvs } from './atlas';
 /**
  * 僵尸的六部件人形：头、身体、两条手臂、两条腿，各是一个长方体，拼成一个 `Group`。
  *
- * 表现整个在渲染层（ADR-0007）：核心只报位置、上一 tick 的位置、偏航与存活 tick 数，摆臂摆腿的
- * 角度由这里按 `age + alpha` 算。不碰 DOM，所以能在 Node 里建出模型对它断言。
+ * 表现整个在渲染层（ADR-0007）：核心只报位置、上一 tick 的位置、偏航、存活 tick 数与上次受伤的 tick，
+ * 摆臂摆腿的角度由这里按 `age + alpha` 算，受击叠红按 tick 差算。不碰 DOM，所以能在 Node 里建出模型
+ * 对它断言。
  */
 
 /** 部件的名字。场景对象按它命名，测试与渲染层都按名字找部件。 */
@@ -35,6 +36,18 @@ export const ZOMBIE_SWING_TICKS = 20;
 
 /** 摆动的幅度（弧度），约 34°。 */
 export const ZOMBIE_SWING_ANGLE = 0.6;
+
+/**
+ * 受击后叠红持续几 tick：受伤那一 tick 起算，10 tick 之后恢复。
+ *
+ * 与僵尸的无敌时间同为 10，但两者各管各的，理由同玩家的 `HURT_FLASH_TICKS`：这个数只决定红多久。
+ */
+export const ZOMBIE_HURT_TINT_TICKS = 10;
+
+/**
+ * 叠红的颜色，乘在贴图上：红分量不动，绿与蓝压到四成多。灰绿的皮肤乘出来是暗红，夜里也看得出。
+ */
+const HURT_TINT = 0xff7070;
 
 /** 模型按像素量尺寸，16 像素一格，与贴图的像素一样大。 */
 const PX = 1 / 16;
@@ -132,6 +145,41 @@ export function poseZombieModel(group: THREE.Group, zombie: ZombieView, alpha: n
   leftArm!.rotation.x = -swing;
   rightLeg!.rotation.x = -swing;
   leftLeg!.rotation.x = swing;
+}
+
+/** 僵尸模型轮换使用的两份材质：平时那一份，与受击后叠红的那一份。所有僵尸共用这两份。 */
+export interface ZombieMaterials {
+  readonly normal: THREE.Material;
+  readonly hurt: THREE.Material;
+}
+
+/**
+ * 由方块那一份材质派生出僵尸的两份材质：平时就用它本身，叠红那一份是它的克隆乘上 `HURT_TINT`，
+ * 贴图是同一张。叠红靠换材质而不是给每只僵尸各克隆一份：同一时刻叠红的僵尸都长一个样，两份就够。
+ */
+export function zombieMaterials(base: THREE.MeshLambertMaterial): ZombieMaterials {
+  const hurt = base.clone();
+  hurt.color.setHex(HURT_TINT);
+  return { normal: base, hurt };
+}
+
+/** 上次受伤在 lastHurtTick、此刻是第 now 个 tick 时，该不该叠红。还没受过伤不叠。 */
+export function zombieHurtTinted(lastHurtTick: number | undefined, now: number): boolean {
+  return lastHurtTick !== undefined && now - lastHurtTick < ZOMBIE_HURT_TINT_TICKS;
+}
+
+/**
+ * 受击后 `ZOMBIE_HURT_TINT_TICKS` 内六个部件换成叠红的材质，之后换回来。now 是核心的 tick 计数。
+ * 按 tick 而不是按毫秒算，与玩家的受伤红闪同一条理由：时长与游戏时间一致。
+ */
+export function tintZombieModel(
+  group: THREE.Group,
+  zombie: ZombieView,
+  now: number,
+  materials: ZombieMaterials,
+): void {
+  const material = zombieHurtTinted(zombie.lastHurtTick, now) ? materials.hurt : materials.normal;
+  for (const child of group.children) (child as THREE.Mesh).material = material;
 }
 
 /** 相位（tick，可带小数）对应的摆角（弧度），落在 ±`ZOMBIE_SWING_ANGLE` 之间。 */

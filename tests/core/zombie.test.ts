@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { GameCore } from '../../src/core/game';
+import { ItemType, type ItemStack } from '../../src/core/item';
+import { KNOCKBACK_DECAY, KNOCKBACK_LIFT, KNOCKBACK_SPEED } from '../../src/core/physics';
 import type { Vec3 } from '../../src/core/vec3';
 import type { World } from '../../src/core/world';
 import {
@@ -10,6 +12,7 @@ import {
   ZOMBIE_STEP,
   ZOMBIE_WANDER_TICKS,
   ZOMBIE_WIDTH,
+  ZOMBIE_XP,
   Zombies,
   type ZombieView,
 } from '../../src/core/zombie';
@@ -20,13 +23,23 @@ const SEED = 1234;
 /** 玩家站在原点那一格中心。僵尸集合的测试直接把这个位置交给 `step`。 */
 const PLAYER: Vec3 = { x: 0.5, y: FLAT_STAND_Y, z: 0.5 };
 
+/** 死掉的僵尸交出来的一样东西落在哪一格。 */
+type Cell = [number, number, number];
+
 /**
  * 平地上的僵尸集合，带一个 tick 计数：游走的方向由种子、tick 与编号哈希出来，
- * 测试得像核心那样每 tick 把计数加 1 交进去。
+ * 测试得像核心那样每 tick 把计数加 1 交进去。死掉的僵尸掉的腐肉与经验球记在 `dropped` 与 `orbs` 里。
  */
 function zombiesOnFlatGround(radius = 1, seed = SEED) {
   const world: World = flatTestWorld(radius);
-  const zombies = new Zombies(world, seed);
+  const dropped: Array<{ stack: ItemStack; at: Cell }> = [];
+  const orbs: Array<{ amount: number; at: Cell }> = [];
+  const zombies = new Zombies(
+    world,
+    seed,
+    { spawnInBlock: (stack, x, y, z) => dropped.push({ stack, at: [x, y, z] }) },
+    { spawnInBlock: (amount, x, y, z) => orbs.push({ amount, at: [x, y, z] }) },
+  );
   let tick = 0;
   /** 推进 n 个 tick，玩家站在 player。每 tick 之后交给 `each` 看一眼。 */
   const advance = (n: number, player: Vec3 = PLAYER, each?: (zombie: ZombieView) => void) => {
@@ -36,7 +49,7 @@ function zombiesOnFlatGround(radius = 1, seed = SEED) {
       if (each && zombie) each(zombie);
     }
   };
-  return { world, zombies, advance };
+  return { world, zombies, advance, now: () => tick, dropped, orbs };
 }
 
 function equalPosition(a: Vec3, b: Vec3): boolean {
@@ -288,5 +301,115 @@ describe('僵尸的消失（ADR-0013）', () => {
     world.loadChunk(2, 0);
     advance(1, player);
     expect(zombies.all()[0]!.position.x).toBeCloseTo(31.8 + ZOMBIE_STEP, 9);
+  });
+});
+
+describe('僵尸被玩家打（#42）', () => {
+  /** 站在玩家脚下的一只：与玩家水平位置重合，它不走，位移全是击退。 */
+  function standingOnPlayer() {
+    const ground = zombiesOnFlatGround();
+    ground.zombies.spawnAt(PLAYER);
+    return ground;
+  }
+
+  /** 玩家在它 +Z 那边 1 格打它：击退朝 −Z。 */
+  const FROM_SOUTH: Vec3 = { x: PLAYER.x, y: PLAYER.y, z: PLAYER.z + 1 };
+
+  it('打一下：扣血、记下受伤的 tick，这一 tick 水平被推出 0.4 格、往上颠 0.4 格', () => {
+    const { zombies, advance, now } = standingOnPlayer();
+    advance(1);
+    expect(zombies.hitByPlayer(1, 3, FROM_SOUTH, now())).toBe(true);
+    const hit = zombies.all()[0]!;
+    expect(hit.health).toBe(17);
+    expect(hit.lastHurtTick).toBe(now());
+
+    advance(1);
+    const pushed = zombies.all()[0]!;
+    expect(KNOCKBACK_SPEED).toBe(0.4);
+    expect(KNOCKBACK_LIFT).toBe(0.4);
+    expect(pushed.position.z).toBeCloseTo(PLAYER.z - 0.4, 12);
+    expect(pushed.position.x).toBe(PLAYER.x);
+    expect(pushed.position.y).toBeCloseTo(FLAT_STAND_Y + 0.4, 12);
+  });
+
+  it('击退的水平速度每 tick 乘 0.6：第二 tick 推出 0.24，同时它朝玩家走回 1 步', () => {
+    expect(KNOCKBACK_DECAY).toBe(0.6);
+    const { zombies, advance, now } = standingOnPlayer();
+    zombies.hitByPlayer(1, 1, FROM_SOUTH, now());
+    advance(1);
+    const first = zombies.all()[0]!.position.z;
+    advance(1);
+    expect(zombies.all()[0]!.position.z - first).toBeCloseTo(-0.24 + ZOMBIE_STEP, 12);
+  });
+
+  it('推出去一共约 1 格，之后不再被推：一直走回玩家脚下', () => {
+    const { zombies, advance, now } = standingOnPlayer();
+    zombies.hitByPlayer(1, 1, FROM_SOUTH, now());
+    let farthest = 0;
+    advance(60, PLAYER, (zombie) => {
+      farthest = Math.max(farthest, PLAYER.z - zombie.position.z);
+    });
+    expect(farthest).toBeGreaterThan(0.4);
+    expect(farthest).toBeLessThan(1);
+    expect(horizontalDistance(zombies.all()[0]!)).toBe(0);
+  });
+
+  it('攻击者与它水平位置重合时只往上颠，不水平推', () => {
+    const { zombies, advance, now } = standingOnPlayer();
+    zombies.hitByPlayer(1, 1, { x: PLAYER.x, y: PLAYER.y + 5, z: PLAYER.z }, now());
+    advance(1);
+    expect(zombies.all()[0]!.position).toMatchObject({ x: PLAYER.x, z: PLAYER.z });
+    expect(zombies.all()[0]!.position.y).toBeGreaterThan(FLAT_STAND_Y);
+  });
+
+  it('受击后 10 tick 内（含第 10 tick）再打不生效：不扣血，也不再击退；第 11 tick 生效', () => {
+    const { zombies, advance, now } = standingOnPlayer();
+    const first = now();
+    zombies.hitByPlayer(1, 1, FROM_SOUTH, first);
+    advance(10);
+    expect(zombies.hitByPlayer(1, 1, FROM_SOUTH, now())).toBe(false);
+    expect(zombies.all()[0]!.health).toBe(19);
+    expect(zombies.all()[0]!.lastHurtTick).toBe(first);
+    advance(1);
+    expect(zombies.hitByPlayer(1, 1, FROM_SOUTH, now())).toBe(true);
+    expect(zombies.all()[0]!.health).toBe(18);
+  });
+
+  it('没有这一只：不生效', () => {
+    const { zombies, now } = standingOnPlayer();
+    expect(zombies.hitByPlayer(99, 1, FROM_SOUTH, now())).toBe(false);
+  });
+
+  it('生命归零的那一只下一次推进时移除，在它所在那一格掉 0 到 2 件腐肉与一个 50 点的经验球', () => {
+    const { zombies, advance, now, dropped, orbs } = zombiesOnFlatGround();
+    zombies.spawnAt({ x: 3.5, y: FLAT_STAND_Y, z: 0.5 });
+    zombies.hitByPlayer(1, 25, FROM_SOUTH, now());
+    expect(zombies.all()[0]!.health).toBe(0);
+    advance(1);
+
+    expect(zombies.count).toBe(0);
+    const cell: Cell = [3, FLAT_STAND_Y, 0];
+    expect(orbs).toEqual([{ amount: ZOMBIE_XP, at: cell }]);
+    expect(dropped.length).toBeLessThanOrEqual(1);
+    for (const { stack, at } of dropped) {
+      expect(at).toEqual(cell);
+      expect(stack.item).toBe(ItemType.RottenFlesh);
+      expect(stack.count).toBeGreaterThanOrEqual(1);
+      expect(stack.count).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it('视线求交：最先碰到的那一只；死了的不算', () => {
+    const { zombies, now } = zombiesOnFlatGround();
+    zombies.spawnAt({ x: 0.5, y: FLAT_STAND_Y, z: -4.5 });
+    zombies.spawnAt({ x: 0.5, y: FLAT_STAND_Y, z: -2.5 });
+    const eye: Vec3 = { x: 0.5, y: FLAT_STAND_Y + 1.62, z: 0.5 };
+    const ahead: Vec3 = { x: 0, y: 0, z: -1 };
+
+    expect(zombies.raycast(eye, ahead, 10)).toEqual({ id: 2, distance: expect.closeTo(2.7, 12) });
+    expect(zombies.raycast(eye, ahead, 2.6)).toBeUndefined();
+
+    zombies.hitByPlayer(2, 20, eye, now());
+    expect(zombies.raycast(eye, ahead, 10)).toMatchObject({ id: 1 });
   });
 });

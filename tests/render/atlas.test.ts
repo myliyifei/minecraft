@@ -72,11 +72,22 @@ describe('方块到贴图格号的映射表', () => {
     expect(new Set([off.top, off.side, off.front, lit.front]).size).toBe(4);
   });
 
-  it('图集是 8x8，64 格里现在用了 39 格', () => {
+  it('图集是 8x8，64 格里现在用了 40 格', () => {
     expect(ATLAS_COLS).toBe(8);
     expect(ATLAS_ROWS).toBe(8);
-    expect(Object.keys(TILE)).toHaveLength(39);
-    expect(new Set(Object.values(TILE)).size).toBe(39);
+    expect(Object.keys(TILE)).toHaveLength(40);
+    expect(new Set(Object.values(TILE)).size).toBe(40);
+  });
+
+  it('腐肉接在僵尸的四张之后占一格，现有格号不变；物品六面同一张（#42）', () => {
+    expect(TILE.rottenFlesh).toBe(39);
+    const earlier = Object.values(TILE).filter((tile) => tile < TILE.rottenFlesh);
+    expect([...earlier].sort((a, b) => a - b)).toEqual(Array.from({ length: 39 }, (_, i) => i));
+    expect(ITEM_TILES[ItemType.RottenFlesh]).toEqual({
+      top: TILE.rottenFlesh,
+      bottom: TILE.rottenFlesh,
+      side: TILE.rottenFlesh,
+    });
   });
 
   it('太阳与月亮接在木炭之后各占一格，现有格号不变（issue #38）', () => {
@@ -277,7 +288,7 @@ describe('手持物品画立方体还是平面图标', () => {
     }
   });
 
-  it('木棍、工具与煤炭、粗铁、铁锭、木炭这类材料没有对应的方块，画平面图标', () => {
+  it('木棍、工具与煤炭、粗铁、铁锭、木炭、腐肉这类材料没有对应的方块，画平面图标', () => {
     for (const item of [
       ItemType.Stick,
       ItemType.WoodenPickaxe,
@@ -293,6 +304,7 @@ describe('手持物品画立方体还是平面图标', () => {
       ItemType.RawIron,
       ItemType.IronIngot,
       ItemType.Charcoal,
+      ItemType.RottenFlesh,
     ]) {
       expect(heldItemShape(item), `物品 ${item}`).toBe(HeldItemShape.Flat);
     }

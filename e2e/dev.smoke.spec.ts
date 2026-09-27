@@ -52,6 +52,7 @@ import {
 } from '../src/render/atlas';
 import { recipesFor, type GridSize } from '../src/core/recipe';
 import { HURT_FLASH_TICKS } from '../src/ui/hurt-flash';
+import { ZOMBIE_HURT_TINT_TICKS } from '../src/render/zombie-model';
 import { ITEM_NAMES, durabilityLabel, recipeLabel, STRINGS } from '../src/ui/strings';
 import {
   countCanvasColors,
@@ -3355,6 +3356,62 @@ test('调试句柄在玩家前方 3 格生成一只僵尸：下一帧场景里�
   expect(horizontal(seen.later.zombies[0]!.position, seen.later.camera)).toBeLessThan(
     horizontal(seen.spawned.zombies[0]!.position, seen.spawned.camera) - 1,
   );
+  expect(errors).toEqual([]);
+});
+
+test('对准 2 格外的僵尸按左键：组的材质带红色叠色，10 tick 后恢复；手持物品挥了一下', async ({
+  page,
+}) => {
+  // 整段跑在一次同步的 evaluate 里，游戏循环插不进来。平视前方，僵尸生成在视线正前方 2 格那一列的顶面上，
+  // 手上拿一把木镐：空手没有东西可挥。
+  const seen = await page.evaluate(
+    ({ distance, pickaxe, tintTicks }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      core.turn(0, -core.player.pitch);
+      core.giveItem(pickaxe, 1);
+      core.selectHotbarSlot(0);
+      const { position, yaw } = core.player;
+      const x = position.x - Math.sin(yaw) * distance;
+      const z = position.z - Math.cos(yaw) * distance;
+      core.spawnZombieAt(x, core.highestBlockY(Math.floor(x), Math.floor(z)) + 1, z);
+      core.tick();
+      renderer.render(1);
+      const before = { zombie: renderer.zombies[0], held: renderer.heldItem };
+
+      core.setMining(true);
+      core.tick();
+      core.setMining(false);
+      renderer.render(0.5);
+      const hit = {
+        zombie: renderer.zombies[0],
+        health: core.zombies.all()[0]?.health,
+        held: renderer.heldItem,
+      };
+
+      core.tick(tintTicks);
+      renderer.render(1);
+      return { before, hit, after: { zombie: renderer.zombies[0], held: renderer.heldItem } };
+    },
+    { distance: 2, pickaxe: ItemType.WoodenPickaxe, tintTicks: ZOMBIE_HURT_TINT_TICKS },
+  );
+  const rgb = (hex: number) => [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff] as const;
+
+  // 打之前是贴图本色（乘白色），手持物品在原位
+  expect(seen.before.zombie!.tint).toBe(0xffffff);
+  expect(seen.before.held!.swing).toBe(0);
+
+  // 打中了：掉 2 点血（木镐），材质的颜色红分量满、绿蓝压低；手持物品正在挥
+  expect(seen.hit.health).toBe(18);
+  const [r, g, b] = rgb(seen.hit.zombie!.tint);
+  expect(r).toBe(0xff);
+  expect(g).toBeLessThan(0xc0);
+  expect(b).toBeLessThan(0xc0);
+  expect(seen.hit.held!.swing).toBeGreaterThan(0);
+
+  // 10 tick 后恢复本色，手持物品回到原位
+  expect(seen.after.zombie!.id).toBe(seen.before.zombie!.id);
+  expect(seen.after.zombie!.tint).toBe(0xffffff);
+  expect(seen.after.held!.swing).toBe(0);
   expect(errors).toEqual([]);
 });
 

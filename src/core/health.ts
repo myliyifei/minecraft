@@ -2,7 +2,7 @@
  * 生命值（见 CONTEXT.md）：受伤、无敌时间与回血。
  *
  * 只是按 tick 计的算术，不碰世界也不碰实体：谁在什么时候受了几点伤由调用方算好交进来，
- * 时间也由调用方给（核心的 tick 计数），这里不自己数 tick。玩家与将来的僵尸共用这一份，
+ * 时间也由调用方给（核心的 tick 计数），这里不自己数 tick。玩家与僵尸共用这一份，
  * 回血只有玩家调。
  */
 
@@ -34,7 +34,7 @@ export function fallDamage(distance: number): number {
 
 /** 生命值的只读视图。HUD 读它画心与红闪，改只能经由核心的 tick。 */
 export interface HealthView {
-  /** 当前生命值，0 到 `MAX_HEALTH` 的整数。 */
+  /** 当前生命值，0 到满血（玩家是 `MAX_HEALTH`）的整数。 */
   readonly points: number;
   /** 生命值归零了没有。 */
   readonly dead: boolean;
@@ -43,10 +43,17 @@ export interface HealthView {
 }
 
 export class Health implements HealthView {
-  private current = MAX_HEALTH;
+  /** 满血是几点。玩家是 `MAX_HEALTH`，僵尸各自的数值由它自己的模块给。 */
+  private readonly max: number;
+  private current: number;
   private lastHurt: number | undefined;
   /** 无敌时间到第几个 tick 为止（含）。还没受过伤时比任何 tick 都早。 */
   private invulnerableUntil = -Infinity;
+
+  constructor(max = MAX_HEALTH) {
+    this.max = max;
+    this.current = max;
+  }
 
   get points(): number {
     return this.current;
@@ -78,20 +85,20 @@ export class Health implements HealthView {
    * 回到进入世界时的样子：满血，没受过伤，没有无敌时间。重生时调。
    */
   reset(): void {
-    this.current = MAX_HEALTH;
+    this.current = this.max;
     this.lastHurt = undefined;
     this.invulnerableUntil = -Infinity;
   }
 
   /**
    * 第 now 个 tick 的回血：距上次受伤满 `REGEN_DELAY_TICKS` 的那一 tick 回 1，之后每满
-   * `REGEN_INTERVAL_TICKS` 再回 1，到 `MAX_HEALTH` 为止。死了不回，没受过伤也没什么可回。
+   * `REGEN_INTERVAL_TICKS` 再回 1，到满血为止。死了不回，没受过伤也没什么可回。
    *
    * 按「距上次受伤几 tick」判定而不是自己数：受伤一次就从头等起，不必另清一个计数。
    * 调用方要每 tick 调一次，漏掉的那一 tick 不补。
    */
   regenerate(now: number): void {
-    if (this.lastHurt === undefined || this.dead || this.current >= MAX_HEALTH) return;
+    if (this.lastHurt === undefined || this.dead || this.current >= this.max) return;
     const waited = now - this.lastHurt - REGEN_DELAY_TICKS;
     if (waited >= 0 && waited % REGEN_INTERVAL_TICKS === 0) this.current++;
   }

@@ -1,19 +1,27 @@
 import type { BlockView } from './block';
 import { TAU, TICK_RATE } from './constants';
+import type { DropSink } from './drop';
 import { isBoxInLoadedChunks, isInLoadedChunk, stepEntities, type LoadedChunks } from './entity';
+import { Health } from './health';
+import { ItemType } from './item';
 import { hashCoords } from './noise';
 import {
+  decayedKnockback,
   fallStep,
   hitboxAt,
   isBlockedAlong,
   isOnGround,
+  KNOCKBACK_LIFT,
+  knockbackFrom,
   movedAlong,
   NO_WALK,
   type Hitbox,
   type HorizontalDelta,
 } from './physics';
 import { JUMP_VELOCITY } from './player';
+import { raycastBox, type EntityHit, type EntityRaycast } from './raycast';
 import type { Vec3 } from './vec3';
+import type { XpOrbSink } from './xp-orb';
 
 /** 碰撞箱的水平边长（方块）。与玩家一样宽。 */
 export const ZOMBIE_WIDTH = 0.6;
@@ -21,8 +29,14 @@ export const ZOMBIE_WIDTH = 0.6;
 /** 碰撞箱的高度（方块）。比玩家高一点：模型总高 2 格，头顶留了一点。 */
 export const ZOMBIE_HEIGHT = 1.95;
 
-/** 生成时的生命值。本 issue（#41）里还没有任何东西伤得了它，攻击由 #42 接上。 */
+/** 生成时的生命值。 */
 export const ZOMBIE_MAX_HEALTH = 20;
+
+/** 死亡时最多掉几件腐肉。件数由哈希在 0 到它之间取（含两端）。 */
+export const ZOMBIE_MAX_FLESH = 2;
+
+/** 被玩家打死时掉的经验球有几点。与方块经验乘 10 的规则一致。 */
+export const ZOMBIE_XP = 50;
 
 /** 移动速度（方块/秒）。比玩家步行的 4.317 慢，玩家总跑得掉。 */
 export const ZOMBIE_SPEED = 3;
@@ -47,6 +61,9 @@ const WANDER_STOP_SHARE = 1 / 3;
 /** 游走的哈希与别的哈希（生成、掉落散开）错开用的盐。 */
 const WANDER_SALT = 0x6a3d_e91b;
 
+/** 腐肉件数的哈希用的盐，与游走错开：同一 tick、同一编号的两种哈希不该相关。 */
+const LOOT_SALT = 0x2f71_c5a3;
+
 /** 僵尸的只读视图。渲染层读它摆模型、按 `age + alpha` 摆臂摆腿（ADR-0007）。 */
 export interface ZombieView {
   /** 僵尸的编号，一直到它消失都不变，消失了也不复用。渲染层靠它认出哪个模型是哪只。 */
@@ -60,6 +77,8 @@ export interface ZombieView {
   /** 已经推进了多少 tick。原地等区块的那些 tick 不算。 */
   readonly age: number;
   readonly health: number;
+  /** 上一次受伤（真的扣了血）是第几个 tick，还没受过伤是 undefined。渲染层据此叠红。 */
+  readonly lastHurtTick: number | undefined;
 }
 
 /** 世界里现有的僵尸。 */
@@ -70,7 +89,8 @@ export interface ZombiesView {
 }
 
 /**
- * 世界里的全部僵尸：出现、朝玩家走或游走、跳上 1 格、离得太远或所在区块没加载就消失。
+ * 世界里的全部僵尸：出现、朝玩家走或游走、跳上 1 格、被玩家打、离得太远或所在区块没加载就消失、
+ * 生命归零就死。
  *
  * 与掉落物、经验球同一套样式（ADR-0007）：持列表、编号自增不复用、`step` 走 `stepEntities`；
  * 重力与碰撞用 `physics.ts` 里与玩家、掉落物同一份解算。僵尸之间、僵尸与玩家之间不做碰撞，
@@ -82,17 +102,29 @@ export interface ZombiesView {
  * 所在区块没加载就消失（ADR-0013）：僵尸是按规则生成的，走远了本来就该没，不必像掉落物那样暂停
  * 保留。中心还在已加载区块里、这一 tick 可能走到的范围（`reach`）却伸进了没加载的区块时，则原地
  * 等这一 tick——否则碰撞把隔壁读成空气，它会走进隔壁本来是墙的位置，区块送到时卡在墙里。
+ *
+ * 死掉的僵尸在原位掉 0 到 2 件腐肉（件数由种子、tick 与编号哈希出来），最后一下是玩家打的
+ * 还掉一个经验球，交给 `DropSink` 与 `XpOrbSink`；之后怎么落、怎么飞是它们的事。
  */
-export class Zombies implements ZombiesView {
+export class Zombies implements ZombiesView, EntityRaycast {
   private readonly blocks: BlockView & LoadedChunks;
   private readonly seed: number;
+  private readonly drops: DropSink;
+  private readonly experience: XpOrbSink;
   private readonly list: Zombie[] = [];
   /** 下一只僵尸的编号。同时是游走哈希的一个输入，同一 tick 里的几只因此各走各的。 */
   private nextId = 1;
 
-  constructor(blocks: BlockView & LoadedChunks, seed: number) {
+  constructor(
+    blocks: BlockView & LoadedChunks,
+    seed: number,
+    drops: DropSink,
+    experience: XpOrbSink,
+  ) {
     this.blocks = blocks;
     this.seed = seed;
+    this.drops = drops;
+    this.experience = experience;
   }
 
   get count(): number {
@@ -109,14 +141,46 @@ export class Zombies implements ZombiesView {
   }
 
   /**
-   * 推进一个 tick。`tick` 是核心的 tick 计数，游走的哈希要用它；`player` 是玩家的位置（碰撞箱
+   * 视线最先碰到的那一只活着的僵尸（碰撞箱求交，`raycastBox`）。死了还没移除的不算：它们这一 tick
+   * 结束前就会消失。
+   */
+  raycast(origin: Vec3, direction: Vec3, maxDistance: number): EntityHit | undefined {
+    let nearest: EntityHit | undefined;
+    for (const zombie of this.list) {
+      if (zombie.dead) continue;
+      const distance = raycastBox(origin, direction, zombie.hitbox, maxDistance);
+      if (distance === undefined || (nearest && nearest.distance <= distance)) continue;
+      nearest = { id: zombie.id, distance };
+    }
+    return nearest;
+  }
+
+  /**
+   * 玩家在 attacker 打了编号 id 的那只一下，伤害 damage，这是第 now 个 tick。attacker 是玩家的
+   * 眼睛位置，击退只用它的水平分量。
+   * 返回这一下生效了没有：还在受击后的无敌时间里、已经死了、没有这只时都不生效。
+   *
+   * 生效时扣血、被击退（`knockbackFrom`）。生命归零不当场移除，等 `step` 结算掉落：伤害可能来自一 tick 里的任何一步，掉落只在一处出。
+   */
+  hitByPlayer(id: number, damage: number, attacker: Vec3, now: number): boolean {
+    const zombie = this.list.find((candidate) => candidate.id === id);
+    return zombie ? zombie.hitByPlayer(damage, now, attacker) : false;
+  }
+
+  /**
+   * 推进一个 tick。`tick` 是核心的 tick 计数，游走与掉落的哈希要用它；`player` 是玩家的位置（碰撞箱
    * 底面中心），追击与消失都按它算。
    *
-   * 先判消失再走：走这一步之前离玩家正好 64 格的不消失，哪怕这一步会让它远出去一点。原地等区块
+   * 死了的最先结算：在它此刻所在的那一格掉落，然后移除，不再走这一步——掉落落在它挨最后一下的地方。
+   * 再判消失，然后走：走这一步之前离玩家正好 64 格的不消失，哪怕这一步会让它远出去一点。原地等区块
    * 排在选方向之前，等着的那些 tick 里游走的方向与剩余 tick、偏航都不动。
    */
   step(tick: number, player: Vec3): void {
     stepEntities(this.list, (zombie) => {
+      if (zombie.dead) {
+        this.dropLoot(zombie, tick);
+        return false;
+      }
       if (!isInLoadedChunk(this.blocks, zombie.position)) return false;
       if (distance(zombie.position, player) > ZOMBIE_DESPAWN_RANGE) return false;
       if (!isBoxInLoadedChunks(this.blocks, zombie.reach)) {
@@ -129,6 +193,21 @@ export class Zombies implements ZombiesView {
     });
   }
 
+  /**
+   * 一只僵尸死了：在它所在的那一格掉 0 到 `ZOMBIE_MAX_FLESH` 件腐肉，合成一堆，再掉一个 `ZOMBIE_XP`
+   * 点的经验球。
+   *
+   * 经验只给玩家打死的。本 issue 里只有玩家伤得了僵尸，所以死了就给；燃烧与摔落伤害（#44）进来时
+   * 要记下最后一下伤害的来源，按它决定给不给。
+   */
+  private dropLoot(zombie: Zombie, tick: number): void {
+    const { x, y, z } = zombie.position;
+    const [bx, by, bz] = [Math.floor(x), Math.floor(y), Math.floor(z)];
+    const flesh = hashCoords(this.seed ^ LOOT_SALT, tick, zombie.id) % (ZOMBIE_MAX_FLESH + 1);
+    if (flesh > 0) this.drops.spawnInBlock({ item: ItemType.RottenFlesh, count: flesh }, bx, by, bz);
+    this.experience.spawnInBlock(ZOMBIE_XP, bx, by, bz);
+  }
+
   /** 游走选方向用的哈希，摊成 [0, 1)。 */
   private wanderRoll(tick: number, id: number): number {
     // hashCoords 给的是 32 位无符号整数，除以 2³² 摊成 [0, 1)。
@@ -136,10 +215,10 @@ export class Zombies implements ZombiesView {
   }
 }
 
-/** 一只僵尸：位置、竖直速度、偏航、游走的方向与剩余 tick。 */
+/** 一只僵尸：位置、速度、生命值、偏航、游走的方向与剩余 tick。 */
 class Zombie implements ZombieView {
   readonly id: number;
-  readonly health = ZOMBIE_MAX_HEALTH;
+  private readonly life = new Health(ZOMBIE_MAX_HEALTH);
   // 与玩家一样存成三个数而不是一个 Vec3：逐轴解算碰撞时每次只改一个分量。
   private x: number;
   private y: number;
@@ -148,6 +227,11 @@ class Zombie implements ZombieView {
   private prevY: number;
   private prevZ: number;
   private velocityY = 0;
+  /**
+   * 击退的水平速度，每 tick 乘 `KNOCKBACK_DECAY`。走路的位移另算、没有惯性，两者每 tick 相加。
+   * 没被打过时是 `NO_WALK`。
+   */
+  private knock: HorizontalDelta = NO_WALK;
   private yawAngle = 0;
   private ticks = 0;
   /** 游走时这一 tick 的位移；选中「停下」时是零位移。 */
@@ -169,6 +253,30 @@ class Zombie implements ZombieView {
     return this.ticks;
   }
 
+  get health(): number {
+    return this.life.points;
+  }
+
+  get lastHurtTick(): number | undefined {
+    return this.life.lastHurtTick;
+  }
+
+  get dead(): boolean {
+    return this.life.dead;
+  }
+
+  /**
+   * 第 now 个 tick 被在 attacker 的玩家打了 amount 点，返回生效了没有。无敌时间与扣血的规则在
+   * `Health`：与玩家同一份，受击后 10 tick 内（含第 10 tick）再打不掉血。生效时水平被推离攻击者，
+   * 带一点上抛。
+   */
+  hitByPlayer(amount: number, now: number, attacker: Vec3): boolean {
+    if (!this.life.hurt(amount, now)) return false;
+    this.knock = knockbackFrom(attacker, this.position);
+    this.velocityY = KNOCKBACK_LIFT;
+    return true;
+  }
+
   get yaw(): number {
     return this.yawAngle;
   }
@@ -187,14 +295,16 @@ class Zombie implements ZombieView {
 
   /**
    * 这一 tick 的碰撞可能读到的范围：碰撞箱水平各向外扩一步。一 tick 在每个轴上至多走
-   * `ZOMBIE_STEP`，所以不必先知道往哪走——判定因此能排在选方向之前。竖直方向不涉及别的区块，
-   * 不外扩。
+   * `ZOMBIE_STEP` 加上击退的速度，所以不必先知道往哪走——判定因此能排在选方向之前。竖直方向
+   * 不涉及别的区块，不外扩。
    */
   get reach(): Hitbox {
     const { min, max } = this.hitbox;
+    const dx = ZOMBIE_STEP + Math.abs(this.knock.x);
+    const dz = ZOMBIE_STEP + Math.abs(this.knock.z);
     return {
-      min: { x: min.x - ZOMBIE_STEP, y: min.y, z: min.z - ZOMBIE_STEP },
-      max: { x: max.x + ZOMBIE_STEP, y: max.y, z: max.z + ZOMBIE_STEP },
+      min: { x: min.x - dx, y: min.y, z: min.z - dz },
+      max: { x: max.x + dx, y: max.y, z: max.z + dz },
     };
   }
 
@@ -241,7 +351,8 @@ class Zombie implements ZombieView {
   }
 
   /**
-   * 推进一个 tick：重力与竖直碰撞，再沿两个水平轴各走一步。
+   * 推进一个 tick：重力与竖直碰撞，再沿两个水平轴各走一步。水平那一步是走路的位移加上击退的速度，
+   * 走完击退速度衰减一次。
    *
    * 水平方向被挡住、脚下踩实、挡住它的那一格上方两格是空气（碰撞箱抬高 1 格再走这一步就走得通）
    * 时起跳。起跳速度在下一 tick 的竖直那一步里生效，与玩家按住跳跃键同一套物理，最高点 1.252 格：
@@ -259,14 +370,16 @@ class Zombie implements ZombieView {
     this.velocityY = fall.velocityY;
 
     // 两个轴分开做碰撞，斜着撞墙时沿着墙滑过去。
-    const blockedX = this.walkAlong(blocks, 'x', walk.x);
-    const blockedZ = this.walkAlong(blocks, 'z', walk.z);
+    const move = { x: walk.x + this.knock.x, z: walk.z + this.knock.z };
+    this.knock = decayedKnockback(this.knock);
+    const blockedX = this.walkAlong(blocks, 'x', move.x);
+    const blockedZ = this.walkAlong(blocks, 'z', move.z);
     if (!blockedX && !blockedZ) return;
     if (!isOnGround(blocks, this.hitbox)) return;
     // 斜着走进墙角时两个轴都被挡，哪个轴上挡住的只有 1 格高就跳。
     const stepUp =
-      (blockedX && this.canStepUp(blocks, 'x', walk.x)) ||
-      (blockedZ && this.canStepUp(blocks, 'z', walk.z));
+      (blockedX && this.canStepUp(blocks, 'x', move.x)) ||
+      (blockedZ && this.canStepUp(blocks, 'z', move.z));
     if (stepUp) this.velocityY = JUMP_VELOCITY;
   }
 

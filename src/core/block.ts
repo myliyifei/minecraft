@@ -501,6 +501,8 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   [ItemType.IronShovel]: null,
   // 木炭同样只是材料：原木炼出来的，没有对应的方块（#34）。
   [ItemType.Charcoal]: null,
+  // 腐肉是僵尸掉的材料，放不下去；饥饿值进来之前也吃不了（#42）。
+  [ItemType.RottenFlesh]: null,
 };
 
 /**

@@ -32,6 +32,7 @@ import { oakTreesTouching } from '../../src/core/tree';
 import type { Vec3 } from '../../src/core/vec3';
 import { ABOVE_SURFACE } from '../helpers/above-surface';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
+import { STONE_LAYER } from '../helpers/stone-layer';
 
 /**
  * 采样用的视距（区块数）。
@@ -230,8 +231,9 @@ describe('GameCore 在 Node 中的方块查询', () => {
       expect(dirt).toBeGreaterThanOrEqual(DIRT_DEPTH_MIN);
       expect(dirt).toBeLessThanOrEqual(DIRT_DEPTH_MAX);
       expect(core.getBlock(x, surface - dirt - 1, z)).toBe(BlockType.Stone);
-      expect(core.getBlock(x, 0, z)).toBe(BlockType.Stone);
-      expect(core.getBlock(x, WORLD_MIN_Y + 1, z)).toBe(BlockType.Stone);
+      // 石层深处可能正好有矿脉，这里只检查地形分层
+      expect(STONE_LAYER).toContain(core.getBlock(x, 0, z));
+      expect(STONE_LAYER).toContain(core.getBlock(x, WORLD_MIN_Y + 1, z));
     }
   });
 

@@ -20,11 +20,11 @@ import { chunkOf, chunksAround, ORIGIN_CHUNK, World, type ChunkCoord } from '../
 const SEED = 314_159;
 const OTHER_SEED = 777;
 
-/** 找矿脉时扫的区块半径。9×9 个区块、每区块几十条，样本够断言密度与形状。 */
+/** 找矿脉时扫的区块半径。9×9 个区块、每区块一百多条，样本够断言密度与形状。 */
 const SCAN_RADIUS = 4;
 
 /**
- * issue #31 给的两种矿石的参数，写死字面值，不从 `ORE_KINDS` 反读：这张表是需求那一侧的数字，
+ * issue #31、#47 给的两种矿石的参数，写死字面值，不从 `ORE_KINDS` 反读：这张表是需求那一侧的数字，
  * 数据表填错也该在这里报出来。
  */
 const EXPECTED_KINDS: Array<{
@@ -37,11 +37,14 @@ const EXPECTED_KINDS: Array<{
   veinsPerChunk: number;
 }> = [
   { name: '煤矿脉', block: BlockType.CoalOre, minY: 0, maxY: 64, maxCount: 8, cellSize: 8, veinsPerChunk: 20 },
-  { name: '铁矿脉', block: BlockType.IronOre, minY: -63, maxY: 32, maxCount: 4, cellSize: 8, veinsPerChunk: 10 },
+  { name: '铁矿脉', block: BlockType.IronOre, minY: -63, maxY: 32, maxCount: 4, cellSize: 4, veinsPerChunk: 100 },
 ];
 
-/** 平均条数允许偏离目标的比例。样本是 81 个区块，正负三成够宽松，也足以说明密度没有偏离目标。 */
-const DENSITY_TOLERANCE = 0.3;
+/**
+ * 平均条数允许偏离目标的比例。样本是 81 个区块，三个种子实测都在目标的 2% 以内，正负一成仍然宽松；
+ * 阈值填错时（例如铁退回 54，约 79 条）测试会失败。
+ */
+const DENSITY_TOLERANCE = 0.1;
 
 /** 一格坐标写成可比较的字符串。 */
 function key({ x, y, z }: Vec3): string {
@@ -97,7 +100,7 @@ function isDeep(vein: OreVein): boolean {
 const ORE_BLOCKS: ReadonlySet<BlockType> = new Set(ORE_KINDS.map((kind) => kind.block));
 
 describe('矿石种类表', () => {
-  it('有煤与铁两种，参数就是 issue #31 给的那些', () => {
+  it('有煤与铁两种，参数就是 issue #31、#47 给的那些', () => {
     expect(ORE_KINDS).toHaveLength(EXPECTED_KINDS.length);
     for (const expected of EXPECTED_KINDS) {
       const kind: OreKindDef | undefined = ORE_KINDS.find((k) => k.block === expected.block);
@@ -131,7 +134,7 @@ describe('矿脉的分布', () => {
     }
   });
 
-  it('每区块平均条数落在目标的宽松区间内：煤约 20、铁约 10', () => {
+  it('每区块平均条数落在目标的宽松区间内：煤约 20、铁约 100', () => {
     for (const seed of [SEED, OTHER_SEED, DEFAULT_SEED]) {
       const all = oreVeinsIn(seed, SCAN_RADIUS);
       for (const { name, block, veinsPerChunk } of EXPECTED_KINDS) {
@@ -211,6 +214,15 @@ describe('矿脉的分布', () => {
       expect(Math.min(...ys), `${name}最低的中心`).toBeLessThan(minY + 8);
       expect(Math.max(...ys), `${name}最高的中心`).toBeGreaterThan(maxY - 8);
     }
+  });
+
+  it('铁矿脉的中心在单元内 64 个位置都出现过：落点的 x、y、z 各取一段互不重叠的哈希位', () => {
+    const { block, cellSize } = EXPECTED_KINDS.find((k) => k.block === BlockType.IronOre)!;
+    const slot = (coord: number): number => ((coord % cellSize) + cellSize) % cellSize;
+    const slots = new Set(
+      veins.filter((v) => v.block === block).map(({ center }) => `${slot(center.x)},${slot(center.y)},${slot(center.z)}`),
+    );
+    expect(slots.size).toBe(cellSize ** 3);
   });
 
   it('同一区块两次算出同样的矿脉', () => {

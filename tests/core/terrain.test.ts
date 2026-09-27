@@ -17,16 +17,7 @@ import {
   plainsTerrain,
 } from '../../src/core/terrain';
 import { ABOVE_SURFACE } from '../helpers/above-surface';
-
-/**
- * 石层里可能出现的方块：石头，以及嵌在石头里的两种矿石（issue #31）。
- * 矿脉的形状与分布断言在 tests/core/ore.test.ts，这里只确认石层除了石头就只有矿石。
- */
-const STONE_LAYER: ReadonlySet<BlockType> = new Set([
-  BlockType.Stone,
-  BlockType.CoalOre,
-  BlockType.IronOre,
-]);
+import { STONE_LAYER } from '../helpers/stone-layer';
 
 // 两个与 DEFAULT_SEED 无关的种子：地形的性质不该只在默认种子下成立。
 const SEED = 314_159;

@@ -594,9 +594,8 @@ export class GameCore implements BlockEdit, BlockStateView {
       // 选中格先生效，再瞄准与使用：同一 tick 里切了格又按使用键，放下的是新格里的东西。
       this.inventoryState.select(this.nextSlot);
     }
-    // 移动之后重读一次：这一 tick 里摔死的，从这里起与已经死了的一样，不挖、不放、不拾取。
-    // 否则落地那一 tick 按着的使用键还会放下一块，脚边的掉落物也会先被拾起再掉出来。
-    const dead = this.healthState.dead;
+    // 移动之后重读一次：这一 tick 里摔死的，从这里起与已经死了的一样，不挖、不放（拾取见下面）。
+    // 否则落地那一 tick 按着的使用键还会放下一块。
     const uiMode = this.uiMode;
     // 攻击与挖掘必须排在移动之后，理由见 Mining.step。界面一开就换成「什么键都没按」，
     // 进度因此当场归零，回头得重挖。攻击排在挖掘之前：左键按下那一 tick 先看视线先碰到的是不是
@@ -616,18 +615,32 @@ export class GameCore implements BlockEdit, BlockStateView {
     // 熔炉排在挖掘与使用之后、掉落物与经验球之前（issue #34）。界面开着照样推进：挡的是玩家的输入，
     // 不是世界。所在区块没加载的熔炉暂停，不补算。
     stepFurnaces(this.world);
-    // 僵尸排在熔炉之后、掉落物之前（#36 定的每 tick 顺序），追的是玩家这一 tick 走完之后的位置。
-    // 死亡画面期间照常推进：世界不停，死了的玩家停在原地，僵尸照样朝那里走。
-    this.zombiesState.step(this.ticks, this.playerState.position);
+    // 僵尸排在熔炉之后、掉落物之前（#36 定的每 tick 顺序），追的、打的是玩家这一 tick 走完之后的位置。
+    // 死亡画面期间照常推进：世界不停，死了的玩家停在原地，僵尸照样朝那里走，只是他不再受伤。
+    // 界面开着照样挨打：挡的是玩家的输入，不是世界。
+    this.zombiesState.step(this.ticks, {
+      position: this.playerState.position,
+      hitbox: this.playerState.hitbox,
+      hitByZombie: (amount, attacker, now) => this.hitByZombie(amount, attacker, now),
+    });
     // 掉落物与经验球都排在挖掘之后：这一 tick 刚挖出来的东西同一 tick 就开始动，而
     // 掉落物的拾取延迟（PICKUP_DELAY_TICKS）也从这里起算。拾取与吸收判的都是玩家走完
-    // 之后的碰撞箱。两者互不影响，谁先谁后都一样。死了的玩家什么都不拾取、不吸收。
-    const collector = dead ? undefined : this.playerState.hitbox;
+    // 之后的碰撞箱。两者互不影响，谁先谁后都一样。死了的玩家什么都不拾取、不吸收，这一 tick 摔死的、
+    // 被僵尸打死的也一样——否则脚边的掉落物会先被拾起再掉出来。
+    const collector = this.healthState.dead ? undefined : this.playerState.hitbox;
     this.dropsState.step(collector, this.inventoryState);
     this.xpOrbsState.step(collector, this.experienceState);
     // 回血与死亡判定排在最后：这一 tick 里所有伤害都结算完了，受伤那一 tick 不会紧跟着回血。
     this.healthState.regenerate(this.ticks);
     if (!wasDead && this.healthState.dead) this.die();
+  }
+
+  /**
+   * 第 now 个 tick 被在 attacker 的僵尸打了 amount 点。无敌时间与死了不受伤的规则在 `Health`；生效时
+   * 被推离那只僵尸（`Player.knockBack`）。生命值不在 `Player` 上，所以由核心把两边拼起来。
+   */
+  private hitByZombie(amount: number, attacker: Vec3, now: number): void {
+    if (this.healthState.hurt(amount, now)) this.playerState.knockBack(attacker);
   }
 
   /**

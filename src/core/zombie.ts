@@ -44,6 +44,15 @@ export const ZOMBIE_SPEED = 3;
 /** 一 tick 的移动距离（方块）。 */
 export const ZOMBIE_STEP = ZOMBIE_SPEED / TICK_RATE;
 
+/** 打玩家一下扣几点。 */
+export const ZOMBIE_ATTACK_DAMAGE = 3;
+
+/** 距上次出手满这么多 tick 才再出手。 */
+export const ZOMBIE_ATTACK_INTERVAL = 20;
+
+/** 与玩家的水平中心距在这么多格以内（含）、碰撞箱竖直区间又重叠，就打得到。 */
+export const ZOMBIE_ATTACK_RANGE = 1.5;
+
 /** 与玩家的水平距离在这么多格以内（含）就朝玩家走，隔着墙也追。 */
 export const ZOMBIE_CHASE_RANGE = 32;
 
@@ -81,6 +90,19 @@ export interface ZombieView {
   readonly lastHurtTick: number | undefined;
 }
 
+/** 僵尸追的、打的那个玩家。 */
+export interface ZombieTarget {
+  /** 碰撞箱底面中心。追击与消失都按它算。 */
+  readonly position: Vec3;
+  /** 当前的碰撞箱。打不打得到要看它的竖直区间。 */
+  readonly hitbox: Hitbox;
+  /**
+   * 第 now 个 tick 被在 attacker（僵尸的位置）的僵尸打了 amount 点。玩家还在无敌时间里、已经死了时
+   * 不生效，由玩家那边判定。
+   */
+  hitByZombie(amount: number, attacker: Vec3, now: number): void;
+}
+
 /** 世界里现有的僵尸。 */
 export interface ZombiesView {
   /** 现有的僵尸。渲染层每帧遍历一次。 */
@@ -89,12 +111,15 @@ export interface ZombiesView {
 }
 
 /**
- * 世界里的全部僵尸：出现、朝玩家走或游走、跳上 1 格、被玩家打、离得太远或所在区块没加载就消失、
- * 生命归零就死。
+ * 世界里的全部僵尸：出现、朝玩家走或游走、跳上 1 格、够得着就打玩家、被玩家打、离得太远或所在区块
+ * 没加载就消失、生命归零就死。
  *
  * 与掉落物、经验球同一套样式（ADR-0007）：持列表、编号自增不复用、`step` 走 `stepEntities`；
  * 重力与碰撞用 `physics.ts` 里与玩家、掉落物同一份解算。僵尸之间、僵尸与玩家之间不做碰撞，
  * 可以重叠。
+ *
+ * 打玩家时只管够不够得着、隔没隔够 20 tick，打出去的那一下交给玩家（`ZombieTarget.hitByZombie`）：
+ * 生命值、无敌时间与击退都是玩家那边的事。
  *
  * 游走的方向由种子、tick 与编号哈希出来（ADR-0003 的延伸），核心不持随机状态，同一种子同一串
  * tick 每次得到同一条轨迹。
@@ -168,27 +193,30 @@ export class Zombies implements ZombiesView, EntityRaycast {
   }
 
   /**
-   * 推进一个 tick。`tick` 是核心的 tick 计数，游走与掉落的哈希要用它；`player` 是玩家的位置（碰撞箱
-   * 底面中心），追击与消失都按它算。
+   * 推进一个 tick。`tick` 是核心的 tick 计数，游走与掉落的哈希、出手的间隔要用它；`player` 是玩家，
+   * 追击与消失按它的位置算，走完这一步够得着就打它。
    *
    * 死了的最先结算：在它此刻所在的那一格掉落，然后移除，不再走这一步——掉落落在它挨最后一下的地方。
    * 再判消失，然后走：走这一步之前离玩家正好 64 格的不消失，哪怕这一步会让它远出去一点。原地等区块
-   * 排在选方向之前，等着的那些 tick 里游走的方向与剩余 tick、偏航都不动。
+   * 排在选方向之前，等着的那些 tick 里游走的方向与剩余 tick、偏航都不动。出手排在走之后，原地等着的
+   * 也照样出手：出手不读方块。
    */
-  step(tick: number, player: Vec3): void {
+  step(tick: number, player: ZombieTarget): void {
+    const at = player.position;
     stepEntities(this.list, (zombie) => {
       if (zombie.dead) {
         this.dropLoot(zombie, tick);
         return false;
       }
       if (!isInLoadedChunk(this.blocks, zombie.position)) return false;
-      if (distance(zombie.position, player) > ZOMBIE_DESPAWN_RANGE) return false;
-      if (!isBoxInLoadedChunks(this.blocks, zombie.reach)) {
+      if (distance(zombie.position, at) > ZOMBIE_DESPAWN_RANGE) return false;
+      if (isBoxInLoadedChunks(this.blocks, zombie.reach)) {
+        const walk = zombie.chooseWalk(at, () => this.wanderRoll(tick, zombie.id));
+        zombie.step(this.blocks, walk);
+      } else {
         zombie.hold();
-        return true;
       }
-      const walk = zombie.chooseWalk(player, () => this.wanderRoll(tick, zombie.id));
-      zombie.step(this.blocks, walk);
+      zombie.attack(player, tick);
       return true;
     });
   }
@@ -215,7 +243,7 @@ export class Zombies implements ZombiesView, EntityRaycast {
   }
 }
 
-/** 一只僵尸：位置、速度、生命值、偏航、游走的方向与剩余 tick。 */
+/** 一只僵尸：位置、速度、生命值、偏航、游走的方向与剩余 tick、上次出手的 tick。 */
 class Zombie implements ZombieView {
   readonly id: number;
   private readonly life = new Health(ZOMBIE_MAX_HEALTH);
@@ -241,6 +269,8 @@ class Zombie implements ZombieView {
    * 当场重选，不接着走追击之前选的那个方向。
    */
   private wanderLeft = 0;
+  /** 上一次出手是第几个 tick，不论玩家受没受伤。还没出过手时比任何 tick 都早。 */
+  private lastAttack = -Infinity;
 
   constructor(id: number, position: Vec3) {
     this.id = id;
@@ -275,6 +305,27 @@ class Zombie implements ZombieView {
     this.knock = knockbackFrom(attacker, this.position);
     this.velocityY = KNOCKBACK_LIFT;
     return true;
+  }
+
+  /**
+   * 第 now 个 tick 距上次出手满 `ZOMBIE_ATTACK_INTERVAL` tick、又够得着 target（`reaches`），就出手打它
+   * 一下。
+   *
+   * 玩家在无敌时间里或死了，这一下不生效，但照样算出过手，重新等 20 tick，与原版一致：几只同时围上来
+   * 打时，掉血的节奏与只有一只时相同，还是每 20 tick 一下。
+   */
+  attack(target: ZombieTarget, now: number): void {
+    if (now - this.lastAttack < ZOMBIE_ATTACK_INTERVAL) return;
+    if (!this.reaches(target)) return;
+    target.hitByZombie(ZOMBIE_ATTACK_DAMAGE, this.position, now);
+    this.lastAttack = now;
+  }
+
+  /** 打得到 target 吗：水平中心距不超过 `ZOMBIE_ATTACK_RANGE`，碰撞箱的竖直区间重叠（相切不算）。 */
+  private reaches({ position, hitbox }: ZombieTarget): boolean {
+    if (Math.hypot(position.x - this.x, position.z - this.z) > ZOMBIE_ATTACK_RANGE) return false;
+    const { min, max } = this.hitbox;
+    return min.y < hitbox.max.y && max.y > hitbox.min.y;
   }
 
   get yaw(): number {

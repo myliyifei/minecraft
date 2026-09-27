@@ -10,6 +10,9 @@ import { FLAT_STAND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 /*
  * 玩家攻击僵尸（#42）。玩家站在原点那一格中心，平视 −Z：眼睛在 (0.5, 72.62, 0.5)，视线沿 −Z 平着走。
  * 僵尸都生成在这条视线上，眼高落在它的碰撞箱（高 1.95）里。
+ *
+ * 僵尸会走过来打玩家（#43），玩家被打得上抛，视线就从它头顶过去了。要推进十几 tick 的测试用
+ * `pennedZombieAhead` 把它关在够不着玩家的地方。
  */
 
 const SEED = 1234;
@@ -24,6 +27,16 @@ function core(seed = SEED): GameCore {
 /** 在视线正前方生成一只僵尸：碰撞箱中心离玩家 distance 格（沿 −Z）。 */
 function zombieAhead(game: GameCore, distance: number): void {
   game.spawnZombieAt(0.5, FLAT_STAND_Y, 0.5 - distance);
+}
+
+/**
+ * 在视线正前方 2 格生成一只，走不过来：它与玩家之间那一格摆一格高的矮墙，它头顶那一层（y = 73）
+ * 封住，跳不起来。它最近停在离玩家 1.8 格处，打不到玩家；视线从矮墙上方过去，照样落在它身上。
+ */
+function pennedZombieAhead(game: GameCore): void {
+  game.setBlock(0, FLAT_STAND_Y, -1, BlockType.Stone);
+  for (let z = -3; z <= -2; z++) game.setBlock(0, FLAT_STAND_Y + 2, z, BlockType.Stone);
+  zombieAhead(game, 2);
 }
 
 function onlyZombie(game: GameCore): ZombieView {
@@ -181,7 +194,7 @@ describe('不自动连击，出手冷却 10 tick，僵尸受击后无敌 10 tick
   it('隔 11 tick 再打，僵尸掉血', () => {
     const game = core();
     game.giveItem(ItemType.WoodenPickaxe, 1);
-    zombieAhead(game, 2);
+    pennedZombieAhead(game);
     press(game);
     const first = game.tickCount;
 
@@ -222,7 +235,7 @@ describe('按下左键是一次性输入，排队到下一个 tick 边界（ADR-
   it('两个 tick 之间松开又按下：算一次新的按下', () => {
     const game = core();
     game.giveItem(ItemType.WoodenPickaxe, 1);
-    zombieAhead(game, 2);
+    pennedZombieAhead(game);
     game.setMining(true);
     game.tick();
     game.tick(10);
@@ -235,7 +248,7 @@ describe('按下左键是一次性输入，排队到下一个 tick 边界（ADR-
 
   it('界面开着时按下左键不出手；关掉界面时左键还按着也不算按下，松开再按才出手', () => {
     const game = core();
-    zombieAhead(game, 2);
+    pennedZombieAhead(game);
     game.toggleInventory();
     game.tick();
     expect(game.uiMode).toBe(true);

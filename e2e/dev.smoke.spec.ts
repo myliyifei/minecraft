@@ -3415,6 +3415,80 @@ test('对准 2 格外的僵尸按左键：组的材质带红色叠色，10 tick 
   expect(errors).toEqual([]);
 });
 
+test('调试句柄把僵尸生成在玩家身旁：下一 tick 少一颗半心、红色遮罩可见；推进到生命归零，死亡画面可见；点重生后心满', async ({
+  page,
+}) => {
+  // 整段跑在一次同步的 evaluate 里，游戏循环插不进来：被打的那一 tick 是精确的。
+  const seen = await page.evaluate(() => {
+    const { core, hud } = window.__VOXEL__!;
+    const shown = (selector: string): boolean => {
+      const element = document.querySelector(selector);
+      return element instanceof HTMLElement && getComputedStyle(element).display !== 'none';
+    };
+    const hearts = () =>
+      [...document.querySelectorAll<HTMLElement>('#health-bar .health__heart')].map(
+        (heart) => heart.dataset.state,
+      );
+
+    // 玩家 +X 方向 1 格那一列的顶面上
+    const { position } = core.player;
+    const x = position.x + 1;
+    core.spawnZombieAt(x, core.highestBlockY(Math.floor(x), Math.floor(position.z)) + 1, position.z);
+    core.tick();
+    hud.update();
+    const hit = { points: core.health.points, hearts: hearts(), flash: shown('#hurt-flash') };
+
+    let ticks = 1;
+    for (; ticks < 600 && !core.health.dead; ticks++) core.tick();
+    hud.update();
+    return { hit, died: { dead: core.health.dead, ticks }, deathScreen: shown('#death-screen') };
+  });
+
+  // 僵尸打一下 3 点：20 → 17，8 颗整心、1 颗半心、1 颗空心，红闪铺着
+  expect(seen.hit).toEqual({
+    points: 17,
+    hearts: [...Array(8).fill('full'), 'half', 'empty'],
+    flash: true,
+  });
+  // 每 20 tick 打一下，7 下打死
+  expect(seen.died.dead).toBe(true);
+  expect(seen.died.ticks).toBeGreaterThanOrEqual(6 * 20 + 1);
+  expect(seen.deathScreen).toBe(true);
+  await expect(page.locator('#death-screen')).toBeVisible();
+
+  // 僵尸还在出生点旁边，点击与下一次 evaluate 之间游戏循环推进一个 tick 它就可能又打一下。所以在
+  // 按钮上挂一个一次性监听，排在界面层的重生处理器之后，在同一个事件任务里读状态
+  const respawn = page.getByRole('button', { name: STRINGS.respawn });
+  await respawn.evaluate((button) => {
+    button.addEventListener(
+      'click',
+      () => {
+        const { core, hud } = window.__VOXEL__!;
+        hud.update();
+        document.body.dataset.respawned = JSON.stringify({
+          dead: core.health.dead,
+          points: core.health.points,
+          hearts: [...document.querySelectorAll<HTMLElement>('#health-bar .health__heart')].map(
+            (heart) => heart.dataset.state,
+          ),
+        });
+      },
+      { once: true },
+    );
+  });
+  await respawn.click();
+  const after: unknown = JSON.parse(
+    await page.evaluate(() => document.body.dataset.respawned ?? 'null'),
+  );
+  expect(after).toEqual({
+    dead: false,
+    points: MAX_HEALTH,
+    hearts: Array(MAX_HEALTH / 2).fill('full'),
+  });
+  await expect(page.locator('#death-screen')).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
 test('核心以固定步长推进', async ({ page }) => {
   const before = await page.evaluate(() => window.__VOXEL__!.core.tickCount);
   await page.waitForTimeout(1000);

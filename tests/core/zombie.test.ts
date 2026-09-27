@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { GameCore } from '../../src/core/game';
 import { ItemType, type ItemStack } from '../../src/core/item';
-import { KNOCKBACK_DECAY, KNOCKBACK_LIFT, KNOCKBACK_SPEED } from '../../src/core/physics';
+import { hitboxAt, KNOCKBACK_DECAY, KNOCKBACK_LIFT, KNOCKBACK_SPEED } from '../../src/core/physics';
+import { PLAYER_HEIGHT, PLAYER_WIDTH } from '../../src/core/player';
 import type { Vec3 } from '../../src/core/vec3';
 import type { World } from '../../src/core/world';
 import {
@@ -14,6 +15,7 @@ import {
   ZOMBIE_WIDTH,
   ZOMBIE_XP,
   Zombies,
+  type ZombieTarget,
   type ZombieView,
 } from '../../src/core/zombie';
 import { FLAT_STAND_Y, flatTestTerrain, flatTestWorld } from '../helpers/flat-terrain';
@@ -44,12 +46,20 @@ function zombiesOnFlatGround(radius = 1, seed = SEED) {
   /** 推进 n 个 tick，玩家站在 player。每 tick 之后交给 `each` 看一眼。 */
   const advance = (n: number, player: Vec3 = PLAYER, each?: (zombie: ZombieView) => void) => {
     for (let i = 0; i < n; i++) {
-      zombies.step(++tick, player);
+      zombies.step(++tick, bystander(player));
       const [zombie] = zombies.all();
       if (each && zombie) each(zombie);
     }
   };
   return { world, zombies, advance, now: () => tick, dropped, orbs };
+}
+
+/**
+ * 站在 at 的玩家，挨打不受伤。这里测的是走、跳、消失与被玩家打；僵尸打玩家要看生命值与击退，
+ * 在 `zombie-attack.test.ts` 里从核心测。
+ */
+function bystander(at: Vec3): ZombieTarget {
+  return { position: at, hitbox: hitboxAt(at, PLAYER_WIDTH, PLAYER_HEIGHT), hitByZombie: () => {} };
 }
 
 function equalPosition(a: Vec3, b: Vec3): boolean {

@@ -2,9 +2,12 @@ import type { BlockView } from './block';
 import { TAU, TICK_RATE } from './constants';
 import { isBoxInLoadedChunks, type LoadedChunks } from './entity';
 import {
+  decayedKnockback,
   fallStep,
   hitboxAt,
   isOnGround,
+  KNOCKBACK_LIFT,
+  knockbackFrom,
   movedAlong,
   NO_WALK,
   type Hitbox,
@@ -98,6 +101,11 @@ export class Player implements PlayerView {
   private prevZ: number;
   private velocityY = 0;
   /**
+   * 击退的水平速度，每 tick 乘 `KNOCKBACK_DECAY`，只由 `knockBack` 写入。走路的位移另算、没有惯性，
+   * 两者每 tick 相加，与僵尸一致。没被打过时是 `NO_WALK`。
+   */
+  private knock: HorizontalDelta = NO_WALK;
+  /**
    * 离地之后到过的最高 y。站在地上时就是脚下的高度；落地那一 tick 拿它减去落点得到落差，
    * 摔落伤害按落差算（`fallDamage`）。跳起来的那一段也算在内。
    */
@@ -187,7 +195,16 @@ export class Player implements PlayerView {
   }
 
   /**
-   * 移动到 spawn 并停住：竖直速度归零，落差从这里起算，上一个 tick 的位置也对齐过去——渲染层不会
+   * 被在 attacker 的东西打了一下：水平被推离它（`knockbackFrom`），带一点上抛。下一 tick 走的时候
+   * 才动。上抛的最高点约 1.2 格，落回来不到摔落伤害的 3 格。
+   */
+  knockBack(attacker: Vec3): void {
+    this.knock = knockbackFrom(attacker, this.position);
+    this.velocityY = KNOCKBACK_LIFT;
+  }
+
+  /**
+   * 移动到 spawn 并停住：竖直速度与击退都归零，落差从这里起算，上一个 tick 的位置也对齐过去——渲染层不会
    * 在死亡处与出生点之间插值出一帧。视角不变。
    */
   respawnAt(spawn: Vec3): void {
@@ -195,6 +212,7 @@ export class Player implements PlayerView {
     this.y = this.prevY = spawn.y;
     this.z = this.prevZ = spawn.z;
     this.velocityY = 0;
+    this.knock = NO_WALK;
     this.fallFromY = spawn.y;
   }
 
@@ -212,9 +230,10 @@ export class Player implements PlayerView {
     // 都不变，与掉落物同一条规则（ADR-0013）。不等的话，那一格读出来是空气（「未加载即空气」），
     // 玩家掉下去，区块送到时已经嵌在地面里，还按从开始下落到嵌进地面的整段落差扣血。浏览器里区块由 Worker
     // 异步送来，走得比生成快就会走到这条边上。范围按这一 tick 要走的方向外扩：站在边上转身往回走
-    // 不必等。
+    // 不必等。击退的速度也在等着的 tick 里原样留着。
     const walk = this.walkDelta(intent);
-    if (!isBoxInLoadedChunks(this.blocks, sweptAlong(this.hitbox, walk))) return 0;
+    const move = { x: walk.x + this.knock.x, z: walk.z + this.knock.z };
+    if (!isBoxInLoadedChunks(this.blocks, sweptAlong(this.hitbox, move))) return 0;
 
     // 只有踩在地上才能起跳，所以按住空格是原地反复起跳，不是二段跳。
     if (intent.jump && this.onGround) this.velocityY = JUMP_VELOCITY;
@@ -230,9 +249,11 @@ export class Player implements PlayerView {
 
     // 竖直走完再走水平：跳到台阶上时这一 tick 已经抬到了台阶顶面之上，
     // 水平方向因此不再被台阶挡住。从边缘走下去时，离地前的高度已经在上面记下，下一 tick 起算落差。
-    // 两个轴分开做碰撞，斜着撞墙时会沿着墙滑过去，而不是整步作废。
-    this.x = this.movedAlong('x', walk.x);
-    this.z = this.movedAlong('z', walk.z);
+    // 两个轴分开做碰撞，斜着撞墙时会沿着墙滑过去，而不是整步作废。这一步是走路加上击退，走完
+    // 击退衰减一次。
+    this.knock = decayedKnockback(this.knock);
+    this.x = this.movedAlong('x', move.x);
+    this.z = this.movedAlong('z', move.z);
     return fell;
   }
 

@@ -2,7 +2,7 @@ import { BlockType, placedBlock } from '../core/block';
 import { ItemType } from '../core/item';
 
 /**
- * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 8 行，目前用了前 35 格。
+ * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 8 行，目前用了前 39 格。
  *
  * 行列数都取 2 的幂：uv 是格号除以行列数，除以 8 在 float32 里是精确的，除以 5 就不是
  * ——顶点属性存的是 Float32Array，1/5 一进去就带上舍入误差，一个面的边缘会取到相邻那一格的像素。
@@ -54,6 +54,11 @@ export const TILE = {
   // 天上的太阳与月亮（#38）：各是一张方片，不属于任何方块或物品。
   sun: 33,
   moon: 34,
+  // 僵尸模型（#41）的四张：头的正面、皮肤（头的其余五面与两条手臂）、上衣（身体）、裤子（两条腿）。
+  zombieFace: 35,
+  zombieSkin: 36,
+  zombieShirt: 37,
+  zombiePants: 38,
 } as const;
 
 /**
@@ -320,10 +325,21 @@ export function tileQuadUvs(tile: number): Float32Array {
  */
 export function itemCubeUvs(item: ItemType): Float32Array {
   const tiles = ITEM_TILES[item];
-  const uvs = new Float32Array(BOX_FACES.length * BOX_FACE_UV.length * 2);
+  return boxUvs(BOX_FACES.map((face) => faceTile(tiles, face)));
+}
+
+/**
+ * 一个 `BoxGeometry` 的 uv 数组：`tiles` 按 three 的面序（+X、−X、+Y、−Y、+Z、−Z）给出六个面
+ * 各取哪一格，每个面铺满那一格。
+ *
+ * 物品小方块按 `FaceTiles` 取面，正面同时贴在 −X 与 −Z 上；僵尸的头只有 −Z 一面是脸，
+ * 所以直接按面序给六个格号。
+ */
+export function boxUvs(tiles: readonly number[]): Float32Array {
+  const uvs = new Float32Array(tiles.length * BOX_FACE_UV.length * 2);
   let i = 0;
-  for (const face of BOX_FACES) {
-    const rect = tileUvRect(faceTile(tiles, face));
+  for (const tile of tiles) {
+    const rect = tileUvRect(tile);
     for (const [du, dv] of BOX_FACE_UV) {
       uvs[i++] = rect.u0 + du * (rect.u1 - rect.u0);
       uvs[i++] = rect.v0 + dv * (rect.v1 - rect.v0);

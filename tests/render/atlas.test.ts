@@ -72,11 +72,11 @@ describe('方块到贴图格号的映射表', () => {
     expect(new Set([off.top, off.side, off.front, lit.front]).size).toBe(4);
   });
 
-  it('图集是 8x8，64 格里现在用了 35 格', () => {
+  it('图集是 8x8，64 格里现在用了 39 格', () => {
     expect(ATLAS_COLS).toBe(8);
     expect(ATLAS_ROWS).toBe(8);
-    expect(Object.keys(TILE)).toHaveLength(35);
-    expect(new Set(Object.values(TILE)).size).toBe(35);
+    expect(Object.keys(TILE)).toHaveLength(39);
+    expect(new Set(Object.values(TILE)).size).toBe(39);
   });
 
   it('太阳与月亮接在木炭之后各占一格，现有格号不变（issue #38）', () => {
@@ -84,8 +84,16 @@ describe('方块到贴图格号的映射表', () => {
     expect(TILE.sun).toBe(33);
     expect(TILE.moon).toBe(34);
     // 前 33 格仍是 0 到 32 各一格：新贴图只往后追加，已有的格号一个都不挪
-    const earlier = Object.values(TILE).filter((tile) => tile !== TILE.sun && tile !== TILE.moon);
+    const earlier = Object.values(TILE).filter((tile) => tile < TILE.sun);
     expect([...earlier].sort((a, b) => a - b)).toEqual(Array.from({ length: 33 }, (_, i) => i));
+  });
+
+  it('僵尸的脸、皮肤、上衣、裤子接在月亮之后各占一格，现有格号不变（issue #41）', () => {
+    expect([TILE.zombieFace, TILE.zombieSkin, TILE.zombieShirt, TILE.zombiePants]).toEqual([
+      35, 36, 37, 38,
+    ]);
+    const earlier = Object.values(TILE).filter((tile) => tile < TILE.zombieFace);
+    expect([...earlier].sort((a, b) => a - b)).toEqual(Array.from({ length: 35 }, (_, i) => i));
   });
 
   it('两种矿石各自六面同一张，与石头不是同一格（issue #31）', () => {

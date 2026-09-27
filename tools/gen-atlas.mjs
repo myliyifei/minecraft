@@ -82,6 +82,17 @@ const SUN = [255, 214, 92];
 const SUN_CORE = [255, 246, 196];
 const MOON = [214, 220, 232];
 const MOON_SPOT = [168, 176, 194];
+/**
+ * 僵尸：灰绿的皮肤，脸上两只深色的眼窝与一道暗的嘴；上衣是暗青色，裤子是深蓝紫。三种颜色的亮度
+ * 拉开，夜里只剩轮廓时也分得出头、身体与腿。
+ */
+const ZOMBIE_SKIN = [96, 138, 78];
+const ZOMBIE_EYE = [24, 34, 26];
+const ZOMBIE_MOUTH = [58, 88, 50];
+const ZOMBIE_SHIRT = [42, 124, 132];
+const ZOMBIE_SHIRT_SEAM = [30, 92, 98];
+const ZOMBIE_PANTS = [58, 60, 124];
+const ZOMBIE_PANTS_SEAM = [42, 44, 94];
 
 /**
  * 矿石贴图上矿点落在哪些像素：每格 8 个矿点，各是一个 2×2 的方块加一个突出的角，位置写死，
@@ -374,6 +385,26 @@ const TILES = {
       (x >= 9 && x <= 10 && y >= 8 && y <= 10) ||
       (x >= 5 && x <= 6 && y >= 10 && y <= 11);
     return shade(spot ? MOON_SPOT : MOON, Math.floor(rand() * 10) - 5);
+  },
+  // zombie_face：皮肤底上两只 3×2 的眼窝，下面一道嘴
+  35: (x, y, rand) => {
+    const eye = y >= 6 && y <= 7 && ((x >= 3 && x <= 5) || (x >= 10 && x <= 12));
+    if (eye) return shade(ZOMBIE_EYE, Math.floor(rand() * 8) - 4);
+    const mouth = y >= 11 && y <= 12 && x >= 5 && x <= 10;
+    if (mouth) return shade(ZOMBIE_MOUTH, Math.floor(rand() * 10) - 5);
+    return TILES[36](x, y, rand);
+  },
+  // zombie_skin：灰绿的皮肤，带一点斑驳
+  36: (_x, _y, rand) => shade(ZOMBIE_SKIN, Math.floor(rand() * 24) - 12),
+  // zombie_shirt：暗青色的布，下摆一道深色的缝
+  37: (_x, y, rand) => {
+    if (y === 14) return shade(ZOMBIE_SHIRT_SEAM, Math.floor(rand() * 10) - 5);
+    return shade(ZOMBIE_SHIRT, Math.floor(rand() * 18) - 9);
+  },
+  // zombie_pants：深蓝紫的布，竖着几道深色的褶
+  38: (x, _y, rand) => {
+    if (x % 5 === 2) return shade(ZOMBIE_PANTS_SEAM, Math.floor(rand() * 10) - 5);
+    return shade(ZOMBIE_PANTS, Math.floor(rand() * 16) - 8);
   },
 };
 

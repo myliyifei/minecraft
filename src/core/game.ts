@@ -19,6 +19,7 @@ import { plainsTerrain } from './terrain';
 import { isNightAt, timeOfDayAt, wrapTimeOfDay } from './time-of-day';
 import type { Vec3 } from './vec3';
 import { XpOrbs, type XpOrbsView } from './xp-orb';
+import { Zombies, type ZombiesView } from './zombie';
 import {
   chunkOf,
   ORIGIN_CHUNK,
@@ -61,7 +62,7 @@ export interface GameCoreOptions {
  * 第一切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」「空手挖掘」
  * 「掉落物与背包」「经验球与等级」「放置方块」「背包界面」九件事，第二切片起加「合成」
  * 与「使用（工作台界面）」，第三切片加「熔炉界面」与「熔炼」，第四切片加「世界时刻」「生命值」
- * 与「死亡与重生」。生物等系统由后续切片挂进 step()。
+ * 「死亡与重生」与「僵尸」。别的生物由后续切片挂进 step()。
  */
 export class GameCore implements BlockEdit, BlockStateView {
   private readonly world: World;
@@ -70,6 +71,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   private readonly playerState: Player;
   private readonly dropsState: Drops;
   private readonly xpOrbsState: XpOrbs;
+  private readonly zombiesState: Zombies;
   private readonly experienceState: Experience;
   private readonly healthState: Health;
   private readonly inventoryState: Inventory;
@@ -134,6 +136,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.playerState = new Player(this.world, this.firstSpawn);
     this.dropsState = new Drops(this.world, this.worldSeed);
     this.xpOrbsState = new XpOrbs();
+    this.zombiesState = new Zombies(this.world, this.worldSeed);
     this.experienceState = new Experience();
     this.healthState = new Health();
     this.inventoryState = new Inventory();
@@ -172,6 +175,11 @@ export class GameCore implements BlockEdit, BlockStateView {
   /** 世界里现有的经验球，只读。渲染层每帧读它摆那些飞向玩家的小方块。 */
   get xpOrbs(): XpOrbsView {
     return this.xpOrbsState;
+  }
+
+  /** 世界里现有的僵尸，只读。渲染层每帧读它摆人形模型。 */
+  get zombies(): ZombiesView {
+    return this.zombiesState;
   }
 
   /** 玩家的经验与等级，只读。HUD 读它画等级条。 */
@@ -395,6 +403,16 @@ export class GameCore implements BlockEdit, BlockStateView {
     return this.inventoryState.add({ item, count });
   }
 
+  /**
+   * 在 (x, y, z)（碰撞箱底面中心）生成一只僵尸，立即生效。不看那里是不是实心、是不是夜晚，
+   * 也不数已经有几只。
+   *
+   * 与 `giveItem`、`setTimeOfDay` 一样是给测试用的公开指令，调试句柄与测试都走它。
+   */
+  spawnZombieAt(x: number, y: number, z: number): void {
+    this.zombiesState.spawnAt({ x, y, z });
+  }
+
   /** 本世界的种子。地形完全由它决定，端到端测试用它断言「同一种子同一个世界」。 */
   get seed(): number {
     return this.worldSeed;
@@ -564,6 +582,9 @@ export class GameCore implements BlockEdit, BlockStateView {
     // 熔炉排在挖掘与使用之后、掉落物与经验球之前（issue #34）。界面开着照样推进：挡的是玩家的输入，
     // 不是世界。所在区块没加载的熔炉暂停，不补算。
     stepFurnaces(this.world);
+    // 僵尸排在熔炉之后、掉落物之前（#36 定的每 tick 顺序），追的是玩家这一 tick 走完之后的位置。
+    // 死亡画面期间照常推进：世界不停，死了的玩家停在原地，僵尸照样朝那里走。
+    this.zombiesState.step(this.ticks, this.playerState.position);
     // 掉落物与经验球都排在挖掘之后：这一 tick 刚挖出来的东西同一 tick 就开始动，而
     // 掉落物的拾取延迟（PICKUP_DELAY_TICKS）也从这里起算。拾取与吸收判的都是玩家走完
     // 之后的碰撞箱。两者互不影响，谁先谁后都一样。死了的玩家什么都不拾取、不吸收。

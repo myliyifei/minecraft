@@ -4,7 +4,7 @@ import type { Axis, Vec3 } from './vec3';
 /**
  * 实体物理：重力、竖直阻力，以及碰撞箱与方块的碰撞解算。
  *
- * 玩家与掉落物共用这一份——两者都是「一个碰撞箱在方块世界里下落并被挡住」，
+ * 玩家、掉落物与僵尸共用这一份——都是「一个碰撞箱在方块世界里下落并被挡住」，
  * 各写一份扫掠就会各有一套边界容差，其中一份迟早算错。谁跑得多快、跳多高这类
  * 各自的移动参数留在各自的模块里。
  */
@@ -96,6 +96,30 @@ export function fallStep(blocks: BlockView, hitbox: Hitbox, velocityY: number): 
   const blocked = y !== target;
   return { y, velocityY: ((blocked ? 0 : velocityY) - GRAVITY) * VERTICAL_DRAG };
 }
+
+/**
+ * 沿一个轴移动 `delta` 会不会被实心方块挡住，哪怕只挡住一部分。
+ *
+ * 与 `movedAlong` 同一次扫掠，只是问的是「走没走满」：落点由扫掠钳在方块边界上，没被挡时
+ * 正好等于起点加 `delta`，所以这里可以精确比较，不需要容差。僵尸据此决定要不要起跳。
+ */
+export function isBlockedAlong(
+  blocks: BlockView,
+  hitbox: Hitbox,
+  axis: Axis,
+  delta: number,
+): boolean {
+  return sweep(blocks, hitbox, axis, delta) !== hitbox.min[axis] + delta;
+}
+
+/** 一 tick 的水平位移（方块）。玩家与僵尸的移动都先算出它，再逐轴做碰撞。 */
+export interface HorizontalDelta {
+  readonly x: number;
+  readonly z: number;
+}
+
+/** 原地不动的水平位移。 */
+export const NO_WALK: HorizontalDelta = Object.freeze({ x: 0, z: 0 });
 
 /** 碰撞箱各方向外扩 margin 格。 */
 export function expand(box: Hitbox, margin: number): Hitbox {

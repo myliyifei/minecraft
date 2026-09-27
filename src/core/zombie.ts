@@ -1,0 +1,304 @@
+import type { BlockView } from './block';
+import { TAU, TICK_RATE } from './constants';
+import { isBoxInLoadedChunks, isInLoadedChunk, stepEntities, type LoadedChunks } from './entity';
+import { hashCoords } from './noise';
+import {
+  fallStep,
+  hitboxAt,
+  isBlockedAlong,
+  isOnGround,
+  movedAlong,
+  NO_WALK,
+  type Hitbox,
+  type HorizontalDelta,
+} from './physics';
+import { JUMP_VELOCITY } from './player';
+import type { Vec3 } from './vec3';
+
+/** 碰撞箱的水平边长（方块）。与玩家一样宽。 */
+export const ZOMBIE_WIDTH = 0.6;
+
+/** 碰撞箱的高度（方块）。比玩家高一点：模型总高 2 格，头顶留了一点。 */
+export const ZOMBIE_HEIGHT = 1.95;
+
+/** 生成时的生命值。本 issue（#41）里还没有任何东西伤得了它，攻击由 #42 接上。 */
+export const ZOMBIE_MAX_HEALTH = 20;
+
+/** 移动速度（方块/秒）。比玩家步行的 4.317 慢，玩家总跑得掉。 */
+export const ZOMBIE_SPEED = 3;
+
+/** 一 tick 的移动距离（方块）。 */
+export const ZOMBIE_STEP = ZOMBIE_SPEED / TICK_RATE;
+
+/** 与玩家的水平距离在这么多格以内（含）就朝玩家走，隔着墙也追。 */
+export const ZOMBIE_CHASE_RANGE = 32;
+
+/** 离玩家超过这么多格（三维距离）就消失。 */
+export const ZOMBIE_DESPAWN_RANGE = 64;
+
+/** 游走时每隔这么多 tick 重新选一次方向或停下。 */
+export const ZOMBIE_WANDER_TICKS = 60;
+
+/**
+ * 游走时选中「停下」的比例。哈希摊成 [0, 1) 之后落在这一段之下就停下，其余的均匀映射成一个方向。
+ */
+const WANDER_STOP_SHARE = 1 / 3;
+
+/** 游走的哈希与别的哈希（生成、掉落散开）错开用的盐。 */
+const WANDER_SALT = 0x6a3d_e91b;
+
+/** 僵尸的只读视图。渲染层读它摆模型、按 `age + alpha` 摆臂摆腿（ADR-0007）。 */
+export interface ZombieView {
+  /** 僵尸的编号，一直到它消失都不变，消失了也不复用。渲染层靠它认出哪个模型是哪只。 */
+  readonly id: number;
+  /** 碰撞箱底面中心。 */
+  readonly position: Vec3;
+  /** 上一个 tick 结束时的位置。渲染层在两者之间插值（ADR-0002）。 */
+  readonly previousPosition: Vec3;
+  /** 偏航（弧度），与玩家同一套约定：0 朝 −Z。最后一次走动时朝着的方向。 */
+  readonly yaw: number;
+  /** 已经推进了多少 tick。原地等区块的那些 tick 不算。 */
+  readonly age: number;
+  readonly health: number;
+}
+
+/** 世界里现有的僵尸。 */
+export interface ZombiesView {
+  /** 现有的僵尸。渲染层每帧遍历一次。 */
+  all(): readonly ZombieView[];
+  readonly count: number;
+}
+
+/**
+ * 世界里的全部僵尸：出现、朝玩家走或游走、跳上 1 格、离得太远或所在区块没加载就消失。
+ *
+ * 与掉落物、经验球同一套样式（ADR-0007）：持列表、编号自增不复用、`step` 走 `stepEntities`；
+ * 重力与碰撞用 `physics.ts` 里与玩家、掉落物同一份解算。僵尸之间、僵尸与玩家之间不做碰撞，
+ * 可以重叠。
+ *
+ * 游走的方向由种子、tick 与编号哈希出来（ADR-0003 的延伸），核心不持随机状态，同一种子同一串
+ * tick 每次得到同一条轨迹。
+ *
+ * 所在区块没加载就消失（ADR-0013）：僵尸是按规则生成的，走远了本来就该没，不必像掉落物那样暂停
+ * 保留。中心还在已加载区块里、这一 tick 可能走到的范围（`reach`）却伸进了没加载的区块时，则原地
+ * 等这一 tick——否则碰撞把隔壁读成空气，它会走进隔壁本来是墙的位置，区块送到时卡在墙里。
+ */
+export class Zombies implements ZombiesView {
+  private readonly blocks: BlockView & LoadedChunks;
+  private readonly seed: number;
+  private readonly list: Zombie[] = [];
+  /** 下一只僵尸的编号。同时是游走哈希的一个输入，同一 tick 里的几只因此各走各的。 */
+  private nextId = 1;
+
+  constructor(blocks: BlockView & LoadedChunks, seed: number) {
+    this.blocks = blocks;
+    this.seed = seed;
+  }
+
+  get count(): number {
+    return this.list.length;
+  }
+
+  all(): readonly ZombieView[] {
+    return this.list;
+  }
+
+  /** 在 position（碰撞箱底面中心）无条件生成一只。不看那里是不是实心、是不是夜晚。 */
+  spawnAt(position: Vec3): void {
+    this.list.push(new Zombie(this.nextId++, position));
+  }
+
+  /**
+   * 推进一个 tick。`tick` 是核心的 tick 计数，游走的哈希要用它；`player` 是玩家的位置（碰撞箱
+   * 底面中心），追击与消失都按它算。
+   *
+   * 先判消失再走：走这一步之前离玩家正好 64 格的不消失，哪怕这一步会让它远出去一点。原地等区块
+   * 排在选方向之前，等着的那些 tick 里游走的方向与剩余 tick、偏航都不动。
+   */
+  step(tick: number, player: Vec3): void {
+    stepEntities(this.list, (zombie) => {
+      if (!isInLoadedChunk(this.blocks, zombie.position)) return false;
+      if (distance(zombie.position, player) > ZOMBIE_DESPAWN_RANGE) return false;
+      if (!isBoxInLoadedChunks(this.blocks, zombie.reach)) {
+        zombie.hold();
+        return true;
+      }
+      const walk = zombie.chooseWalk(player, () => this.wanderRoll(tick, zombie.id));
+      zombie.step(this.blocks, walk);
+      return true;
+    });
+  }
+
+  /** 游走选方向用的哈希，摊成 [0, 1)。 */
+  private wanderRoll(tick: number, id: number): number {
+    // hashCoords 给的是 32 位无符号整数，除以 2³² 摊成 [0, 1)。
+    return hashCoords(this.seed ^ WANDER_SALT, tick, id) / 0x1_0000_0000;
+  }
+}
+
+/** 一只僵尸：位置、竖直速度、偏航、游走的方向与剩余 tick。 */
+class Zombie implements ZombieView {
+  readonly id: number;
+  readonly health = ZOMBIE_MAX_HEALTH;
+  // 与玩家一样存成三个数而不是一个 Vec3：逐轴解算碰撞时每次只改一个分量。
+  private x: number;
+  private y: number;
+  private z: number;
+  private prevX: number;
+  private prevY: number;
+  private prevZ: number;
+  private velocityY = 0;
+  private yawAngle = 0;
+  private ticks = 0;
+  /** 游走时这一 tick 的位移；选中「停下」时是零位移。 */
+  private wanderWalk: HorizontalDelta = NO_WALK;
+  /**
+   * 离下一次重选游走方向还有几 tick。0 表示这一 tick 就选。追击时归零：走出 32 格的那一 tick
+   * 当场重选，不接着走追击之前选的那个方向。
+   */
+  private wanderLeft = 0;
+
+  constructor(id: number, position: Vec3) {
+    this.id = id;
+    this.x = this.prevX = position.x;
+    this.y = this.prevY = position.y;
+    this.z = this.prevZ = position.z;
+  }
+
+  get age(): number {
+    return this.ticks;
+  }
+
+  get yaw(): number {
+    return this.yawAngle;
+  }
+
+  get position(): Vec3 {
+    return { x: this.x, y: this.y, z: this.z };
+  }
+
+  get previousPosition(): Vec3 {
+    return { x: this.prevX, y: this.prevY, z: this.prevZ };
+  }
+
+  get hitbox(): Hitbox {
+    return hitboxAt(this.position, ZOMBIE_WIDTH, ZOMBIE_HEIGHT);
+  }
+
+  /**
+   * 这一 tick 的碰撞可能读到的范围：碰撞箱水平各向外扩一步。一 tick 在每个轴上至多走
+   * `ZOMBIE_STEP`，所以不必先知道往哪走——判定因此能排在选方向之前。竖直方向不涉及别的区块，
+   * 不外扩。
+   */
+  get reach(): Hitbox {
+    const { min, max } = this.hitbox;
+    return {
+      min: { x: min.x - ZOMBIE_STEP, y: min.y, z: min.z - ZOMBIE_STEP },
+      max: { x: max.x + ZOMBIE_STEP, y: max.y, z: max.z + ZOMBIE_STEP },
+    };
+  }
+
+  /**
+   * 这一 tick 的水平位移，还没做碰撞；顺带把偏航转向要走的方向。
+   *
+   * 水平距离 32 格内朝玩家的水平位置直线走，一步不超过剩下的距离，走到玩家脚下就停住。超过 32 格
+   * 按游走的方向走，每 60 tick 用 `roll` 重选一次。`roll` 只在重选时调，给出 [0, 1) 的哈希值。
+   */
+  chooseWalk(player: Vec3, roll: () => number): HorizontalDelta {
+    const dx = player.x - this.x;
+    const dz = player.z - this.z;
+    const horizontal = Math.hypot(dx, dz);
+    if (horizontal <= ZOMBIE_CHASE_RANGE) {
+      this.wanderLeft = 0;
+      if (horizontal === 0) return NO_WALK;
+      const step = Math.min(ZOMBIE_STEP, horizontal);
+      return this.facing({ x: (dx / horizontal) * step, z: (dz / horizontal) * step });
+    }
+
+    if (this.wanderLeft === 0) {
+      this.wanderWalk = wanderWalkFor(roll());
+      this.wanderLeft = ZOMBIE_WANDER_TICKS;
+    }
+    this.wanderLeft--;
+    return this.facing(this.wanderWalk);
+  }
+
+  /** 把偏航转向 walk 的方向，原样返回 walk。零位移时偏航不变：停下来还朝着原来的方向。 */
+  private facing(walk: HorizontalDelta): HorizontalDelta {
+    // 前方是 (−sin 偏航, −cos 偏航)，与玩家一致。
+    if (walk.x !== 0 || walk.z !== 0) this.yawAngle = Math.atan2(-walk.x, -walk.z);
+    return walk;
+  }
+
+  /**
+   * 原地停一个 tick：位置、速度、存活 tick 都不变，只把上一个 tick 的位置对齐到现在。
+   * 渲染层在两个位置之间插值（ADR-0002），不对齐的话它会一遍遍重放停下之前的最后一步。
+   */
+  hold(): void {
+    this.prevX = this.x;
+    this.prevY = this.y;
+    this.prevZ = this.z;
+  }
+
+  /**
+   * 推进一个 tick：重力与竖直碰撞，再沿两个水平轴各走一步。
+   *
+   * 水平方向被挡住、脚下踩实、挡住它的那一格上方两格是空气（碰撞箱抬高 1 格再走这一步就走得通）
+   * 时起跳。起跳速度在下一 tick 的竖直那一步里生效，与玩家按住跳跃键同一套物理，最高点 1.252 格：
+   * 翻得过 1 格高的墙，翻不过 2 格的。
+   */
+  step(blocks: BlockView, walk: HorizontalDelta): void {
+    this.prevX = this.x;
+    this.prevY = this.y;
+    this.prevZ = this.z;
+    this.ticks++;
+
+    // 竖直在前、水平在后，与玩家一致：起跳之后身子已经抬到墙顶之上，水平那一步才不再被挡。
+    const fall = fallStep(blocks, this.hitbox, this.velocityY);
+    this.y = fall.y;
+    this.velocityY = fall.velocityY;
+
+    // 两个轴分开做碰撞，斜着撞墙时沿着墙滑过去。
+    const blockedX = this.walkAlong(blocks, 'x', walk.x);
+    const blockedZ = this.walkAlong(blocks, 'z', walk.z);
+    if (!blockedX && !blockedZ) return;
+    if (!isOnGround(blocks, this.hitbox)) return;
+    // 斜着走进墙角时两个轴都被挡，哪个轴上挡住的只有 1 格高就跳。
+    const stepUp =
+      (blockedX && this.canStepUp(blocks, 'x', walk.x)) ||
+      (blockedZ && this.canStepUp(blocks, 'z', walk.z));
+    if (stepUp) this.velocityY = JUMP_VELOCITY;
+  }
+
+  /**
+   * 沿一个轴走 delta，返回有没有被挡住。
+   *
+   * 零位移就一步都不走：`movedAlong` 会把半宽减掉再加回来，浮点上不保证还原成原值，而原地站着
+   * 要求位置一个数都不变。
+   */
+  private walkAlong(blocks: BlockView, axis: 'x' | 'z', delta: number): boolean {
+    if (delta === 0) return false;
+    const blocked = isBlockedAlong(blocks, this.hitbox, axis, delta);
+    this[axis] = movedAlong(blocks, this.hitbox, axis, delta);
+    return blocked;
+  }
+
+  /** 碰撞箱抬高 1 格之后，沿 axis 走 delta 还会不会被挡：不会就说明挡住的只有 1 格高。 */
+  private canStepUp(blocks: BlockView, axis: 'x' | 'z', delta: number): boolean {
+    const raised = hitboxAt({ x: this.x, y: this.y + 1, z: this.z }, ZOMBIE_WIDTH, ZOMBIE_HEIGHT);
+    return !isBlockedAlong(blocks, raised, axis, delta);
+  }
+}
+
+/**
+ * 游走一次选中的每 tick 位移：`roll` 落在前三分之一是停下，其余均匀映射成一个水平方向。
+ */
+function wanderWalkFor(roll: number): HorizontalDelta {
+  if (roll < WANDER_STOP_SHARE) return NO_WALK;
+  const angle = ((roll - WANDER_STOP_SHARE) / (1 - WANDER_STOP_SHARE)) * TAU;
+  return { x: Math.cos(angle) * ZOMBIE_STEP, z: Math.sin(angle) * ZOMBIE_STEP };
+}
+
+function distance(a: Vec3, b: Vec3): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}

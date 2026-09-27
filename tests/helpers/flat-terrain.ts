@@ -34,11 +34,13 @@ const TEST_CHUNK_RADIUS = 1;
  * 原点周围 3×3 个区块已加载好的固定平地世界。
  * 物理测试拿它当地面，再用 `setBlock` 手工摆墙与台阶——碰撞因此是对真实的
  * `World` 断言，而不是对一个另写的假方块视图。
+ *
+ * `radius` 换一个更大的半径：僵尸的游走与消失要在几十格外测，3×3 个区块装不下。
  */
-export function flatTestWorld(): World {
+export function flatTestWorld(radius = TEST_CHUNK_RADIUS): World {
   const world = new World(flatTestTerrain);
-  for (let cx = -TEST_CHUNK_RADIUS; cx <= TEST_CHUNK_RADIUS; cx++) {
-    for (let cz = -TEST_CHUNK_RADIUS; cz <= TEST_CHUNK_RADIUS; cz++) {
+  for (let cx = -radius; cx <= radius; cx++) {
+    for (let cz = -radius; cz <= radius; cz++) {
       world.loadChunk(cx, cz);
     }
   }

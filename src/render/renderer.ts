@@ -33,6 +33,13 @@ import {
 import { dropBob, dropSpin } from './drop-motion';
 import { buildChunkMesh, meshTiles, type MeshData } from './mesh';
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes, staleChunksFor } from './mesh-plan';
+import {
+  ZombiePart,
+  createZombieModel,
+  poseZombieModel,
+  zombieGeometries,
+  type ZombieGeometries,
+} from './zombie-model';
 import { chunkKey, type ChunkCoord } from '../core/world';
 
 /** 竖直视场角（度）。 */
@@ -203,6 +210,21 @@ export interface XpOrbRenderView {
 }
 
 /**
+ * 场景里一只僵尸的模型现在的样子。
+ * 与 `DropRenderView` 一样直接从场景对象上读，端到端测试验的是真摆进场景的东西。
+ */
+export interface ZombieRenderView {
+  /** 对应核心里那只僵尸的编号。 */
+  readonly id: number;
+  /** 组的世界坐标：脚底中心。 */
+  readonly position: Vec3;
+  /** 组里有几个部件。 */
+  readonly parts: number;
+  /** 右臂此刻摆了多少（弧度）。站着不动时是 0。 */
+  readonly armSwing: number;
+}
+
+/**
  * 手持方块现在的样子。与上面几个一样直接从场景对象上读。
  * 空手时没有这个视图（`WorldRenderer.heldItem` 返回 undefined）。
  */
@@ -297,6 +319,10 @@ export class WorldRenderer {
   private heldItemMesh: THREE.Mesh | undefined;
   /** 现在画的是哪种物品。与核心的手持不同就换几何体（与材质、大小）。 */
   private heldItemType: ItemType | undefined;
+  /** 场景里的僵尸模型，按核心给的编号索引。与掉落物同一套做法，见 ADR-0007。 */
+  private readonly zombieModels = new Map<number, THREE.Group>();
+  /** 僵尸六个部件的几何体：所有僵尸长得一样，建一份共用，僵尸消失时不销毁。 */
+  private readonly zombieGeometries: ZombieGeometries = zombieGeometries();
   /** 场景里的经验球小方块，按核心给的编号索引。与掉落物同一套做法，见 ADR-0007。 */
   private readonly xpOrbMeshes = new Map<number, THREE.Mesh>();
   /** 经验球的几何体与材质：所有经验球长得一样，各建一份共用就够。 */
@@ -479,6 +505,16 @@ export class WorldRenderer {
     }));
   }
 
+  /** 上一帧画出来的僵尸模型。 */
+  get zombies(): ZombieRenderView[] {
+    return [...this.zombieModels].map(([id, group]) => ({
+      id,
+      position: { x: group.position.x, y: group.position.y, z: group.position.z },
+      parts: group.children.length,
+      armSwing: group.getObjectByName(ZombiePart.RightArm)!.rotation.x,
+    }));
+  }
+
   /**
    * 上一帧画出来的手持方块，空手时 undefined。
    *
@@ -585,6 +621,7 @@ export class WorldRenderer {
     this.updateChainPreview();
     this.updateDrops(alpha);
     this.updateXpOrbs(alpha);
+    this.updateZombies(alpha);
     this.updateHeldItem();
 
     // 两遍：先画世界，再把深度清掉画手上那块方块。深度一清，手持就永远在世界前面，
@@ -681,7 +718,7 @@ export class WorldRenderer {
    * `age + alpha` 算，因此在两次 tick 之间也是连续的，不会以 20Hz 一跳一跳地转。
    */
   private updateDrops(alpha: number): void {
-    this.syncEntityMeshes(
+    this.syncEntityObjects(
       this.core.drops.all(),
       this.dropMeshes,
       (drop) => this.itemMesh(drop.item, DROP_SIZE),
@@ -701,7 +738,7 @@ export class WorldRenderer {
    * 几 tick 就没了，转与漂根本看不出来，加上只会让「它在往我这边来」这件事更难看清。
    */
   private updateXpOrbs(alpha: number): void {
-    this.syncEntityMeshes(
+    this.syncEntityObjects(
       this.core.xpOrbs.all(),
       this.xpOrbMeshes,
       () => new THREE.Mesh(this.xpOrbGeometry, this.xpOrbMaterial),
@@ -710,34 +747,50 @@ export class WorldRenderer {
   }
 
   /**
+   * 让场景里的人形模型跟上核心里的僵尸：一只一个六部件的组（`createZombieModel`），摆位与
+   * 摆臂摆腿在 `poseZombieModel` 里，相位按 `age + alpha` 算。
+   *
+   * 与掉落物同一套做法（ADR-0007）。模型用方块那一份材质：四张贴图在同一张图集里，夜里也与
+   * 地形一起变暗。
+   */
+  private updateZombies(alpha: number): void {
+    this.syncEntityObjects(
+      this.core.zombies.all(),
+      this.zombieModels,
+      () => createZombieModel(this.zombieGeometries, this.material),
+      (group, zombie) => poseZombieModel(group, zombie, alpha),
+    );
+  }
+
+  /**
    * 让一批场景对象跟上核心里的一批实体：新出现的建好加进场景，消失的移出去，留着的
    * 交给 `place` 摆位。
    *
-   * 掉落物与经验球共用这一份：ADR-0007 定的实体同步就是「每帧全量遍历 + 按编号认对象」
-   * 这一套，各写一遍迟早有一边忘了从场景里移除。将来的生物也走这里。
+   * 掉落物、经验球与僵尸共用这一份：ADR-0007 定的实体同步就是「每帧全量遍历 + 按编号认对象」
+   * 这一套，各写一遍迟早有一边忘了从场景里移除。场景对象可以是一个 `Mesh`，也可以是一整个组。
    */
-  private syncEntityMeshes<T extends { readonly id: number }>(
+  private syncEntityObjects<T extends { readonly id: number }, O extends THREE.Object3D>(
     entities: readonly T[],
-    meshes: Map<number, THREE.Mesh>,
-    create: (entity: T) => THREE.Mesh,
-    place: (mesh: THREE.Mesh, entity: T) => void,
+    objects: Map<number, O>,
+    create: (entity: T) => O,
+    place: (object: O, entity: T) => void,
   ): void {
     const alive = new Set<number>();
     for (const entity of entities) {
       alive.add(entity.id);
-      let mesh = meshes.get(entity.id);
-      if (!mesh) {
-        mesh = create(entity);
-        this.scene.add(mesh);
-        meshes.set(entity.id, mesh);
+      let object = objects.get(entity.id);
+      if (!object) {
+        object = create(entity);
+        this.scene.add(object);
+        objects.set(entity.id, object);
       }
-      place(mesh, entity);
+      place(object, entity);
     }
 
-    for (const [id, mesh] of meshes) {
+    for (const [id, object] of objects) {
       if (alive.has(id)) continue;
-      this.scene.remove(mesh);
-      meshes.delete(id);
+      this.scene.remove(object);
+      objects.delete(id);
     }
   }
 

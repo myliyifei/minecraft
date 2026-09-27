@@ -3301,6 +3301,63 @@ test('正午抬头看得见太阳；头顶放一块石头之后，画面正中�
   expect(errors).toEqual([]);
 });
 
+test('调试句柄在玩家前方 3 格生成一只僵尸：下一帧场景里有一个六部件的组，画面正中是它；推进 20 tick 后它走近了相机', async ({
+  page,
+}) => {
+  // 整段跑在一次同步的 evaluate 里，游戏循环插不进来。平视前方，僵尸生成在视线正前方 3 格那一列的
+  // 顶面上：相机在眼睛的高度，视线正好落在它的头上。
+  const seen = await page.evaluate(
+    ({ distance }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const centerRgb = window.__CENTER_RGB__!;
+      core.turn(0, -core.player.pitch);
+      renderer.render(1);
+      const before = centerRgb();
+
+      const { position, yaw } = core.player;
+      const x = position.x - Math.sin(yaw) * distance;
+      const z = position.z - Math.cos(yaw) * distance;
+      core.spawnZombieAt(x, core.highestBlockY(Math.floor(x), Math.floor(z)) + 1, z);
+      renderer.render(1);
+      const spawned = { zombies: renderer.zombies, camera: renderer.cameraPosition, rgb: centerRgb() };
+
+      core.tick(10);
+      renderer.render(0.5);
+      const walking = renderer.zombies;
+      core.tick(10);
+      renderer.render(1);
+      return {
+        before,
+        spawned,
+        walking,
+        later: { zombies: renderer.zombies, camera: renderer.cameraPosition },
+        count: core.zombies.count,
+      };
+    },
+    { distance: 3 },
+  );
+  const horizontal = (a: Vec3, b: Vec3) => Math.hypot(a.x - b.x, a.z - b.z);
+
+  // 一只僵尸，一个组，六个部件：头、身体、两条手臂、两条腿
+  expect(seen.spawned.zombies).toHaveLength(1);
+  expect(seen.spawned.zombies[0]).toMatchObject({ id: 1, parts: 6, armSwing: 0 });
+  expect(horizontal(seen.spawned.zombies[0]!.position, seen.spawned.camera)).toBeCloseTo(3, 6);
+  // 真画进了画布：画面正中换成了僵尸头上那一片灰绿，绿色分量压过红与蓝
+  const [r, g, b] = seen.spawned.rgb;
+  expect(seen.spawned.rgb).not.toEqual(seen.before);
+  expect(g).toBeGreaterThan(r);
+  expect(g).toBeGreaterThan(b);
+
+  // 走动时臂在摆；推进 20 tick 之后还是同一只，离相机更近了
+  expect(seen.walking[0]!.armSwing).not.toBe(0);
+  expect(seen.count).toBe(1);
+  expect(seen.later.zombies[0]!.id).toBe(1);
+  expect(horizontal(seen.later.zombies[0]!.position, seen.later.camera)).toBeLessThan(
+    horizontal(seen.spawned.zombies[0]!.position, seen.spawned.camera) - 1,
+  );
+  expect(errors).toEqual([]);
+});
+
 test('核心以固定步长推进', async ({ page }) => {
   const before = await page.evaluate(() => window.__VOXEL__!.core.tickCount);
   await page.waitForTimeout(1000);

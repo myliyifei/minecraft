@@ -1,7 +1,15 @@
 import type { BlockView } from './block';
 import { TAU, TICK_RATE } from './constants';
 import { isBoxInLoadedChunks, type LoadedChunks } from './entity';
-import { fallStep, hitboxAt, isOnGround, movedAlong, type Hitbox } from './physics';
+import {
+  fallStep,
+  hitboxAt,
+  isOnGround,
+  movedAlong,
+  NO_WALK,
+  type Hitbox,
+  type HorizontalDelta,
+} from './physics';
 import type { Axis, Vec3 } from './vec3';
 
 /** 碰撞箱的水平边长（方块）。 */
@@ -268,14 +276,6 @@ export class Player implements PlayerView {
     return movedAlong(this.blocks, this.hitbox, axis, delta);
   }
 }
-
-/** 一 tick 的水平位移（方块）。 */
-interface HorizontalDelta {
-  readonly x: number;
-  readonly z: number;
-}
-
-const NO_WALK: HorizontalDelta = Object.freeze({ x: 0, z: 0 });
 
 /**
  * 碰撞箱沿水平位移扫过的范围：只往要走的那一侧外扩。区块是整根柱子，竖直方向不外扩。

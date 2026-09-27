@@ -84,21 +84,17 @@ describe('核心的玩家生命值', () => {
     expect(game.health.points).toBe(19);
   });
 
-  it('生命归零后「已死亡」为真，不再回血、不再受伤', () => {
+  // 死亡期间不受重力、不再受伤，在 tests/core/death.test.ts
+  it('生命归零后「已死亡」为真，不再回血', () => {
     const game = core();
     // 落差 24 格摔 21 点，扣到 0 为止
     digShaftUnderfoot(game, 24);
     tickUntilLanded(game);
     expect(game.health.points).toBe(0);
     expect(game.health.dead).toBe(true);
-    const diedAt = game.health.lastHurtTick;
 
     game.tick(500);
     expect(game.health.points).toBe(0);
-    digShaftUnderfoot(game, 8);
-    tickUntilLanded(game);
-    expect(game.health.points).toBe(0);
-    expect(game.health.lastHurtTick).toBe(diedAt);
   });
 
   it('走到还没送到的区块边上原地等待，不掉进「未加载即空气」里；区块送到之后继续前进，不掉血', () => {
@@ -207,5 +203,19 @@ describe('生命值的受伤与无敌时间', () => {
     expect(health.dead).toBe(true);
     expect(health.hurt(1, 200)).toBe(false);
     expect(health.lastHurtTick).toBe(100);
+  });
+});
+
+describe('生命值的重置', () => {
+  it('死后重置：满血、没受过伤、没有无敌时间，下一 tick 就能受伤', () => {
+    const health = new Health();
+    health.hurt(20, 100);
+    expect(health.dead).toBe(true);
+    health.reset();
+    expect(health.points).toBe(20);
+    expect(health.dead).toBe(false);
+    expect(health.lastHurtTick).toBeUndefined();
+    expect(health.hurt(1, 101)).toBe(true);
+    expect(health.points).toBe(19);
   });
 });

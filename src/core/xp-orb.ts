@@ -89,6 +89,19 @@ export class XpOrbs implements XpOrbsView, XpOrbSink {
     return this.list;
   }
 
+  /**
+   * 在某个位置所在的那一格里生成一个经验球。取整放在这里的理由同 `Drops.spawnAt`。
+   * 死亡时全部经验装成一个经验球，走的是这条路。
+   */
+  spawnAt(amount: number, position: Vec3): void {
+    this.spawnInBlock(
+      amount,
+      Math.floor(position.x),
+      Math.floor(position.y),
+      Math.floor(position.z),
+    );
+  }
+
   spawnInBlock(amount: number, x: number, y: number, z: number): void {
     // 碰撞箱的中心对准那一格的中心，所以底面比格底高半个箱高。
     const position: Vec3 = { x: x + 0.5, y: y + 0.5 - XP_ORB_SIZE / 2, z: z + 0.5 };
@@ -101,12 +114,15 @@ export class XpOrbs implements XpOrbsView, XpOrbSink {
    * `playerBox` 是玩家的碰撞箱，经验球朝它的中心飞（朝脚底飞的话会贴着地面钻过来）；
    * `into` 是收经验的地方。排在玩家移动之后调，接触判定用的才是这一 tick 走完之后的
    * 位置。
+   *
+   * `playerBox` 是 undefined 时没有飞行的目标：经验球都停在原地、谁都不吸收，照常计存活时间。
+   * 死亡画面期间就是这样，否则死亡处那个经验球当场就飞回死了的玩家身上。
    */
-  step(playerBox: Hitbox, into: ExperienceSink): void {
-    const target = boxCenter(playerBox);
+  step(playerBox: Hitbox | undefined, into: ExperienceSink): void {
+    const target = playerBox && boxCenter(playerBox);
     stepEntities(this.list, (orb) => {
       orb.step(target);
-      if (orb.absorbedBy(playerBox, into)) return false;
+      if (playerBox && orb.absorbedBy(playerBox, into)) return false;
       return orb.age < XP_ORB_LIFETIME_TICKS;
     });
   }
@@ -160,12 +176,16 @@ class XpOrb implements XpOrbView {
     return { x: this.x, y: this.y + XP_ORB_SIZE / 2, z: this.z };
   }
 
-  /** 朝 `target` 飞一步。超出吸引范围时停在原地，速率归零。 */
-  step(target: Vec3): void {
+  /** 朝 `target` 飞一步。没有目标、或超出吸引范围时停在原地，速率归零。 */
+  step(target: Vec3 | undefined): void {
     this.prevX = this.x;
     this.prevY = this.y;
     this.prevZ = this.z;
     this.ticks++;
+    if (!target) {
+      this.speed = 0;
+      return;
+    }
 
     const center = this.center;
     const dx = target.x - center.x;

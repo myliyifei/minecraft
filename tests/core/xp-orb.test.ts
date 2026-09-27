@@ -255,6 +255,29 @@ describe('经验球被吸收', () => {
   });
 });
 
+describe('没有玩家可飞（死亡画面期间）', () => {
+  it('没有目标时停在原地、谁都不吸收，存活时间照走', () => {
+    // 生成在原点那一格：没有目标时若按原点算方向，它会动
+    const orbs = new XpOrbs();
+    orbs.spawnInBlock(5, 0, 0, 0);
+    const start = orbs.all()[0]!.position;
+    const into = recorder();
+    for (let i = 0; i < 20; i++) orbs.step(undefined, into);
+
+    expect(orbs.count).toBe(1);
+    expect(orbs.all()[0]!.position).toEqual(start);
+    expect(orbs.all()[0]!.age).toBe(20);
+    expect(into.gained).toEqual([]);
+  });
+
+  it('spawnAt 把小数坐标取整到那一格，生成在格子中心', () => {
+    const orbs = new XpOrbs();
+    orbs.spawnAt(7, { x: BLOCK.x + 0.8, y: BLOCK.y + 0.3, z: BLOCK.z + 0.1 });
+    expect(orbs.all()[0]!.amount).toBe(7);
+    expect(centerOf(orbs)).toEqual(ORB_CENTER);
+  });
+});
+
 describe('经验球的存活时间', () => {
   it('存活 tick 数逐 tick 累加', () => {
     const orbs = orbsWith();

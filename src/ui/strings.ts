@@ -42,6 +42,9 @@ export const STRINGS = {
   recipeUncraftable: '材料不足',
   // 工具格上那条耐久条的名字，读屏软件报它时缀上还剩几点。
   durability: '耐久',
+  // 死亡画面的标题与那颗按钮：生命归零时铺满屏幕，点按钮回到出生点。
+  youDied: '你死了',
+  respawn: '重生',
 } as const;
 
 /**

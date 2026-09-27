@@ -153,16 +153,19 @@ export class Drops implements DropsView, DropSink {
    *
    * 碰撞箱这一 tick 可能碰到的区块有一个没加载，就只原地停住，也不判定拾取：暂停就是这一 tick
    * 整个跳过它。玩家站在已加载区块的边上、它就在隔壁没加载的区块里时，要等那个区块加载了才拾取得到。
+   *
+   * `playerBox` 是 undefined 时这一 tick 谁都不拾取，掉落物照常下落、照常计存活时间。死亡画面期间
+   * 就是这样：玩家的东西散在死亡处，重生跑回来才拾得到。
    */
-  step(playerBox: Hitbox, into: ItemSink): void {
-    const pickupBox = expand(playerBox, PICKUP_MARGIN);
+  step(playerBox: Hitbox | undefined, into: ItemSink): void {
+    const pickupBox = playerBox && expand(playerBox, PICKUP_MARGIN);
     stepEntities(this.list, (drop) => {
       if (!isBoxInLoadedChunks(this.blocks, drop.reach)) {
         drop.hold();
         return true;
       }
       drop.step(this.blocks);
-      if (drop.collectInto(pickupBox, into)) return false;
+      if (pickupBox && drop.collectInto(pickupBox, into)) return false;
       return drop.age < DROP_LIFETIME_TICKS;
     });
   }

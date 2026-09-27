@@ -117,6 +117,16 @@ export class Inventory implements InventoryView, ItemSink, Hand, ToolHand, SlotS
   }
 
   /**
+   * 取走 36 格里的全部物品，按下标顺序返回每一堆，背包随之清空。选中的仍是原来那一格。
+   * 死亡时调：每一堆原样交出去，工具的损耗跟着那一堆走（ADR-0010）。
+   */
+  takeAll(): ItemStack[] {
+    const taken = this.slots.filter((stack): stack is ItemStack => stack !== undefined);
+    this.slots.fill(undefined);
+    return taken;
+  }
+
+  /**
    * 把一堆物品收进背包，返回没放下的数量（0 表示全收下了）。
    *
    * 两轮：先把同种的未满堆填满，再占空格。顺序与原版一致：拾取到的东西优先并进

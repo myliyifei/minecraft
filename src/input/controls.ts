@@ -18,7 +18,7 @@ import { isPointerSpike } from './pointer-spike';
 export const MOUSE_SENSITIVITY = 0.0022;
 
 /**
- * 输入适配器要用到的核心指令，加一样查询：界面模式开着没有。
+ * 输入适配器要用到的核心指令，加两样查询：界面模式开着没有，与死了没有。
  * 写成窄接口，接线接错了编译期就报。
  */
 export type PlayerInputTarget = Pick<
@@ -32,6 +32,7 @@ export type PlayerInputTarget = Pick<
   | 'scrollHotbar'
   | 'toggleInventory'
   | 'uiMode'
+  | 'health'
 >;
 
 /**
@@ -51,12 +52,21 @@ export type PlayerInputTarget = Pick<
  * 换不掉，所以它是 `INVENTORY_CLOSE_KEY` 这个单独的常量，不在 `KEY_BINDINGS` 里——
  * 设置界面（后续切片）改不到它。
  *
+ * 死亡画面也是界面模式，但键盘一概不认，背包键与 Esc 也不例外：它们关不掉死亡画面，
+ * 照常处理的话还会把指针锁定抓回来。离开死亡画面只有重生按钮一条路，按钮在界面层，
+ * 按下之后由接线层调这里的 `grabPointer`。
+ *
  * 返回的句柄要每帧 `sync()`：界面可能不是由这里的按键打开的——右键对着工作台，界面在
- * 下一个 tick 由核心打开——那时鼠标还锁着，得释放给页面。
+ * 下一个 tick 由核心打开；生命归零，死亡画面在那一 tick 出现——那时鼠标还锁着，得释放给页面。
  */
 export interface PlayerControls {
   /** 让指针锁定跟上核心：有界面开着而鼠标还锁着，就释放。每帧调一次。 */
   sync(): void;
+  /**
+   * 抓回指针锁定，进第一人称。必须在用户手势（点击、按键）的处理函数里同步调，否则浏览器会拒。
+   * 死亡画面的重生按钮走这里，与关掉背包界面时抓回锁定是同一条路。
+   */
+  grabPointer(): void;
   /** 卸下全部监听器。 */
   remove(): void;
 }
@@ -67,8 +77,8 @@ export function installPlayerControls(
 ): PlayerControls {
   const pressed = new Set<MoveAction>();
   const locked = (): boolean => document.pointerLockElement === canvas;
-  // 界面模式（见 CONTEXT.md）：背包界面、工作台界面或熔炉界面开着。这时鼠标已经交还给页面，
-  // 键盘只认关掉界面那两颗键。
+  // 界面模式（见 CONTEXT.md）：背包界面、工作台界面或熔炉界面开着，或者在死亡画面上。这时鼠标
+  // 已经交还给页面，键盘只认关掉界面那两颗键（死亡画面上连这两颗也不认）。
   const uiOpen = (): boolean => target.uiMode;
   const sendIntent = (): void => target.setMoveIntent(intentOf(pressed));
 
@@ -83,8 +93,8 @@ export function installPlayerControls(
   /**
    * 抓回指针锁定：进第一人称，网页鼠标随即消失。
    *
-   * 两处入口都走这里——点画布，以及关掉背包界面。合成一个函数是因为锁定生效后浏览器会
-   * 补投一发光标归位的 mousemove（见 `dropWarpMove`），漏掉那一发视角就会被甩一下。
+   * 三处入口都走这里——点画布、关掉背包界面、按死亡画面的重生按钮。合成一个函数是因为锁定
+   * 生效后浏览器会补投一发光标归位的 mousemove（见 `dropWarpMove`），漏掉那一发视角就会被甩一下。
    *
    * 请求可能被浏览器拒：它只在用户手势里放行。拒了就退回「玩家点一下画面」，但那个
    * rejection 必须接住，否则会变成控制台里一条未处理的错误。
@@ -169,6 +179,9 @@ export function installPlayerControls(
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
+    // 死亡画面上键盘一概不认，理由见 `PlayerControls`。
+    if (target.health.dead) return;
+
     // 背包键两头都要认：锁定着的时候按它开背包界面，有界面开着（背包或工作台）的时候
     // 按它关那个界面。开哪个、关哪个由核心定，这里只认「现在有没有界面开着」。
     if (event.code === KEY_BINDINGS.inventory && (locked() || uiOpen())) {
@@ -267,10 +280,16 @@ export function installPlayerControls(
       // 只在打开那一帧判，不能每帧判「开着且锁着就释放」：按背包键关界面时锁定请求当场
       // 发出，而界面要到下一个 tick 才关——锁定先到位的话，每帧判会把刚抓回来的锁定又
       // 放掉，之后就没有手势再抓它了。
+      //
+      // 死亡画面是例外，每帧都判：死了而鼠标还锁着就释放。只看「从没有到有」会漏掉一种情形——
+      // 按背包键关界面、当场抓回锁定，而同一 tick 里玩家摔死，这一帧看到的界面模式从开着直接到开着
+      // （背包关了、死亡画面开了），鼠标于是一直锁着，点不到重生按钮。死亡画面上只有重生按钮会抓回
+      // 锁定，它先让核心重生再抓（`GameCore.respawn` 立即生效），所以每帧判不会放掉那一下。
       const open = uiOpen();
-      if (open && !shownUiOpen && locked()) document.exitPointerLock();
+      if (locked() && ((open && !shownUiOpen) || target.health.dead)) document.exitPointerLock();
       shownUiOpen = open;
     },
+    grabPointer,
     remove(): void {
       canvas.removeEventListener('click', onClick);
       document.removeEventListener('pointerlockchange', onLockChange);

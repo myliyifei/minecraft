@@ -1317,6 +1317,87 @@ test('调试句柄挖空脚下 6 格：落地后少一颗半心，红色遮罩�
   expect(errors).toEqual([]);
 });
 
+test('调试句柄让玩家摔死：死亡画面铺满屏幕并交还鼠标，背包键与 Esc 关不掉它；点重生按钮回到出生点、重新锁定鼠标、心满', async ({
+  page,
+}) => {
+  await grabPointer(page);
+  // 挖空脚下 24 格，落地摔 21 点。整段跑在一次同步的 evaluate 里，游戏循环插不进来
+  const died = await page.evaluate(
+    ({ depth, air }) => {
+      const { core, hud } = window.__VOXEL__!;
+      const { x, z } = core.player.position;
+      const column = { x: Math.floor(x), z: Math.floor(z) };
+      const top = core.highestBlockY(column.x, column.z);
+      for (let y = top; y > top - depth; y--) core.setBlock(column.x, y, column.z, air);
+      for (let ticks = 0; ticks < 100 && !core.health.dead; ticks++) core.tick();
+      hud.update();
+      return { dead: core.health.dead, points: core.health.points };
+    },
+    { depth: 24, air: BlockType.Air },
+  );
+  expect(died).toEqual({ dead: true, points: 0 });
+
+  const screen = page.locator('#death-screen');
+  await expect(screen).toBeVisible();
+  await expect(screen).toHaveAttribute('aria-label', STRINGS.youDied);
+  await expect(page.locator('#death-screen .death-screen__title')).toHaveText(STRINGS.youDied);
+  const respawn = page.getByRole('button', { name: STRINGS.respawn });
+  await expect(respawn).toBeVisible();
+  // 铺满视口，准星与底部那一栏都收起
+  const box = await screen.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).toEqual({ x: 0, y: 0, width: viewport!.width, height: viewport!.height });
+  await expect(page.locator('#crosshair')).toBeHidden();
+  await expect(page.locator('#hud')).toBeHidden();
+  // 死亡那一帧由游戏循环把鼠标交还给页面
+  await expect.poll(() => readLockedElementId(page)).toBe(null);
+
+  // 背包键与 Esc 都关不掉它，不打开背包界面，也不把鼠标抓回去
+  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(INVENTORY_CLOSE_KEY);
+  await page.evaluate(() => {
+    const { core, hud } = window.__VOXEL__!;
+    core.tick();
+    hud.update();
+  });
+  await expect(screen).toBeVisible();
+  await expect(page.locator('#inventory-screen')).toBeHidden();
+  expect(await readLockedElementId(page)).toBe(null);
+
+  await respawn.click();
+  await expect.poll(() => readLockedElementId(page)).toBe('game');
+  // 锁定期间 headless Chromium 的 rAF 降到约 1/10（见 `walkWhileHolding`），界面在这里显式刷新一次再读
+  const after = await page.evaluate(() => {
+    const { core, hud } = window.__VOXEL__!;
+    hud.update();
+    const shown = (selector: string): boolean => {
+      const element = document.querySelector(selector);
+      return element instanceof HTMLElement && getComputedStyle(element).display !== 'none';
+    };
+    return {
+      dead: core.health.dead,
+      points: core.health.points,
+      atSpawn: JSON.stringify(core.player.position) === JSON.stringify(core.spawnPoint),
+      deathScreen: shown('#death-screen'),
+      crosshair: shown('#crosshair'),
+      hud: shown('#hud'),
+      hearts: [...document.querySelectorAll<HTMLElement>('#health-bar .health__heart')].map(
+        (heart) => heart.dataset.state,
+      ),
+    };
+  });
+  expect(after).toEqual({
+    dead: false,
+    points: MAX_HEALTH,
+    atSpawn: true,
+    deathScreen: false,
+    crosshair: true,
+    hud: true,
+    hearts: Array(MAX_HEALTH / 2).fill('full'),
+  });
+  expect(errors).toEqual([]);
+});
+
 test('经验球画成小方块飞向玩家，被吸收后从画面上消失', async ({ page }) => {
   await waitForFullViewDistance(page);
 

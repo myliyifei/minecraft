@@ -1,6 +1,7 @@
 import type { GameCore } from '../core/game';
 import type { InventoryScreenView } from '../core/inventory-screen';
 import { installCrosshair } from './crosshair';
+import { installDeathScreen } from './death-screen';
 import { installHealthBar } from './health-bar';
 import { installHotbar } from './hotbar';
 import { installHurtFlash } from './hurt-flash';
@@ -15,8 +16,8 @@ import { installLevelBar } from './level-bar';
 
 /**
  * 屏幕上那一整套界面：十字准星在正中，底部自上而下是生命值那一排心、等级条、快捷栏，再加
- * 受伤时的红闪与三层覆盖层——按 E 打开的背包界面，与使用键对着工作台、熔炉打开的工作台界面、
- * 熔炉界面。
+ * 受伤时的红闪、三层覆盖层——按 E 打开的背包界面，与使用键对着工作台、熔炉打开的工作台界面、
+ * 熔炉界面——与生命归零时的死亡画面。
  *
  * 合成一个句柄，接线层与调试句柄因此不必知道界面由几个部件组成——加一块显示（饥饿值）
  * 只改这个文件。心、等级条与快捷栏装在同一个 `#hud` 容器里，等级条的宽度因此自动跟
@@ -45,6 +46,7 @@ export type HudSource = Pick<
   | 'splitSlot'
   | 'clickCraftingOutput'
   | 'clickRecipe'
+  | 'respawn'
 >;
 
 /** 给一层界面接线：视图换成它自己的，背包与点击指令是共用的那一份。 */
@@ -59,8 +61,17 @@ function screenSource(source: HudSource, screen: InventoryScreenView): Inventory
   };
 }
 
-/** 把 HUD 挂到页面上。返回的句柄要每帧 `update()`。 */
-export function installHud(parent: HTMLElement, source: HudSource): Hud {
+/**
+ * 把 HUD 挂到页面上。返回的句柄要每帧 `update()`。
+ *
+ * `afterRespawn` 在死亡画面的重生按钮按下、核心重生之后同步调，接线层在这里抓回指针锁定
+ * （见 `installDeathScreen`）。
+ */
+export function installHud(
+  parent: HTMLElement,
+  source: HudSource,
+  afterRespawn: () => void,
+): Hud {
   // 红闪挂在最前面：后挂的元素画在它上面，心、快捷栏、准星与三层界面因此都不被染红，
   // 受伤那一下照样看得清剩几颗心。它挂在 `parent` 而不是 `#hud` 里，理由见下面准星那一段，
   // 另外还有一条：界面开着时 `#hud` 整栏收起，而开着背包受伤也要闪。
@@ -94,6 +105,9 @@ export function installHud(parent: HTMLElement, source: HudSource): Hud {
     screenSource(source, source.furnaceScreen),
     FURNACE_SCREEN_LABEL,
   );
+  // 死亡画面挂在最后，压在其余一切之上。死亡时核心已经关掉了三层界面，准星与底部那一栏
+  // 也因为界面模式收起了，这里只是保证叠放的先后。
+  const deathScreen = installDeathScreen(parent, source, afterRespawn);
 
   /** 上一次画的是收起还是展开。与当前相同就不碰 DOM。 */
   let shownOpen: boolean | undefined;
@@ -114,6 +128,7 @@ export function installHud(parent: HTMLElement, source: HudSource): Hud {
       screen.update();
       craftingTable.update();
       furnace.update();
+      deathScreen.update();
     },
     remove(): void {
       root.remove();
@@ -122,6 +137,7 @@ export function installHud(parent: HTMLElement, source: HudSource): Hud {
       screen.remove();
       craftingTable.remove();
       furnace.remove();
+      deathScreen.remove();
     },
   };
 }

@@ -102,6 +102,14 @@ export class Experience implements ExperienceView, ExperienceSink {
     return this.breakdown.intoLevel / this.breakdown.levelSpan;
   }
 
+  /** 取走全部累计经验，返回取走了几点。之后经验值与等级都是 0。死亡时调。 */
+  takeAll(): number {
+    const taken = this.points;
+    this.points = 0;
+    this.breakdown = levelBreakdown(0);
+    return taken;
+  }
+
   gain(amount: number): void {
     if (amount <= 0) return;
     this.points += amount;

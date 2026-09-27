@@ -9,6 +9,7 @@ import { stepFurnaces } from './furnace';
 import { FurnaceSlots } from './furnace-slots';
 import { fallDamage, Health, type HealthView } from './health';
 import { Inventory, wrapHotbarSlot, type InventoryView } from './inventory';
+import type { ItemType } from './item';
 import { InventoryScreen, type InventoryScreenView } from './inventory-screen';
 import { IDLE_MINING, Mining, type MiningView } from './mining';
 import { placeBlock } from './placement';
@@ -59,7 +60,8 @@ export interface GameCoreOptions {
  *
  * 第一切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」「空手挖掘」
  * 「掉落物与背包」「经验球与等级」「放置方块」「背包界面」九件事，第二切片起加「合成」
- * 与「使用（工作台界面）」，第三切片加「熔炉界面」与「熔炼」。生物等系统由后续切片挂进 step()。
+ * 与「使用（工作台界面）」，第三切片加「熔炉界面」与「熔炼」，第四切片加「世界时刻」「生命值」
+ * 与「死亡与重生」。生物等系统由后续切片挂进 step()。
  */
 export class GameCore implements BlockEdit, BlockStateView {
   private readonly world: World;
@@ -86,6 +88,11 @@ export class GameCore implements BlockEdit, BlockStateView {
   private readonly furnaceSlots: FurnaceSlots;
   private readonly furnaceScreenState: InventoryScreen;
   private readonly miningState: Mining;
+  /**
+   * 进入世界时的出生点。原点区块卸载了又没改过时，出生点就是它：地形是种子的纯函数（ADR-0003），
+   * 重新生成出来与进入世界时一样。见 `spawnPoint`。
+   */
+  private readonly firstSpawn: Vec3;
   private ticks = 0;
   /**
    * 世界时刻相对 tick 计数的偏移（见 `timeOfDayAt`）。进入世界时是 0，所以开局是早晨；
@@ -123,7 +130,8 @@ export class GameCore implements BlockEdit, BlockStateView {
     // 来源当场给不出区块时（浏览器里 Worker 还在生成）这里只加载得到已经就绪的那些，
     // 其余由 tick 补上——所以浏览器那一侧要先把出生点那一带备好，见 src/main.ts。
     streamChunks(this.world, ORIGIN_CHUNK, this.radius);
-    this.playerState = new Player(this.world, this.spawnPoint);
+    this.firstSpawn = this.originColumnTop();
+    this.playerState = new Player(this.world, this.firstSpawn);
     this.dropsState = new Drops(this.world, this.worldSeed);
     this.xpOrbsState = new XpOrbs();
     this.experienceState = new Experience();
@@ -213,14 +221,17 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
-   * 这一刻是界面模式吗（见 CONTEXT.md）——有界面开着就是。
+   * 这一刻是界面模式吗（见 CONTEXT.md）——有界面开着、或者在死亡画面上就是。
    *
    * 问的是「有没有界面开着」而不是「背包界面开着没有」：移动、视角、挖掘、使用那几处
    * 判定只看这一个答案，再加一种界面也不必改它们。界面层与输入层也读它：准星藏不藏、
    * 底部那一栏收不收、鼠标要不要交还页面，看的都是「有没有界面开着」。
+   *
+   * 死亡画面也算，但它不是 `activeScreen` 里的一个界面：它没有格子可点，背包键关不掉它，
+   * 只有 `respawn` 让它退出。死了没有与生命值归零是同一件事，所以直接看 `health.dead`。
    */
   get uiMode(): boolean {
-    return this.activeScreen !== undefined;
+    return this.activeScreen !== undefined || this.healthState.dead;
   }
 
   /** 此刻开着的那个界面，一个都没开时 undefined。同一时刻最多开一个。 */
@@ -345,6 +356,45 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.screenClicks.push({ kind: 'recipe', index });
   }
 
+  /**
+   * 重生：回到出生点，血回满，退出死亡画面。立即生效。没死时什么都不做。
+   *
+   * 由界面层的重生按钮调。
+   *
+   * 死亡期间积累的输入一并作废：按着的移动键、挖掘键、连锁键、切过的选中格，以及还没到 tick
+   * 边界的使用键、背包键与界面点击。死亡画面上这些输入都不生效，重生之后也不该接着生效。
+   * 重生时背包是空的——东西都掉在死亡处了。
+   *
+   * 立即生效而不是等下一个 tick（ADR-0004 的例外，理由写在那里）：按钮按下时输入层当场抓回指针
+   * 锁定，而死亡画面期间输入层会把锁定释放掉（`PlayerControls.sync`）。等到下一个 tick，刚抓回的
+   * 锁定就被放掉了。
+   */
+  respawn(): void {
+    if (!this.healthState.dead) return;
+    // 原点区块改过又卸载了，要先放回世界：出生点按改过之后的方块算。没改过又还没送到的，
+    // 出生点就是进入世界时那一个（`spawnPoint`），玩家在那里等区块送到（ADR-0013）。
+    this.world.loadChunk(ORIGIN_CHUNK.cx, ORIGIN_CHUNK.cz);
+    this.playerState.respawnAt(this.spawnPoint);
+    this.healthState.reset();
+    this.intent = IDLE_INTENT;
+    this.miningHeld = false;
+    this.chainHeld = false;
+    this.nextSlot = this.inventoryState.selectedSlot;
+    this.useQueued = false;
+    this.toggleQueued = false;
+    this.screenClicks.length = 0;
+  }
+
+  /**
+   * 往背包里放 count 个 item，立即生效，返回装不下的数量。按物品进背包的规则放（`Inventory.add`）：
+   * 先并进同一类型的未满堆，再占空格。
+   *
+   * 与 `setTimeOfDay` 一样是给测试用的公开指令：测试用它备好背包，不必先挖掘再合成。
+   */
+  giveItem(item: ItemType, count: number): number {
+    return this.inventoryState.add({ item, count });
+  }
+
   /** 本世界的种子。地形完全由它决定，端到端测试用它断言「同一种子同一个世界」。 */
   get seed(): number {
     return this.worldSeed;
@@ -458,12 +508,21 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
-   * 出生点：世界原点那一列最高实心方块的顶面，落在方块中心。
+   * 出生点：世界原点那一列最高实心方块的顶面，落在方块中心。重生也回到这里。
    *
    * `highestBlockY` 找的是最高的非空气方块。当前除空气之外的方块都是实心的，两者等价。
    * 树冠会把它抬到树冠的高度，所以出生点那一带干脆不长树，见 `OAK_SPAWN_CLEARANCE`。
+   *
+   * 原点区块没加载时读不出那一列（「未加载即空气」），就用进入世界时的出生点。这时原点区块一定
+   * 没改过：改过的区块卸载后仍留在世界里（ADR-0008），`respawn` 先把它放回来再问这里。
    */
   get spawnPoint(): Vec3 {
+    if (!this.world.isChunkLoaded(ORIGIN_CHUNK.cx, ORIGIN_CHUNK.cz)) return this.firstSpawn;
+    return this.originColumnTop();
+  }
+
+  /** 世界原点那一列此刻最高方块的顶面中心。 */
+  private originColumnTop(): Vec3 {
     return { x: 0.5, y: this.highestBlockY(0, 0) + 1, z: 0.5 };
   }
 
@@ -473,15 +532,25 @@ export class GameCore implements BlockEdit, BlockStateView {
     // 先让区块跟上玩家再算物理：玩家脚下的地形必须已经在世界里，否则他会踩进
     // 「未加载即空气」的虚空里往下掉。
     streamChunks(this.world, this.playerChunk, this.radius);
+    // 死亡画面期间玩家那几步整个跳过：不移动、不受重力、不受伤、不拾取。世界照常推进——
+    // 熔炉、掉落物、经验球都还在走。
+    const wasDead = this.healthState.dead;
     // 界面的输入排在最前：这一 tick 是不是界面模式，下面几步都要看它。
-    this.stepScreens();
+    this.stepScreens(wasDead);
     // 界面模式下移动、挖掘、使用一律不算数（见 CONTEXT.md 的「界面模式」）：玩家在
     // 摆物品，不是在操作世界。挡的是输入而不是世界——重力、掉落物、经验球照旧。
+    if (wasDead) {
+      this.playerState.hold();
+    } else {
+      const fell = this.playerState.step(this.uiMode ? IDLE_INTENT : this.intent);
+      this.healthState.hurt(fallDamage(fell), this.ticks);
+      // 选中格先生效，再瞄准与使用：同一 tick 里切了格又按使用键，放下的是新格里的东西。
+      this.inventoryState.select(this.nextSlot);
+    }
+    // 移动之后重读一次：这一 tick 里摔死的，从这里起与已经死了的一样，不挖、不放、不拾取。
+    // 否则落地那一 tick 按着的使用键还会放下一块，脚边的掉落物也会先被拾起再掉出来。
+    const dead = this.healthState.dead;
     const uiMode = this.uiMode;
-    const fell = this.playerState.step(uiMode ? IDLE_INTENT : this.intent);
-    this.healthState.hurt(fallDamage(fell), this.ticks);
-    // 选中格先生效，再瞄准与使用：同一 tick 里切了格又按使用键，放下的是新格里的东西。
-    this.inventoryState.select(this.nextSlot);
     // 挖掘必须排在移动之后，理由见 Mining.step。界面一开就换成「什么键都没按」，
     // 进度因此当场归零，回头得重挖。
     this.miningState.step(uiMode ? IDLE_MINING : { held: this.miningHeld, chain: this.chainHeld });
@@ -497,11 +566,31 @@ export class GameCore implements BlockEdit, BlockStateView {
     stepFurnaces(this.world);
     // 掉落物与经验球都排在挖掘之后：这一 tick 刚挖出来的东西同一 tick 就开始动，而
     // 掉落物的拾取延迟（PICKUP_DELAY_TICKS）也从这里起算。拾取与吸收判的都是玩家走完
-    // 之后的碰撞箱。两者互不影响，谁先谁后都一样。
-    this.dropsState.step(this.playerState.hitbox, this.inventoryState);
-    this.xpOrbsState.step(this.playerState.hitbox, this.experienceState);
-    // 回血排在最后：这一 tick 里所有伤害都结算完了，受伤那一 tick 不会紧跟着回血。
+    // 之后的碰撞箱。两者互不影响，谁先谁后都一样。死了的玩家什么都不拾取、不吸收。
+    const collector = dead ? undefined : this.playerState.hitbox;
+    this.dropsState.step(collector, this.inventoryState);
+    this.xpOrbsState.step(collector, this.experienceState);
+    // 回血与死亡判定排在最后：这一 tick 里所有伤害都结算完了，受伤那一 tick 不会紧跟着回血。
     this.healthState.regenerate(this.ticks);
+    if (!wasDead && this.healthState.dead) this.die();
+  }
+
+  /**
+   * 生命归零的那一 tick：身上的东西全部留在死亡处，进入死亡画面。
+   *
+   * 开着的界面先关掉，规则与平时关界面相同（`InventoryScreen.toggle`）：光标上那一堆先回到拿起它
+   * 的那一格，合成网格里的退回背包，退不回去的掉在脚下；熔炉三格里的留在熔炉里，所以从熔炉格拿到
+   * 光标上的东西回到熔炉，不随身掉落。然后背包每一堆各生成一个掉落物（耐久随堆，ADR-0010），落在同一格，
+   * 由各自的编号哈希出不同的初速度散开；累计经验全部装进一个经验球，没有经验就不生成。
+   *
+   * 进入死亡画面不需要另记一个状态：生命值归零就是（`uiMode`）。
+   */
+  private die(): void {
+    const at = this.playerState.position;
+    for (const stack of this.activeScreen?.toggle() ?? []) this.dropsState.spawnAt(stack, at);
+    for (const stack of this.inventoryState.takeAll()) this.dropsState.spawnAt(stack, at);
+    const experience = this.experienceState.takeAll();
+    if (experience > 0) this.xpOrbsState.spawnAt(experience, at);
   }
 
   /**
@@ -547,8 +636,11 @@ export class GameCore implements BlockEdit, BlockStateView {
    *
    * 点击排在开合之前，按下背包键那一 tick 里点的格子才算数——两件事都在这一 tick 里
    * 到达，而玩家先点了格子才去按键。点击落在开着的那个界面上，一个都没开时点了没有反应。
+   *
+   * 死亡画面上背包键作废：死亡那一 tick 已经关掉了所有界面（`die`），一个都没开，按下去不打开
+   * 背包界面，也关不掉死亡画面。
    */
-  private stepScreens(): void {
+  private stepScreens(dead: boolean): void {
     const active = this.activeScreen;
     if (active) {
       for (const click of this.screenClicks) {
@@ -562,6 +654,7 @@ export class GameCore implements BlockEdit, BlockStateView {
 
     if (!this.toggleQueued) return;
     this.toggleQueued = false;
+    if (dead) return;
     // 有界面开着就关它，没有就开背包界面。关的时候光标上、合成网格里还有东西而背包
     // 一格不剩的，扔在玩家脚下那一格，与原版一样：界面一关就看不见的东西不能凭空消失。
     // 玩家挪出一格来就能拾取回去。

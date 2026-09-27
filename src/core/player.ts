@@ -169,6 +169,28 @@ export class Player implements PlayerView {
   }
 
   /**
+   * 原地停一个 tick：不走、不受重力，只把上一个 tick 的位置对齐到现在。死亡画面期间每 tick 调。
+   * 渲染层在两个位置之间插值（ADR-0002），不对齐的话相机会一遍遍重放死前的最后一步。
+   */
+  hold(): void {
+    this.prevX = this.x;
+    this.prevY = this.y;
+    this.prevZ = this.z;
+  }
+
+  /**
+   * 移动到 spawn 并停住：竖直速度归零，落差从这里起算，上一个 tick 的位置也对齐过去——渲染层不会
+   * 在死亡处与出生点之间插值出一帧。视角不变。
+   */
+  respawnAt(spawn: Vec3): void {
+    this.x = this.prevX = spawn.x;
+    this.y = this.prevY = spawn.y;
+    this.z = this.prevZ = spawn.z;
+    this.velocityY = 0;
+    this.fallFromY = spawn.y;
+  }
+
+  /**
    * 推进一个 tick，返回这一 tick 落地时的落差（格）：离地之后到过的最高点减去落点。没有落地、
    * 或者一直站在地上，返回 0。跳上台阶时落差只算高出台阶顶面的那一段。受不受伤、受几点由调用方
    * 按 `fallDamage` 算，玩家本身不持生命值。

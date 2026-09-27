@@ -45,9 +45,10 @@ async function main(): Promise<void> {
 
   // 首帧画完才撤掉加载遮罩，页面不会闪一下空画布。
   loading.remove();
-  const hud = installHud(document.body, core);
-  hud.update();
   const controls = installPlayerControls(canvas, core);
+  // 重生按钮按下那一刻抓回指针锁定：锁定只在用户手势里放行，所以由按钮的 click 直接调，不等下一帧。
+  const hud = installHud(document.body, core, () => controls.grabPointer());
+  hud.update();
   installDebugHandle({ core, renderer, hud, chunks });
   startGameLoop(core, (alpha) => {
     renderer.syncChunkMeshes();

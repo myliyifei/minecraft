@@ -75,6 +75,15 @@ export class Health implements HealthView {
   }
 
   /**
+   * 回到进入世界时的样子：满血，没受过伤，没有无敌时间。重生时调。
+   */
+  reset(): void {
+    this.current = MAX_HEALTH;
+    this.lastHurt = undefined;
+    this.invulnerableUntil = -Infinity;
+  }
+
+  /**
    * 第 now 个 tick 的回血：距上次受伤满 `REGEN_DELAY_TICKS` 的那一 tick 回 1，之后每满
    * `REGEN_INTERVAL_TICKS` 再回 1，到 `MAX_HEALTH` 为止。死了不回，没受过伤也没什么可回。
    *

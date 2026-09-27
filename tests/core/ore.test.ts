@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, DEFAULT_SEED, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
@@ -8,6 +8,7 @@ import {
   ORE_VEIN_RISE,
   oreVeinsTouching,
   plantOreVeins,
+  type OreCellSize,
   type OreKindDef,
   type OreVein,
 } from '../../src/core/ore';
@@ -32,10 +33,11 @@ const EXPECTED_KINDS: Array<{
   minY: number;
   maxY: number;
   maxCount: number;
+  cellSize: number;
   veinsPerChunk: number;
 }> = [
-  { name: '煤矿脉', block: BlockType.CoalOre, minY: 0, maxY: 64, maxCount: 8, veinsPerChunk: 20 },
-  { name: '铁矿脉', block: BlockType.IronOre, minY: -63, maxY: 32, maxCount: 4, veinsPerChunk: 10 },
+  { name: '煤矿脉', block: BlockType.CoalOre, minY: 0, maxY: 64, maxCount: 8, cellSize: 8, veinsPerChunk: 20 },
+  { name: '铁矿脉', block: BlockType.IronOre, minY: -63, maxY: 32, maxCount: 4, cellSize: 8, veinsPerChunk: 10 },
 ];
 
 /** 平均条数允许偏离目标的比例。样本是 81 个区块，正负三成够宽松，也足以说明密度没有偏离目标。 */
@@ -104,7 +106,13 @@ describe('矿石种类表', () => {
       expect(kind!.maxY, `${expected.name}的上界`).toBe(expected.maxY);
       expect(kind!.minCount, `${expected.name}最少块数`).toBe(1);
       expect(kind!.maxCount, `${expected.name}最多块数`).toBe(expected.maxCount);
+      expect(kind!.cellSize, `${expected.name}的单元边长`).toBe(expected.cellSize);
     }
+  });
+
+  it('单元边长只能取 4 或 8', () => {
+    // 在类型检查时判定：OreCellSize 多一个或少一个取值，npm run typecheck 都会报错
+    expectTypeOf<OreCellSize>().toEqualTypeOf<4 | 8>();
   });
 
   it('矿脉的伸展范围：水平不超过 2 格、竖直不超过 1 格', () => {

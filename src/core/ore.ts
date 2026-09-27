@@ -5,7 +5,17 @@ import { hashCoords } from './noise';
 import type { Vec3 } from './vec3';
 
 /**
- * 一种矿石的矿脉参数（见 CONTEXT.md 的「矿脉」，issue #31）。
+ * 矿脉单元的边长（方块），三个方向都是。
+ *
+ * 上限 8：单元内落点每一维用 3 位哈希（见 `SLOT_X_SHIFT` 那几个位段），边长再大就有格子落不到。
+ * 下限 4：等于矿脉水平伸展半径（`ORE_VEIN_RADIUS`）的两倍。矿脉水平最宽 5 格，相邻单元的两条矿脉
+ * 仍可能挨在一起或共用几格；边长再小，相邻单元的矿脉大多会连在一起。
+ * 两者之间只有 4 和 8 是 2 的幂，单元坐标因此能用位移算。
+ */
+export type OreCellSize = 4 | 8;
+
+/**
+ * 一种矿石的矿脉参数（见 CONTEXT.md 的「矿脉」，issue #31、#47）。
  *
  * 高度区间说的是矿石方块，不是矿脉中心：中心再往上下各伸 `ORE_VEIN_RISE` 格，所以中心只在
  * 区间内缩一格的范围里取。
@@ -26,6 +36,11 @@ export interface OreKindDef {
    * 每区块平均条数 = 区块覆盖的有效单元数 × 阈值 ÷ 256，见 `ORE_KINDS` 各行的注释。
    */
   readonly chance: number;
+  /**
+   * 这种矿石的矿脉单元边长。世界按它切成立方格，一格最多一条矿脉：密度因此有上界，而一条矿脉
+   * 只由自己那一格的哈希决定，每个区块能独立算出所有该写的矿脉，见 ADR-0005。
+   */
+  readonly cellSize: OreCellSize;
   /** 这种矿石分布用的种子偏移量：两种矿石各走一条互不相关的哈希流。 */
   readonly salt: number;
 }
@@ -39,21 +54,6 @@ export interface OreVein {
   readonly cells: readonly Vec3[];
 }
 
-/**
- * 矿脉单元的边长（方块），三个方向都是。
- *
- * 世界按它切成立方格，一格最多一条矿脉：密度因此有上界，而一条矿脉只由自己那一格的哈希决定，
- * 每个区块能独立算出所有该写的矿脉，见 ADR-0005。取 8 是让一个区块一层有 4 个单元、煤的 65 层
- * 高度区间有 8 个单元，一区块二十条煤脉对应每单元六成的概率，既够密又不至于每个单元都有。
- */
-export const ORE_CELL_SIZE = 8;
-
-/** 单元坐标用位移算，负坐标也向下取整。满足 `1 << ORE_CELL_SHIFT === ORE_CELL_SIZE`。 */
-const ORE_CELL_SHIFT = 3;
-
-/** 单元内落点的掩码：中心落在单元内哪一格。 */
-const ORE_CELL_MASK = ORE_CELL_SIZE - 1;
-
 /** 矿脉离中心最远伸几格：水平（切比雪夫距离）。区块拉取邻近单元的范围按它定。 */
 export const ORE_VEIN_RADIUS = 2;
 
@@ -64,7 +64,8 @@ export const ORE_VEIN_RISE = 1;
  * 两种矿石的参数表——纯数据，数值来自 issue #31。
  *
  * 平均条数的算法：中心可取的 y 是区间内缩一格，按单元竖直切开数有效单元（部分落在区间外的
- * 单元按落在区间内的比例算），乘一区块一层的 4 个单元，再乘阈值 ÷ 256。
+ * 单元按落在区间内的比例算），乘一区块一层的单元数（边长 8 是 4 个，边长 4 是 16 个），再乘
+ * 阈值 ÷ 256。
  * - 煤：中心 1–63，单元 y 0–63 共 8 个，第一个只有 7/8 有效，7.875 × 4 = 31.5 个有效单元，
  *   163/256 ≈ 0.637，平均约 20 条。
  * - 铁：中心 −62–31，单元 y −64–31 共 12 个，第一个只有 6/8 有效，11.75 × 4 = 47 个，
@@ -82,6 +83,7 @@ export const ORE_KINDS: readonly OreKindDef[] = Object.freeze([
     minCount: 1,
     maxCount: 8,
     chance: 163,
+    cellSize: 8,
     salt: 0x6c0a_1e5d,
   },
   {
@@ -91,6 +93,7 @@ export const ORE_KINDS: readonly OreKindDef[] = Object.freeze([
     minCount: 1,
     maxCount: 4,
     chance: 54,
+    cellSize: 8,
     salt: 0x1207_9b3f,
   },
 ]);
@@ -137,9 +140,9 @@ const FACE_NEIGHBOURS: ReadonlyArray<readonly [number, number, number]> = [
   [0, 0, -1],
 ];
 
-/** 世界坐标所属的单元坐标。 */
-function cellOf(worldCoord: number): number {
-  return worldCoord >> ORE_CELL_SHIFT;
+/** 世界坐标所属的单元坐标。用位移算，负坐标也向下取整；位移量是边长以 2 为底的对数。 */
+function cellOf(worldCoord: number, cellSize: OreCellSize): number {
+  return worldCoord >> (31 - Math.clz32(cellSize));
 }
 
 /** 三维单元坐标的哈希：先把水平两维搅在一起，再搅进竖直那一维。 */
@@ -196,9 +199,12 @@ function oreVeinInCell(
   const roll = hashCell((seed ^ kind.salt) | 0, cellX, cellY, cellZ);
   if (((roll >>> PRESENCE_SHIFT) & ROLL_MASK) >= kind.chance) return undefined;
 
-  const x = cellX * ORE_CELL_SIZE + ((roll >>> SLOT_X_SHIFT) & ORE_CELL_MASK);
-  const y = cellY * ORE_CELL_SIZE + ((roll >>> SLOT_Y_SHIFT) & ORE_CELL_MASK);
-  const z = cellZ * ORE_CELL_SIZE + ((roll >>> SLOT_Z_SHIFT) & ORE_CELL_MASK);
+  // 单元内落点：边长是 2 的幂，减一就是掩码，只取每段位的低几位
+  const size = kind.cellSize;
+  const slotMask = size - 1;
+  const x = cellX * size + ((roll >>> SLOT_X_SHIFT) & slotMask);
+  const y = cellY * size + ((roll >>> SLOT_Y_SHIFT) & slotMask);
+  const z = cellZ * size + ((roll >>> SLOT_Z_SHIFT) & slotMask);
   // 中心上下各伸 ORE_VEIN_RISE 格都得在区间里：区间说的是矿石方块，不是中心
   if (y - ORE_VEIN_RISE < kind.minY || y + ORE_VEIN_RISE > kind.maxY) return undefined;
 
@@ -231,14 +237,15 @@ function reachesChunk(vein: OreVein, originX: number, originZ: number): boolean 
 export function oreVeinsTouching(seed: number, cx: number, cz: number): OreVein[] {
   const originX = cx * CHUNK_SIZE;
   const originZ = cz * CHUNK_SIZE;
-  const firstCellX = cellOf(originX - ORE_VEIN_RADIUS);
-  const lastCellX = cellOf(originX + CHUNK_SIZE - 1 + ORE_VEIN_RADIUS);
-  const firstCellZ = cellOf(originZ - ORE_VEIN_RADIUS);
-  const lastCellZ = cellOf(originZ + CHUNK_SIZE - 1 + ORE_VEIN_RADIUS);
   const veins: OreVein[] = [];
   for (const kind of ORE_KINDS) {
-    const lastCellY = cellOf(kind.maxY - ORE_VEIN_RISE);
-    for (let cellY = cellOf(kind.minY + ORE_VEIN_RISE); cellY <= lastCellY; cellY++) {
+    const size = kind.cellSize;
+    const firstCellX = cellOf(originX - ORE_VEIN_RADIUS, size);
+    const lastCellX = cellOf(originX + CHUNK_SIZE - 1 + ORE_VEIN_RADIUS, size);
+    const firstCellZ = cellOf(originZ - ORE_VEIN_RADIUS, size);
+    const lastCellZ = cellOf(originZ + CHUNK_SIZE - 1 + ORE_VEIN_RADIUS, size);
+    const lastCellY = cellOf(kind.maxY - ORE_VEIN_RISE, size);
+    for (let cellY = cellOf(kind.minY + ORE_VEIN_RISE, size); cellY <= lastCellY; cellY++) {
       for (let cellZ = firstCellZ; cellZ <= lastCellZ; cellZ++) {
         for (let cellX = firstCellX; cellX <= lastCellX; cellX++) {
           const vein = oreVeinInCell(seed, kind, cellX, cellY, cellZ);

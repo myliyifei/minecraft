@@ -616,6 +616,37 @@ describe('配方书：列出这块网格能做的配方，材料充足的高亮'
     expect(entryFor(screen, ItemType.WoodenShovel).craftable).toBe(false);
   });
 
+  it('剑与工具同一套规则（#45）：2 块木板加 1 根木棍时木剑高亮、木镐灰显，木棍拿到光标上木剑也灰显', () => {
+    const { screen } = opened((inv) => {
+      inv.setSlot(0, planks(2));
+      inv.setSlot(1, { item: ItemType.Stick, count: 1 });
+    }, new CraftingGrid({ width: 3, height: 3 }));
+    expect(entryFor(screen, ItemType.WoodenSword).craftable).toBe(true);
+    expect(entryFor(screen, ItemType.WoodenPickaxe).craftable).toBe(false);
+    // 圆石与铁锭一个都没有：石剑、铁剑灰显
+    expect(entryFor(screen, ItemType.StoneSword).craftable).toBe(false);
+    expect(entryFor(screen, ItemType.IronSword).craftable).toBe(false);
+    screen.clickSlot(1);
+    expect(entryFor(screen, ItemType.WoodenSword).craftable).toBe(false);
+  });
+
+  it('点木剑配方：2 块木板加 1 根木棍靠左上角竖排填入 3x3，输出格显示 1 把木剑', () => {
+    const extra = new CraftingGrid({ width: 3, height: 3 });
+    const { inventory, screen } = opened((inv) => {
+      inv.setSlot(0, planks(2));
+      inv.setSlot(1, { item: ItemType.Stick, count: 1 });
+    }, extra);
+    screen.clickRecipe(indexOf(screen, ItemType.WoodenSword));
+    expect([0, 3, 6].map((i) => extra.slot(i))).toEqual([
+      planks(1),
+      planks(1),
+      { item: ItemType.Stick, count: 1 },
+    ]);
+    expect(screen.crafting!.output).toEqual({ item: ItemType.WoodenSword, count: 1 });
+    expect(inventory.slot(0)).toBeUndefined();
+    expect(inventory.slot(1)).toBeUndefined();
+  });
+
   it('点木镐配方：3 块木板加 2 根木棍按图案填入 3x3，输出格显示 1 把木镐', () => {
     const extra = new CraftingGrid({ width: 3, height: 3 });
     const { inventory, screen } = opened((inv) => {

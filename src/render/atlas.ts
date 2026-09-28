@@ -2,7 +2,7 @@ import { BlockType, placedBlock } from '../core/block';
 import { ItemType } from '../core/item';
 
 /**
- * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 8 行，目前用了前 40 格。
+ * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 8 行，目前用了前 43 格。
  *
  * 行列数都取 2 的幂：uv 是格号除以行列数，除以 8 在 float32 里是精确的，除以 5 就不是
  * ——顶点属性存的是 Float32Array，1/5 一进去就带上舍入误差，一个面的边缘会取到相邻那一格的像素。
@@ -61,6 +61,10 @@ export const TILE = {
   zombiePants: 38,
   // 僵尸掉的腐肉（#42）。
   rottenFlesh: 39,
+  // 木石铁三把剑（#45）。
+  woodenSword: 40,
+  stoneSword: 41,
+  ironSword: 42,
 } as const;
 
 /**
@@ -188,6 +192,10 @@ export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
   [ItemType.Charcoal]: flat(TILE.charcoal),
   // 腐肉没有对应的方块：六面同一张图标，手持画平面图标。
   [ItemType.RottenFlesh]: flat(TILE.rottenFlesh),
+  // 剑与工具一样：六面同一张图标，手持画平面图标（#45）。
+  [ItemType.WoodenSword]: flat(TILE.woodenSword),
+  [ItemType.StoneSword]: flat(TILE.stoneSword),
+  [ItemType.IronSword]: flat(TILE.ironSword),
 };
 
 /**

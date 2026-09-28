@@ -2395,7 +2395,7 @@ describe('GameCore 的木石两档工具', () => {
       expect(core.inventory.slot(1)).toEqual(COBBLESTONE_X1);
     });
 
-    it('工作台的配方书列出九件工具：木、石、铁三档的镐、斧、铲', () => {
+    it('工作台的配方书列出九件工具与三把剑：木、石、铁三档的镐、斧、铲、剑', () => {
       const core = holdingPickaxe();
       core.use();
       core.tick();
@@ -2410,6 +2410,9 @@ describe('GameCore 的木石两档工具', () => {
         ItemType.IronPickaxe,
         ItemType.IronAxe,
         ItemType.IronShovel,
+        ItemType.WoodenSword,
+        ItemType.StoneSword,
+        ItemType.IronSword,
       ]) {
         expect(listed, `物品 ${tool}`).toContain(tool);
       }

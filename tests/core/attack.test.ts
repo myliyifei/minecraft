@@ -126,6 +126,20 @@ describe('左键按下那一 tick 视线先碰到僵尸：攻击', () => {
     }
   });
 
+  it('持石剑 15、持铁剑 14，剑攻击一下耐久损 1（#45）', () => {
+    for (const [item, health] of [
+      [ItemType.StoneSword, 15],
+      [ItemType.IronSword, 14],
+    ] as const) {
+      const game = core();
+      game.giveItem(item, 1);
+      zombieAhead(game, 2);
+      press(game);
+      expect(onlyZombie(game).health, `物品 ${item}`).toBe(health);
+      expect(wear(game), `物品 ${item}`).toBe(1);
+    }
+  });
+
   it('攻击距离 3 格，与触及距离分开：4 格外按左键没有任何反应', () => {
     expect(ATTACK_RANGE).toBe(3);
     const game = core();

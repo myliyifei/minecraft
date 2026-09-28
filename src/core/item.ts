@@ -32,6 +32,10 @@ export const ItemType = {
   Charcoal: 20,
   /** 僵尸死亡掉的材料（issue #42）：可堆叠，放不下去。饥饿值不在第四切片，所以还不能吃。 */
   RottenFlesh: 21,
+  /** 第一件武器（issue #45）：工具类别是剑，木石铁三档，头部材料与镐斧铲相同。 */
+  WoodenSword: 22,
+  StoneSword: 23,
+  IronSword: 24,
 } as const;
 
 export type ItemType = (typeof ItemType)[keyof typeof ItemType];
@@ -66,11 +70,13 @@ export function withoutOne(stack: ItemStack): ItemStack | undefined {
 }
 
 /**
- * 工具类别（见 CONTEXT.md 的「工具」）：镐、斧、铲，加一个「无」。
+ * 工具类别（见 CONTEXT.md 的「工具」）：镐、斧、铲、剑，加一个「无」。
  *
  * 两侧都用它：物品那边说某件工具属于哪一类（`ToolDef.toolClass`），方块那边说挖它的
  * 合格工具是哪一类（`BlockDef.qualifiedToolClass`）。「无」同时表示三件事——空手、手上那件东西
  * 不是工具、这种方块没有合格工具（树叶）。三者对挖掘的作用相同，不必分开。
+ *
+ * 剑（#45）只出现在物品这一侧：没有哪种方块的合格工具是剑，持剑挖任何方块都按拿错类别算。
  *
  * 值是字符串而不是编号：它不进存档（工具类别是由物品种类查出来的，不单独存），
  * 所以不必像 `ItemType` 那样把编号钉死，读起来还清楚些。
@@ -80,6 +86,7 @@ export const ToolClass = {
   Pickaxe: 'pickaxe',
   Axe: 'axe',
   Shovel: 'shovel',
+  Sword: 'sword',
 } as const;
 
 export type ToolClass = (typeof ToolClass)[keyof typeof ToolClass];
@@ -87,8 +94,9 @@ export type ToolClass = (typeof ToolClass)[keyof typeof ToolClass];
 /**
  * 工具的材质档（见 CONTEXT.md 的「材质档」）：目前有木、石、铁。金、钻石在各自的切片里各加一行。
  *
- * 倍率与最大耐久按材质档查（`TOOL_MATERIALS`），不按每件工具各记一份：同一档的镐斧铲三件数值相同，
- * 记三遍就是三处可能对不上。值是字符串，理由同 `ToolClass`：它不进存档。
+ * 倍率与最大耐久按材质档查（`TOOL_MATERIALS`），不按每件工具各记一份：同一档的镐斧铲剑四件数值相同，
+ * 记四遍就是四处可能对不上。剑的倍率用不上：它对任何方块都不是合格工具。值是字符串，理由同
+ * `ToolClass`：它不进存档。
  *
  * 材质档有先后（木 < 石 < 铁），先后记在 `TOOL_MATERIAL_ORDER` 里而不是这里的键顺序：对象键的顺序
  * 不是拿来表达语义的地方。
@@ -210,7 +218,7 @@ function tool(toolClass: ToolClass, material: ToolMaterial, attackDamage: number
 /**
  * 物品属性表——纯数据。食物回复量是后续切片往这里加的数据列。
  *
- * 攻击伤害一列（#42）：镐 2/3/4、斧 7/9/9、铲 3/4/5，其余 1。
+ * 攻击伤害一列（#42、#45）：剑 4/5/6、镐 2/3/4、斧 7/9/9、铲 3/4/5，其余 1。
  */
 export const ITEMS: Readonly<Record<ItemType, ItemDef>> = {
   [ItemType.Dirt]: STACKABLE,
@@ -234,6 +242,9 @@ export const ITEMS: Readonly<Record<ItemType, ItemDef>> = {
   [ItemType.IronShovel]: tool(ToolClass.Shovel, ToolMaterial.Iron, 5),
   [ItemType.Charcoal]: STACKABLE,
   [ItemType.RottenFlesh]: STACKABLE,
+  [ItemType.WoodenSword]: tool(ToolClass.Sword, ToolMaterial.Wood, 4),
+  [ItemType.StoneSword]: tool(ToolClass.Sword, ToolMaterial.Stone, 5),
+  [ItemType.IronSword]: tool(ToolClass.Sword, ToolMaterial.Iron, 6),
 };
 
 /** 这种物品一格最多堆多少个。 */
@@ -276,20 +287,44 @@ export function attackDamageOf(stack: ItemStack | undefined): number {
 }
 
 /**
- * 攻击一下手上那件东西损耗几点耐久，按工具类别查：镐斧铲是挖掘工具，拿来打人损耗 2。
- * 「无」那一行是空手与拿着材料：没有耐久可损耗。剑（#45）加进来时在这里加一行 1。
+ * 攻击一下手上那件东西损耗几点耐久，按工具类别查：剑是武器，损耗 1；镐斧铲是挖掘工具，
+ * 拿来打人损耗 2。「无」那一行是空手与拿着材料：没有耐久可损耗。
  */
 const ATTACK_WEAR: Readonly<Record<ToolClass, number>> = {
   [ToolClass.None]: 0,
   [ToolClass.Pickaxe]: 2,
   [ToolClass.Axe]: 2,
   [ToolClass.Shovel]: 2,
+  [ToolClass.Sword]: 1,
 };
+
+/**
+ * 挖穿一块方块手上那件东西损耗几点耐久，按工具类别查：镐斧铲 1，剑 2。与攻击那张表相反：
+ * 剑挖方块、镐斧铲打僵尸，损耗都是 2。不看是不是合格工具：持镐挖泥土同样 1 点。「无」那一行同
+ * `ATTACK_WEAR`。
+ */
+const MINING_WEAR: Readonly<Record<ToolClass, number>> = {
+  [ToolClass.None]: 0,
+  [ToolClass.Pickaxe]: 1,
+  [ToolClass.Axe]: 1,
+  [ToolClass.Shovel]: 1,
+  [ToolClass.Sword]: 2,
+};
+
+/** 这一堆的工具类别，不是工具（含空手）时是「无」。两张损耗表都按它查。 */
+function toolClassOf(stack: ItemStack | undefined): ToolClass {
+  const tool = stack && toolOf(stack.item);
+  return tool ? tool.toolClass : ToolClass.None;
+}
 
 /** 拿着这一堆攻击一下损耗几点耐久。不是工具时是 0。 */
 export function attackWearOf(stack: ItemStack | undefined): number {
-  const tool = stack && toolOf(stack.item);
-  return ATTACK_WEAR[tool ? tool.toolClass : ToolClass.None];
+  return ATTACK_WEAR[toolClassOf(stack)];
+}
+
+/** 拿着这一堆挖穿一块方块损耗几点耐久。不是工具时是 0。 */
+export function miningWearOf(stack: ItemStack | undefined): number {
+  return MINING_WEAR[toolClassOf(stack)];
 }
 
 /** 这种物品的满耐久是多少点，不是工具时 undefined。 */
@@ -320,8 +355,8 @@ export function durabilityOf(stack: ItemStack): Durability | undefined {
  * 这一堆损耗 `points` 点耐久之后是什么：损耗累加；累加到满耐久工具消失，那一格清空（undefined）。
  * 材料没有耐久，原样返回；空手（undefined）仍是空手。
  *
- * 一次可以损耗好几点：连锁挖掘把集合里每块各 1 点合成一次结算，损耗超过剩余耐久时工具同样
- * 消失（见 CONTEXT.md 的「连锁挖掘」）。
+ * 一次可以损耗好几点：连锁挖掘把集合里每块各自的损耗（`miningWearOf`）合成一次结算，损耗超过
+ * 剩余耐久时工具同样消失（见 CONTEXT.md 的「连锁挖掘」）。
  */
 export function wornTool(stack: ItemStack | undefined, points: number): ItemStack | undefined {
   if (!stack || points <= 0) return stack;

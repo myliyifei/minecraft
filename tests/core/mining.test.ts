@@ -1077,6 +1077,62 @@ describe('铁制工具（issue #32）', () => {
   });
 });
 
+describe('持剑挖方块（issue #45）', () => {
+  /**
+   * issue #45 给的数值，写死字面值：剑不是挖掘工具，挖泥土与空手一样 15 tick；挖穿一块损耗 2 点，
+   * 不是镐斧铲的 1 点。铁剑满耐久 250，挖 125 块消失。
+   */
+  const BARE_HAND_DIRT_TICKS = 15;
+  const SWORD_WEAR_PER_BLOCK = 2;
+  const IRON_DURABILITY = 250;
+
+  it('持木剑挖泥土第 14 tick 仍在、第 15 tick 碎，与空手相同；木剑损耗 2 点', () => {
+    const { world, mining, hand, spawned } = miningTowards(BlockType.Dirt, fresh(ItemType.WoodenSword));
+    hold(mining, BARE_HAND_DIRT_TICKS - 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Dirt);
+    expect(hand.held).toEqual(fresh(ItemType.WoodenSword));
+    hold(mining, 1);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    // 泥土不需要工具，拿什么挖都掉泥土
+    expect(spawned).toEqual([{ stack: { item: ItemType.Dirt, count: 1 }, at: TARGET }]);
+    expect(hand.held).toEqual(worn(ItemType.WoodenSword, SWORD_WEAR_PER_BLOCK));
+  });
+
+  it('持铁剑挖石头什么都不掉：剑不是合格工具', () => {
+    const { world, mining, spawned } = miningTowards(BlockType.Stone, fresh(ItemType.IronSword));
+    hold(mining, 150);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(spawned).toEqual([]);
+  });
+
+  it('铁剑挖 124 块泥土后还剩 2 点，第 125 块挖穿那一 tick 消失', () => {
+    const { world, mining, hand } = miningTowards(BlockType.Dirt, fresh(ItemType.IronSword));
+    const blocks = IRON_DURABILITY / SWORD_WEAR_PER_BLOCK;
+    for (let dug = 0; dug < blocks - 1; dug++) {
+      hold(mining, BARE_HAND_DIRT_TICKS);
+      expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+      world.setBlock(...TARGET, BlockType.Dirt);
+    }
+    expect(hand.held).toEqual(worn(ItemType.IronSword, IRON_DURABILITY - SWORD_WEAR_PER_BLOCK));
+
+    hold(mining, BARE_HAND_DIRT_TICKS);
+    expect(world.getBlock(...TARGET)).toBe(BlockType.Air);
+    expect(hand.held).toBeUndefined();
+    expect(hand.slot(0)).toBeUndefined();
+  });
+
+  it('持剑连锁挖 5 块树干：每块 2 点，一次扣 10 点', () => {
+    const cells = columnCells(5);
+    const world = worldWith(...cells.map((cell) => [cell, BlockType.OakLog] as [BlockCoord, BlockType]));
+    const hand = handHolding(fresh(ItemType.StoneSword));
+    const mining = new Mining(world, turntable().aim, hand, IGNORED_DROPS, IGNORED_XP, NO_ENTITIES);
+
+    hold(mining, LOG_TICKS, CHAINED);
+    expect(remaining(world, cells)).toEqual([]);
+    expect(hand.held).toEqual(worn(ItemType.StoneSword, 5 * SWORD_WEAR_PER_BLOCK));
+  });
+});
+
 describe('持工具连锁挖掘一柱相连的石头（issue #23）', () => {
   /** 一柱 height 块相连的石头，手上拿着 `held`，对准最下面那块。 */
   function miningStoneColumn(

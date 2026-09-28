@@ -16,6 +16,7 @@ import {
   materialAtLeast,
   maxDurability,
   miningToolOf,
+  miningWearOf,
   stackLimit,
   toolOf,
   withCount,
@@ -38,6 +39,10 @@ describe('物品表里的工具', () => {
     ['铁镐是铁档的镐', ItemType.IronPickaxe, ToolClass.Pickaxe, ToolMaterial.Iron],
     ['铁斧是铁档的斧', ItemType.IronAxe, ToolClass.Axe, ToolMaterial.Iron],
     ['铁铲是铁档的铲', ItemType.IronShovel, ToolClass.Shovel, ToolMaterial.Iron],
+    // issue #45 的三把剑：工具类别新增剑，材质档沿用那三档
+    ['木剑是木档的剑', ItemType.WoodenSword, ToolClass.Sword, ToolMaterial.Wood],
+    ['石剑是石档的剑', ItemType.StoneSword, ToolClass.Sword, ToolMaterial.Stone],
+    ['铁剑是铁档的剑', ItemType.IronSword, ToolClass.Sword, ToolMaterial.Iron],
   ];
 
   for (const [name, item, toolClass, material] of TOOLS) {
@@ -136,6 +141,12 @@ describe('材质档的倍率与最大耐久', () => {
     expect(maxDurability(ItemType.IronAxe)).toBe(250);
     expect(maxDurability(ItemType.IronShovel)).toBe(250);
     expect(maxDurability(ItemType.IronIngot)).toBeUndefined();
+  });
+
+  it('三把剑的耐久与同档工具相同：59、131、250（issue #45）', () => {
+    expect(maxDurability(ItemType.WoodenSword)).toBe(59);
+    expect(maxDurability(ItemType.StoneSword)).toBe(131);
+    expect(maxDurability(ItemType.IronSword)).toBe(250);
   });
 });
 
@@ -286,11 +297,14 @@ describe('耐久是格子里那一堆的状态（ADR-0010）', () => {
   });
 });
 
-describe('攻击伤害一列与攻击的耐久损耗（#42）', () => {
-  it('空手 1；镐 2/3/4、斧 7/9/9、铲 3/4/5：写死字面值', () => {
+describe('攻击伤害一列与攻击的耐久损耗（#42、#45）', () => {
+  it('空手 1；剑 4/5/6、镐 2/3/4、斧 7/9/9、铲 3/4/5：写死字面值', () => {
     expect(BARE_HAND_DAMAGE).toBe(1);
     expect(attackDamageOf(undefined)).toBe(1);
     const table: Array<[ItemType, number]> = [
+      [ItemType.WoodenSword, 4],
+      [ItemType.StoneSword, 5],
+      [ItemType.IronSword, 6],
       [ItemType.WoodenPickaxe, 2],
       [ItemType.StonePickaxe, 3],
       [ItemType.IronPickaxe, 4],
@@ -317,10 +331,61 @@ describe('攻击伤害一列与攻击的耐久损耗（#42）', () => {
     expect(attackDamageOf({ item: ItemType.IronAxe, count: 1, damage: 249 })).toBe(9);
   });
 
-  it('镐斧铲攻击一下损耗 2；空手与材料不损耗', () => {
-    for (const item of Object.values(ItemType)) {
-      expect(attackWearOf({ item, count: 1 }), `物品 ${item}`).toBe(toolOf(item) ? 2 : 0);
+  it('剑攻击一下损耗 1，镐斧铲损耗 2：写死字面值', () => {
+    const table: Array<[ItemType, number]> = [
+      [ItemType.WoodenSword, 1],
+      [ItemType.StoneSword, 1],
+      [ItemType.IronSword, 1],
+      [ItemType.WoodenPickaxe, 2],
+      [ItemType.WoodenAxe, 2],
+      [ItemType.WoodenShovel, 2],
+      [ItemType.StonePickaxe, 2],
+      [ItemType.StoneAxe, 2],
+      [ItemType.StoneShovel, 2],
+      [ItemType.IronPickaxe, 2],
+      [ItemType.IronAxe, 2],
+      [ItemType.IronShovel, 2],
+    ];
+    for (const [item, points] of table) {
+      expect(attackWearOf({ item, count: 1 }), `物品 ${item}`).toBe(points);
     }
+  });
+
+  it('空手与材料攻击不损耗：0', () => {
     expect(attackWearOf(undefined)).toBe(0);
+    for (const item of Object.values(ItemType)) {
+      if (toolOf(item)) continue;
+      expect(attackWearOf({ item, count: 5 }), `物品 ${item}`).toBe(0);
+    }
+  });
+});
+
+describe('挖穿一块的耐久损耗按类别查（#45）', () => {
+  it('剑 2，镐斧铲 1：写死字面值', () => {
+    const table: Array<[ItemType, number]> = [
+      [ItemType.WoodenSword, 2],
+      [ItemType.StoneSword, 2],
+      [ItemType.IronSword, 2],
+      [ItemType.WoodenPickaxe, 1],
+      [ItemType.WoodenAxe, 1],
+      [ItemType.WoodenShovel, 1],
+      [ItemType.StonePickaxe, 1],
+      [ItemType.StoneAxe, 1],
+      [ItemType.StoneShovel, 1],
+      [ItemType.IronPickaxe, 1],
+      [ItemType.IronAxe, 1],
+      [ItemType.IronShovel, 1],
+    ];
+    for (const [item, points] of table) {
+      expect(miningWearOf({ item, count: 1 }), `物品 ${item}`).toBe(points);
+    }
+  });
+
+  it('空手与材料没有耐久可损耗：0', () => {
+    expect(miningWearOf(undefined)).toBe(0);
+    for (const item of Object.values(ItemType)) {
+      if (toolOf(item)) continue;
+      expect(miningWearOf({ item, count: 5 }), `物品 ${item}`).toBe(0);
+    }
   });
 });

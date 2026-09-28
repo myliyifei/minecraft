@@ -9,7 +9,7 @@ import {
 import { blockStateContents, type BlockStateView } from './block-state';
 import { chainConnectedBlocks } from './chain-mining';
 import type { DropSink } from './drop';
-import { miningToolOf, type MiningTool, type ToolHand } from './item';
+import { miningToolOf, miningWearOf, type MiningTool, type ToolHand } from './item';
 import { PLAYER_REACH, type PlayerView } from './player';
 import { raycastBlocks, type BlockHit, type EntityRaycast } from './raycast';
 import type { Vec3 } from './vec3';
@@ -93,7 +93,7 @@ const NO_CHAIN: readonly Vec3[] = Object.freeze([]);
  *
  * 耗时与掉落都看手上拿着什么工具（`hand`）。耗时每 tick 按当时手上的工具重算——与目标方块
  * 每 tick 重算是同一个思路（ADR-0006）：挖到一半换上木镐，已经挖的那些 tick 留着，剩下的按
- * 木镐算。挖穿那一 tick 读一次手上的工具，用它决定掉什么、损耗几点耐久（ADR-0010）。
+ * 木镐算。挖穿那一 tick 读一次手上的工具，用它决定掉什么、每块损耗几点耐久（ADR-0010）。
  *
  * 视线在碰到目标方块之前先穿过一只僵尸（`occluders`）时，这一 tick 没有目标：挖到一半僵尸挡到
  * 前面，进度就归零，与视线移开同一条规则，也不自动改打它（ADR-0015）。
@@ -194,9 +194,9 @@ export class Mining implements MiningView {
     for (const cell of this.chain ?? [this.hit]) {
       if (this.breakBlock(cell.x, cell.y, cell.z, tool)) broken++;
     }
-    // 每挖穿一块损耗 1 点，整批一次结算：损耗超过剩余耐久时那些方块照样全碎，工具随后消失
-    // （见 CONTEXT.md 的「连锁挖掘」）。空手与拿着材料时 `wearHeld` 什么都不做。
-    this.hand.wearHeld(broken);
+    // 每挖穿一块按类别损耗（镐斧铲 1、剑 2），整批一次结算：损耗超过剩余耐久时那些方块照样全碎，
+    // 工具随后消失（见 CONTEXT.md 的「连锁挖掘」）。空手与拿着材料时损耗是 0。
+    this.hand.wearHeld(broken * miningWearOf(this.hand.held));
     this.restart();
     // 挖穿了，视线随即落到后面那块上。当场重瞄一次，选框不会在这一 tick 里还套着一个
     // 已经不存在的方块；按住不放因此接着挖下一块，与原版一致。

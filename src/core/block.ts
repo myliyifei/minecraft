@@ -267,7 +267,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     opaque: false,
     solid: true,
     hardness: 0.2,
-    // 原版用剪刀与剑，本项目两样都还没有，所以树叶没有合格工具：拿什么挖都一样快。
+    // 原版用剪刀与剑。剪刀还没有，剑（#45）在本项目不是挖掘工具，所以树叶没有合格工具：拿什么挖都一样快。
     qualifiedToolClass: ToolClass.None,
     minimumMaterial: ToolMaterial.Wood,
     requiresTool: false,
@@ -503,6 +503,10 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   [ItemType.Charcoal]: null,
   // 腐肉是僵尸掉的材料，放不下去；饥饿值进来之前也吃不了（#42）。
   [ItemType.RottenFlesh]: null,
+  // 三把剑与工具一样放不下去（#45）。
+  [ItemType.WoodenSword]: null,
+  [ItemType.StoneSword]: null,
+  [ItemType.IronSword]: null,
 };
 
 /**

@@ -2100,7 +2100,7 @@ test('攒 3 个圆石在工作台造出石镐：快捷栏画石镐的图标与�
   expect(errors).toEqual([]);
 });
 
-test('调试句柄把铁镐放进熔炉、空手挖掉熔炉拾取到选中格：快捷栏画铁镐的图标与中文名，右下角画平面图标，挖石头 8 tick', async ({
+test('调试句柄给一把铁镐拿在手上：快捷栏画铁镐的图标与中文名，右下角画平面图标，挖石头 8 tick', async ({
   page,
 }) => {
   await waitForFullViewDistance(page);
@@ -2108,12 +2108,10 @@ test('调试句柄把铁镐放进熔炉、空手挖掉熔炉拾取到选中格�
   const stoneTicks = miningTicks(BlockType.Stone, miningToolOf({ item: ItemType.IronPickaxe, count: 1 }));
   expect(stoneTicks).toBe(8);
 
-  // 核心没有往背包里放物品的入口，铁锭又要挖铁矿、炼上 200 tick 才有，所以改用熔炉：调试句柄往眼前那个
-  // 熔炉的原料格放一把铁镐（原料格在游戏里只收可炼物，这里是调试路径），空手挖掉熔炉，里面的
-  // 东西在原位掉出，拾取后进开局选中的第一格。
+  // 铁锭要挖铁矿、炼上 200 tick 才有，所以用调试句柄的 giveItem 直接放进开局空着的第一格（#45）。
   // 整段跑在一次同步的 evaluate 里，渲染层直接调，读到的就是刚画的那一帧。
   const seen = await page.evaluate(
-    ({ furnace, stone, ironPickaxe, eyeHeight, furnaceTicks, stoneTicks, pickupTicks }) => {
+    ({ stone, ironPickaxe, eyeHeight, stoneTicks, pickupTicks }) => {
       const { core, renderer, hud } = window.__VOXEL__!;
       core.turn(-core.player.yaw, -core.player.pitch);
       const spot = {
@@ -2122,16 +2120,10 @@ test('调试句柄把铁镐放进熔炉、空手挖掉熔炉拾取到选中格�
         z: Math.floor(core.player.position.z) - 1,
       };
 
-      core.setBlock(spot.x, spot.y, spot.z, furnace);
-      core.blockStateAt(spot.x, spot.y, spot.z)!.input = { item: ironPickaxe, count: 1 };
+      core.giveItem(ironPickaxe, 1);
+      core.selectHotbarSlot(0);
       core.tick();
-      const target = core.mining.target;
-      if (!target || target.z !== spot.z) throw new Error('平视时应该对准眼前那个熔炉');
-      core.setMining(true);
-      core.tick(furnaceTicks);
-      core.setMining(false);
-      core.tick(pickupTicks);
-      if (core.inventory.held?.item !== ironPickaxe) throw new Error('拾取的铁镐应该在选中格里');
+      if (core.inventory.held?.item !== ironPickaxe) throw new Error('给的铁镐应该在选中格里');
 
       renderer.syncChunkMeshes();
       renderer.render(1);
@@ -2151,11 +2143,9 @@ test('调试句柄把铁镐放进熔炉、空手挖掉熔炉拾取到选中格�
       return { tool, standing, broken, hotbar: core.inventory.hotbar() };
     },
     {
-      furnace: BlockType.Furnace,
       stone: BlockType.Stone,
       ironPickaxe: ItemType.IronPickaxe,
       eyeHeight: PLAYER_EYE_HEIGHT,
-      furnaceTicks: miningTicks(BlockType.Furnace, BARE_HAND),
       stoneTicks,
       pickupTicks: PICKUP_DELAY_TICKS + 2,
     },
@@ -2178,6 +2168,46 @@ test('调试句柄把铁镐放进熔炉、空手挖掉熔炉拾取到选中格�
   await expect(slot).toHaveAttribute('title', durabilityLabel(ITEM_NAMES[ItemType.IronPickaxe], max - 1, max));
   await expect(slot.locator('.hotbar__durability')).toHaveCSS('--durability', String((max - 1) / max));
   const { col, row } = tileCell(ITEM_TILES[ItemType.IronPickaxe].side);
+  const icon = slot.locator('.hotbar__icon');
+  await expect(icon).toBeVisible();
+  await expect(icon).toHaveCSS('--tile-col', String(col));
+  await expect(icon).toHaveCSS('--tile-row', String(row));
+  expect(errors).toEqual([]);
+});
+
+test('调试句柄给一把铁剑并选中：快捷栏画铁剑的图标与中文名、满耐久不画耐久条，右下角画平面图标', async ({
+  page,
+}) => {
+  await waitForFullViewDistance(page);
+  const seen = await page.evaluate(
+    ({ ironSword }) => {
+      const { core, renderer, hud } = window.__VOXEL__!;
+      const left = core.giveItem(ironSword, 1);
+      core.selectHotbarSlot(0);
+      core.tick();
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      hud.update();
+      return { left, held: renderer.heldItem, hotbar: core.inventory.hotbar() };
+    },
+    { ironSword: ItemType.IronSword },
+  );
+
+  expect(seen.left).toBe(0);
+  expect(seen.hotbar[0]).toEqual({ item: ItemType.IronSword, count: 1 });
+  // 右下角画的是铁剑的平面图标
+  expect(seen.held).toMatchObject({ item: ItemType.IronSword, shape: HeldItemShape.Flat });
+  expect(seen.held!.screen.x).toBeGreaterThan(0.2);
+  expect(seen.held!.screen.y).toBeLessThan(-0.2);
+
+  // 快捷栏第一格：图集里铁剑那一格、简体中文名；满耐久不画耐久条，只有一把不写数字
+  const slot = page.locator('#hotbar .hotbar__slot[data-slot="0"]');
+  await expect(slot).toHaveAttribute('data-item', String(ItemType.IronSword));
+  await expect(slot).toHaveAttribute('title', ITEM_NAMES[ItemType.IronSword]);
+  expect(ITEM_NAMES[ItemType.IronSword]).toBe('铁剑');
+  await expect(slot.locator('.hotbar__durability')).toBeHidden();
+  await expect(slot.locator('.hotbar__count')).toHaveText('');
+  const { col, row } = tileCell(ITEM_TILES[ItemType.IronSword].side);
   const icon = slot.locator('.hotbar__icon');
   await expect(icon).toBeVisible();
   await expect(icon).toHaveCSS('--tile-col', String(col));

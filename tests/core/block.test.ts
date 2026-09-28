@@ -157,6 +157,11 @@ describe('手持工具时的挖掘耗时', () => {
     ['持木铲挖圆石', BlockType.Cobblestone, tool(ToolClass.Shovel, WOODEN), 200],
     // 树叶没有合格工具，谁挖都一样
     ['持木斧挖树叶', BlockType.OakLeaves, tool(ToolClass.Axe, WOODEN), 6],
+    // 剑（issue #45）：没有任何方块以剑为合格工具，持剑挖什么都与空手一样慢
+    ['持木剑挖泥土', BlockType.Dirt, tool(ToolClass.Sword, WOODEN), 15],
+    ['持铁剑挖原木', BlockType.OakLog, tool(ToolClass.Sword, IRON), 60],
+    ['持铁剑挖石头', BlockType.Stone, tool(ToolClass.Sword, IRON), 150],
+    ['持铁剑挖树叶', BlockType.OakLeaves, tool(ToolClass.Sword, IRON), 6],
   ];
 
   for (const [name, block, held, ticks] of TOOL_MINING) {
@@ -191,6 +196,12 @@ describe('方块表的合格工具类别一列', () => {
       expect(BLOCKS[block].qualifiedToolClass).toBe(expected);
     });
   }
+
+  it('没有任何方块以剑为合格工具（issue #45）', () => {
+    for (const block of Object.values(BlockType)) {
+      expect(BLOCKS[block].qualifiedToolClass, `方块 ${block}`).not.toBe(ToolClass.Sword);
+    }
+  });
 
   it('每一行都填了这一列，且填的是一种工具类别', () => {
     const classes: readonly ToolClass[] = Object.values(ToolClass);
@@ -453,6 +464,10 @@ describe('放置表', () => {
     ['铁镐放不下去', ItemType.IronPickaxe, null],
     ['铁斧放不下去', ItemType.IronAxe, null],
     ['铁铲放不下去', ItemType.IronShovel, null],
+    // 三把剑与工具一样放不下去（issue #45）
+    ['木剑放不下去', ItemType.WoodenSword, null],
+    ['石剑放不下去', ItemType.StoneSword, null],
+    ['铁剑放不下去', ItemType.IronSword, null],
     // 木炭是原木炼出来的材料（issue #34），没有对应的方块
     ['木炭放不下去', ItemType.Charcoal, null],
     ['腐肉放不下去', ItemType.RottenFlesh, null],

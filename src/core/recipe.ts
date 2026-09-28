@@ -47,21 +47,23 @@ function one(item: ItemType): ItemStack {
   return { item, count: 1 };
 }
 
-/** 一档工具：头部用哪种材料，造出来的镐、斧、铲各是哪种物品。 */
+/** 一档工具：头部用哪种材料，造出来的镐、斧、铲、剑各是哪种物品。 */
 interface ToolTier {
   readonly head: ItemType;
   readonly pickaxe: ItemType;
   readonly axe: ItemType;
   readonly shovel: ItemType;
+  readonly sword: ItemType;
 }
 
 /**
- * 一档工具的三条配方：头部用 `head` 材料、柄是木棍。木制用木板，石制用圆石，铁制用铁锭，
- * 三条图案不变——所以图案只写一遍，材料当参数传进来。
+ * 一档工具的四条配方：头部用 `head` 材料、柄是木棍。木制用木板，石制用圆石，铁制用铁锭，
+ * 四条图案不变——所以图案只写一遍，材料当参数传进来。
  *
- * 镐与铲的图案左右对称，镜像与否结果相同，写 false；斧的刃只在一边，左右镜像的摆法也算。
+ * 镐、铲与剑的图案左右对称，镜像与否结果相同，写 false；斧的刃只在一边，左右镜像的摆法也算。
+ * 四条都是三行，摆不进 2x2：只能在工作台里做。
  */
-function toolRecipes({ head, pickaxe, axe, shovel }: ToolTier): Recipe[] {
+function toolRecipes({ head, pickaxe, axe, shovel, sword }: ToolTier): Recipe[] {
   const S = ItemType.Stick;
   return [
     {
@@ -90,13 +92,21 @@ function toolRecipes({ head, pickaxe, axe, shovel }: ToolTier): Recipe[] {
       pattern: [[head], [S], [S]],
       mirrored: false,
     },
+    // 剑（#45）：两格材料竖排在上、一根木棍在下。木板那一档与木棍配方不冲突：多了一根木棍，
+    // 包围矩形是 3 行，木棍配方是 2 行。
+    {
+      kind: 'shaped',
+      result: one(sword),
+      pattern: [[head], [head], [S]],
+      mirrored: false,
+    },
   ];
 }
 
 /**
  * 配方表——纯数据（见 CONTEXT.md 的「合成」）。加配方只加一条。
  *
- * 目前有原木出木板、木板出木棍、木板出工作台三条，加木、石、铁三档各三件工具，再加圆石出熔炉。
+ * 目前有原木出木板、木板出木棍、木板出工作台三条，加木、石、铁三档各四件（镐、斧、铲、剑），再加圆石出熔炉。
  * 金、钻石那两档各再加一组 `toolRecipes`。
  */
 export const RECIPES: ReadonlyArray<Recipe> = [
@@ -127,6 +137,7 @@ export const RECIPES: ReadonlyArray<Recipe> = [
     pickaxe: ItemType.WoodenPickaxe,
     axe: ItemType.WoodenAxe,
     shovel: ItemType.WoodenShovel,
+    sword: ItemType.WoodenSword,
   }),
   // 石制三件：图案与木制那三条一模一样，头部的木板换成圆石（#23）。
   ...toolRecipes({
@@ -134,6 +145,7 @@ export const RECIPES: ReadonlyArray<Recipe> = [
     pickaxe: ItemType.StonePickaxe,
     axe: ItemType.StoneAxe,
     shovel: ItemType.StoneShovel,
+    sword: ItemType.StoneSword,
   }),
   // 铁制三件：图案不变，头部换成铁锭（#32）。
   ...toolRecipes({
@@ -141,6 +153,7 @@ export const RECIPES: ReadonlyArray<Recipe> = [
     pickaxe: ItemType.IronPickaxe,
     axe: ItemType.IronAxe,
     shovel: ItemType.IronShovel,
+    sword: ItemType.IronSword,
   }),
   // 8 块圆石围一圈、中心空着出一个熔炉（#30）。图案占满 3x3，只在工作台里做得出；
   // 四向对称，镜像与否结果相同，写 false。

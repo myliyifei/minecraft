@@ -380,4 +380,13 @@ describe('GameCore 的 giveItem', () => {
     expect(game.inventory.slot(1)).toEqual({ item: ItemType.Coal, count: 6 });
     expect(game.giveItem(ItemType.Cobblestone, 64 * 34 + 7)).toBe(7);
   });
+
+  it('剑一格一把、满耐久：给 2 把铁剑占两格，背包满了再给一把原样返回（#45）', () => {
+    const game = core();
+    expect(game.giveItem(ItemType.IronSword, 2)).toBe(0);
+    expect(game.inventory.slot(0)).toEqual({ item: ItemType.IronSword, count: 1 });
+    expect(game.inventory.slot(1)).toEqual({ item: ItemType.IronSword, count: 1 });
+    expect(game.giveItem(ItemType.Dirt, 64 * 34)).toBe(0);
+    expect(game.giveItem(ItemType.IronSword, 1)).toBe(1);
+  });
 });

@@ -238,6 +238,21 @@ function shovelHead(x, y) {
 }
 
 /**
+ * 剑：刃沿柄的同一条斜线（x + y = 15）一直伸到右上角，宽 3 像素，尖端 1 像素宽；刃根处一道
+ * 与刃垂直的护手，宽 2 像素、两头各伸出刃外 1 像素。柄只露出护手左下那一小截，比镐斧铲的短。
+ *
+ * 护手与刃右下那一条边是暗面，其余是亮面。先判护手，再判刃：两者在刃根那一格重叠。
+ */
+function swordHead(x, y) {
+  const offset = x + y - (TILE_PX - 1);
+  const along = x - y;
+  if ((along === -5 || along === -4) && Math.abs(offset) <= 4) return 'dark';
+  const blade = (Math.abs(offset) <= 1 && x >= 6 && x <= 13) || (x === 14 && y === 1);
+  if (!blade) return undefined;
+  return offset === 1 ? 'dark' : 'light';
+}
+
+/**
  * 一件工具的图标：先画头，头没盖到的地方画柄，其余透明。`head(x, y)` 给出这一像素落在头的
  * 哪一面，`colors` 是这一档材质头的亮暗两色。
  */
@@ -431,6 +446,10 @@ const TILES = {
     const rot = FLESH_ROT_SPOTS.some(([rx, ry]) => rx === x && ry === y);
     return shade(rot ? FLESH_ROT : FLESH, noise);
   },
+  // wooden_sword、stone_sword、iron_sword：同一个剑形，刃按材质档换色，与镐斧铲的头同色
+  40: toolIcon(swordHead, WOOD_HEAD),
+  41: toolIcon(swordHead, STONE_HEAD),
+  42: toolIcon(swordHead, IRON_HEAD),
 };
 
 /** 太阳与月亮那块方片的范围：居中 12×12，四周各留 2 像素透明边。 */

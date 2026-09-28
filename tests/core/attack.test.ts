@@ -32,6 +32,7 @@ function zombieAhead(game: GameCore, distance: number): void {
 /**
  * 在视线正前方 2 格生成一只，走不过来：它与玩家之间那一格摆一格高的矮墙，它头顶那一层（y = 73）
  * 封住，跳不起来。它最近停在离玩家 1.8 格处，打不到玩家；视线从矮墙上方过去，照样落在它身上。
+ * 头顶那一层也挡住了太阳：白天露天的僵尸会燃烧（#44），不挡的话掉的血就不全是打出来的。
  */
 function pennedZombieAhead(game: GameCore): void {
   game.setBlock(0, FLAT_STAND_Y, -1, BlockType.Stone);
@@ -159,7 +160,7 @@ describe('左键按下那一 tick 视线先碰到僵尸：攻击', () => {
 describe('不自动连击，出手冷却 10 tick，僵尸受击后无敌 10 tick', () => {
   it('按住左键 30 tick，僵尸只掉一次血', () => {
     const game = core();
-    zombieAhead(game, 2);
+    pennedZombieAhead(game);
     game.setMining(true);
     game.tick(30);
     expect(onlyZombie(game).health).toBe(19);
@@ -330,11 +331,12 @@ describe('挖掘途中僵尸挡到视线前面', () => {
  * 空着。视线从空着的那一格穿过去打得到它；它走不过来（身子被脚下那块挡住），也跳不上去（抬高一格
  * 会顶到上面那块）。不关住的话它追到玩家身上，掉的经验球同一 tick 就被吸走了。
  *
- * 墙在 z = −1 那一格，僵尸贴着墙站在 z = −1.3，碰撞箱正面离眼睛 1.5 格。
+ * 墙在 z = −1 那一格，僵尸贴着墙站在 z = −1.3，碰撞箱正面离眼睛 1.5 格。它身后被击退到的那几格
+ * 头顶也盖上，挡住太阳：白天露天的僵尸会燃烧（#44），不挡的话它掉的血就不全是打出来的。
  */
 function pennedZombie(game: GameCore): void {
   game.setBlock(0, EYE_LAYER - 1, -1, BlockType.Stone);
-  game.setBlock(0, EYE_LAYER + 1, -1, BlockType.Stone);
+  for (let z = -5; z <= -1; z++) game.setBlock(0, EYE_LAYER + 1, z, BlockType.Stone);
   zombieAhead(game, 2);
 }
 

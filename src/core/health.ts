@@ -74,10 +74,21 @@ export class Health implements HealthView {
    * （扣到 0 为止），并从这一 tick 起重新计无敌时间与回血的等待。
    */
   hurt(amount: number, now: number): boolean {
-    if (amount <= 0 || this.dead || now <= this.invulnerableUntil) return false;
+    if (now <= this.invulnerableUntil || !this.hurtIgnoringInvulnerability(amount, now)) return false;
+    this.invulnerableUntil = now + INVULNERABLE_TICKS;
+    return true;
+  }
+
+  /**
+   * 在第 now 个 tick 受 amount 点伤，不看无敌时间、也不开始无敌时间，返回这一下是否生效。燃烧走这一条：
+   * 它按固定的间隔扣血，受击之后照样扣，扣完也不挡住别的伤害。
+   *
+   * 伤害不是正数、已经死了时不生效。生效时扣血（扣到 0 为止），记下受伤的 tick。
+   */
+  hurtIgnoringInvulnerability(amount: number, now: number): boolean {
+    if (amount <= 0 || this.dead) return false;
     this.current = Math.max(0, this.current - amount);
     this.lastHurt = now;
-    this.invulnerableUntil = now + INVULNERABLE_TICKS;
     return true;
   }
 

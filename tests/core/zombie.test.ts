@@ -6,7 +6,9 @@ import { hitboxAt, KNOCKBACK_DECAY, KNOCKBACK_LIFT, KNOCKBACK_SPEED } from '../.
 import { PLAYER_HEIGHT, PLAYER_WIDTH } from '../../src/core/player';
 import type { Vec3 } from '../../src/core/vec3';
 import type { World } from '../../src/core/world';
+import { NIGHT_START } from '../../src/core/time-of-day';
 import {
+  ZOMBIE_BURN_INTERVAL,
   ZOMBIE_DESPAWN_RANGE,
   ZOMBIE_MAX_HEALTH,
   ZOMBIE_SPEED,
@@ -22,6 +24,12 @@ import { FLAT_STAND_Y, flatTestTerrain, flatTestWorld } from '../helpers/flat-te
 
 const SEED = 1234;
 
+/**
+ * 腐肉件数由种子、tick 与编号哈希出来，可能是 0。这个种子下，烧死（第 400 tick）与从 30 格高摔死
+ * （第 31 tick）的那一只都掉得出腐肉，「原位有腐肉」才断言得了。
+ */
+const FLESH_SEED = 2;
+
 /** 玩家站在原点那一格中心。僵尸集合的测试直接把这个位置交给 `step`。 */
 const PLAYER: Vec3 = { x: 0.5, y: FLAT_STAND_Y, z: 0.5 };
 
@@ -31,6 +39,7 @@ type Cell = [number, number, number];
 /**
  * 平地上的僵尸集合，带一个 tick 计数：游走的方向由种子、tick 与编号哈希出来，
  * 测试得像核心那样每 tick 把计数加 1 交进去。死掉的僵尸掉的腐肉与经验球记在 `dropped` 与 `orbs` 里。
+ * 不生成：自然生成是 `spawnNaturally`，这里只推进。
  */
 function zombiesOnFlatGround(radius = 1, seed = SEED) {
   const world: World = flatTestWorld(radius);
@@ -43,15 +52,21 @@ function zombiesOnFlatGround(radius = 1, seed = SEED) {
     { spawnInBlock: (amount, x, y, z) => orbs.push({ amount, at: [x, y, z] }) },
   );
   let tick = 0;
+  // 默认是夜晚：露天的平地上白天会燃烧，走、跳、消失这些测试不该掉血。
+  let night = true;
   /** 推进 n 个 tick，玩家站在 player。每 tick 之后交给 `each` 看一眼。 */
   const advance = (n: number, player: Vec3 = PLAYER, each?: (zombie: ZombieView) => void) => {
     for (let i = 0; i < n; i++) {
-      zombies.step(++tick, bystander(player));
+      zombies.step(++tick, bystander(player), night);
       const [zombie] = zombies.all();
       if (each && zombie) each(zombie);
     }
   };
-  return { world, zombies, advance, now: () => tick, dropped, orbs };
+  /** 之后的 tick 是白天还是夜晚。 */
+  const setNight = (value: boolean) => {
+    night = value;
+  };
+  return { world, zombies, advance, setNight, now: () => tick, dropped, orbs };
 }
 
 /**
@@ -421,5 +436,171 @@ describe('僵尸被玩家打（#42）', () => {
 
     zombies.hitByPlayer(2, 20, eye, now());
     expect(zombies.raycast(eye, ahead, 10)).toMatchObject({ id: 1 });
+  });
+});
+
+describe('白天露天燃烧（#44）', () => {
+  /** 站在玩家脚下的一只：它不走，燃烧掉的血与掉落的位置都不受走动影响。 */
+  function burningOnPlayer(seed = SEED) {
+    const ground = zombiesOnFlatGround(1, seed);
+    ground.zombies.spawnAt(PLAYER);
+    ground.setNight(false);
+    return ground;
+  }
+
+  it('白天露天：燃烧标记为真，每 20 tick 掉 1 点', () => {
+    const { zombies, advance } = burningOnPlayer();
+    expect(ZOMBIE_BURN_INTERVAL).toBe(20);
+    advance(1);
+    expect(zombies.all()[0]!.burning).toBe(true);
+    advance(18);
+    expect(zombies.all()[0]!.health).toBe(20);
+    advance(1);
+    expect(zombies.all()[0]!.health).toBe(19);
+    advance(19);
+    expect(zombies.all()[0]!.health).toBe(19);
+    advance(1);
+    expect(zombies.all()[0]!.health).toBe(18);
+  });
+
+  it('400 tick 后死亡：第 399 tick 还剩 1 点，第 400 tick 当场移除，原位有腐肉，没有经验球', () => {
+    const { zombies, advance, dropped, orbs } = burningOnPlayer(FLESH_SEED);
+    advance(399);
+    expect(zombies.all()[0]!.health).toBe(1);
+    advance(1);
+
+    expect(zombies.count).toBe(0);
+    expect(dropped).toEqual([
+      { stack: { item: ItemType.RottenFlesh, count: expect.any(Number) }, at: [0, FLAT_STAND_Y, 0] },
+    ]);
+    expect(orbs).toEqual([]);
+  });
+
+  it('头顶盖一块方块：燃烧标记为假，不再掉血；拆掉又接着烧', () => {
+    const { world, zombies, advance } = burningOnPlayer();
+    advance(20);
+    expect(zombies.all()[0]!.health).toBe(19);
+
+    // 碰撞箱顶在 72.95，盖在 73 那一格，不碰到它
+    world.setBlock(0, FLAT_STAND_Y + 2, 0, BlockType.Stone);
+    advance(200);
+    expect(zombies.all()[0]).toMatchObject({ health: 19, burning: false });
+
+    world.setBlock(0, FLAT_STAND_Y + 2, 0, BlockType.Air);
+    advance(20);
+    expect(zombies.all()[0]).toMatchObject({ health: 18, burning: true });
+  });
+
+  it('夜晚不烧：400 tick 后还是满血，燃烧标记为假', () => {
+    const { zombies, advance, setNight } = burningOnPlayer();
+    setNight(true);
+    advance(400);
+    expect(zombies.all()[0]).toMatchObject({ health: ZOMBIE_MAX_HEALTH, burning: false });
+  });
+
+  it('燃烧不看受击后的无敌时间：玩家打完第 1 tick 照样烧掉 1 点', () => {
+    const { zombies, advance, now } = burningOnPlayer();
+    advance(19);
+    zombies.hitByPlayer(1, 3, PLAYER, now());
+    advance(1);
+    expect(zombies.all()[0]!.health).toBe(16);
+  });
+
+  it('玩家打过、最后烧死的不给经验；烧到剩 1 点再被玩家打死的给经验', () => {
+    const burned = burningOnPlayer();
+    burned.advance(5);
+    burned.zombies.hitByPlayer(1, 5, PLAYER, burned.now());
+    burned.advance(400);
+    expect(burned.zombies.count).toBe(0);
+    expect(burned.orbs).toEqual([]);
+
+    const struck = burningOnPlayer();
+    struck.advance(385);
+    expect(struck.zombies.all()[0]!.health).toBe(1);
+    struck.zombies.hitByPlayer(1, 1, PLAYER, struck.now());
+    struck.advance(1);
+    expect(struck.zombies.count).toBe(0);
+    expect(struck.orbs).toEqual([{ amount: ZOMBIE_XP, at: [0, FLAT_STAND_Y, 0] }]);
+  });
+
+  it('核心按世界时刻交进白天与夜晚：开局是白天，核心里生成的僵尸 20 tick 后 19 点；拨到夜晚不烧', () => {
+    const day = core();
+    const { x, y, z } = day.player.position;
+    day.spawnZombieAt(x, y, z);
+    day.tick(20);
+    expect(day.zombies.all()[0]).toMatchObject({ health: 19, burning: true });
+
+    const night = core();
+    night.setTimeOfDay(NIGHT_START);
+    night.spawnZombieAt(x, y, z);
+    night.tick(20);
+    expect(night.zombies.all()[0]).toMatchObject({ health: ZOMBIE_MAX_HEALTH, burning: false });
+  });
+});
+
+describe('僵尸的摔落伤害（#44）', () => {
+  /** 在玩家脚下那一列的 height 格高处生成一只，推进到它落地之后。 */
+  function dropFrom(height: number, seed = SEED) {
+    const ground = zombiesOnFlatGround(1, seed);
+    ground.zombies.spawnAt({ ...PLAYER, y: FLAT_STAND_Y + height });
+    ground.advance(60);
+    return ground;
+  }
+
+  it('从 8 格高落地：生命 15，落在地面上', () => {
+    const { zombies } = dropFrom(8);
+    expect(zombies.all()[0]).toMatchObject({ health: 15, position: PLAYER });
+  });
+
+  it('从 3 格高落地不掉血', () => {
+    const { zombies } = dropFrom(3);
+    expect(zombies.all()[0]).toMatchObject({ health: ZOMBIE_MAX_HEALTH, position: PLAYER });
+  });
+
+  it('跳上 1 格高的墙、再从墙上下来都不掉血', () => {
+    const { world, zombies, advance } = zombiesOnFlatGround();
+    zombies.spawnAt({ x: 6.5, y: FLAT_STAND_Y, z: 0.5 });
+    for (let dz = -1; dz <= 1; dz++) world.setBlock(3, FLAT_STAND_Y, dz, BlockType.Stone);
+    advance(100);
+    expect(zombies.all()[0]!.health).toBe(ZOMBIE_MAX_HEALTH);
+  });
+
+  it('摔死：落地那一 tick 当场移除，落点那一格有腐肉，没有经验球', () => {
+    const { zombies, advance, dropped, orbs } = zombiesOnFlatGround(1, FLESH_SEED);
+    zombies.spawnAt({ ...PLAYER, y: FLAT_STAND_Y + 30 });
+    // 逐 tick 记下它最后一次还在列表里时的高度：当场移除的话，那时它还在半空
+    let lastY = Infinity;
+    advance(60, PLAYER, (zombie) => (lastY = zombie.position.y));
+    expect(zombies.count).toBe(0);
+    expect(lastY).toBeGreaterThan(FLAT_STAND_Y);
+    expect(dropped).toEqual([
+      { stack: { item: ItemType.RottenFlesh, count: expect.any(Number) }, at: [0, FLAT_STAND_Y, 0] },
+    ]);
+    expect(orbs).toEqual([]);
+  });
+
+  it('追着玩家摔死：落地那一 tick 不再水平走，掉落落在落地时所在的那一格', () => {
+    const { zombies, advance, dropped } = zombiesOnFlatGround(1, FLESH_SEED);
+    // 玩家在 +X 方向 20 格外，僵尸从 28 格高处一边落一边朝它走：落地时 x 在 4.85，再走一步就进了下一格
+    const player: Vec3 = { ...PLAYER, x: 20.5 };
+    zombies.spawnAt({ ...PLAYER, y: FLAT_STAND_Y + 28 });
+    let lastX = 0;
+    advance(60, player, (zombie) => (lastX = zombie.position.x));
+
+    expect(zombies.count).toBe(0);
+    expect(dropped).toHaveLength(1);
+    // lastX 是落地前一 tick 的位置，落地那一 tick 只落不走；再走一步就跨进了下一格
+    expect(Math.floor(lastX + ZOMBIE_STEP)).toBe(Math.floor(lastX) + 1);
+    expect(dropped[0]!.at).toEqual([Math.floor(lastX), FLAT_STAND_Y, 0]);
+  });
+
+  it('玩家在半空打过一下、最后摔死的不给经验：最后一下伤害是摔落', () => {
+    const { zombies, advance, now, orbs } = zombiesOnFlatGround();
+    zombies.spawnAt({ ...PLAYER, y: FLAT_STAND_Y + 30 });
+    advance(2);
+    expect(zombies.hitByPlayer(1, 1, PLAYER, now())).toBe(true);
+    advance(60);
+    expect(zombies.count).toBe(0);
+    expect(orbs).toEqual([]);
   });
 });

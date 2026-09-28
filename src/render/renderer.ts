@@ -226,7 +226,7 @@ export interface ZombieRenderView {
   readonly parts: number;
   /** 右臂此刻摆了多少（弧度）。站着不动时是 0。 */
   readonly armSwing: number;
-  /** 部件材质乘的颜色（sRGB 十六进制）。平时是白色（贴图本色），受击后叠红时偏红。 */
+  /** 部件材质乘的颜色（sRGB 十六进制）。平时是白色（贴图本色），受击后叠红时偏红，燃烧中叠橙时偏橙。 */
   readonly tint: number;
 }
 
@@ -780,7 +780,7 @@ export class WorldRenderer {
    * 摆臂摆腿在 `poseZombieModel` 里，相位按 `age + alpha` 算。
    *
    * 与掉落物同一套做法（ADR-0007）。模型用方块那一份材质：四张贴图在同一张图集里，夜里也与
-   * 地形一起变暗。受击后 10 tick 内换成叠红的那一份（`tintZombieModel`）。
+   * 地形一起变暗。受击后 10 tick 内换成叠红的那一份，燃烧中换成叠橙的那一份（`tintZombieModel`）。
    */
   private updateZombies(alpha: number): void {
     const now = this.core.tickCount;

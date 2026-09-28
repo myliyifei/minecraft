@@ -300,7 +300,7 @@ interface Horizontal {
 /**
  * 生成时的水平初速度：方向由种子、方块坐标与掉落物编号哈希出来。
  *
- * 不用 `Math.random`——核心必须是确定性的（ADR-0003），而且同一格同时掉出的几个
+ * 不用 `Math.random`——核心必须是确定性的（ADR-0003、ADR-0014），而且同一格同时掉出的几个
  * 掉落物要各自散开，编号正好把它们区分开。
  */
 function spawnVelocity(

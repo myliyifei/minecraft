@@ -617,12 +617,19 @@ export class GameCore implements BlockEdit, BlockStateView {
     stepFurnaces(this.world);
     // 僵尸排在熔炉之后、掉落物之前（#36 定的每 tick 顺序），追的、打的是玩家这一 tick 走完之后的位置。
     // 死亡画面期间照常推进：世界不停，死了的玩家停在原地，僵尸照样朝那里走，只是他不再受伤。
-    // 界面开着照样挨打：挡的是玩家的输入，不是世界。
-    this.zombiesState.step(this.ticks, {
-      position: this.playerState.position,
-      hitbox: this.playerState.hitbox,
-      hitByZombie: (amount, attacker, now) => this.hitByZombie(amount, attacker, now),
-    });
+    // 界面开着照样挨打：挡的是玩家的输入，不是世界。生成排在现有的那些走完之后：这一 tick 生成的
+    // 下一 tick 才开始动。
+    const night = this.isNight;
+    this.zombiesState.step(
+      this.ticks,
+      {
+        position: this.playerState.position,
+        hitbox: this.playerState.hitbox,
+        hitByZombie: (amount, attacker, now) => this.hitByZombie(amount, attacker, now),
+      },
+      night,
+    );
+    this.zombiesState.spawnNaturally(this.ticks, this.playerState.position, night);
     // 掉落物与经验球都排在挖掘之后：这一 tick 刚挖出来的东西同一 tick 就开始动，而
     // 掉落物的拾取延迟（PICKUP_DELAY_TICKS）也从这里起算。拾取与吸收判的都是玩家走完
     // 之后的碰撞箱。两者互不影响，谁先谁后都一样。死了的玩家什么都不拾取、不吸收，这一 tick 摔死的、

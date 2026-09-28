@@ -1,12 +1,13 @@
-import type { BlockView } from './block';
+import { isSolid, type BlockView } from './block';
 import { TAU, TICK_RATE } from './constants';
 import type { DropSink } from './drop';
 import { isBoxInLoadedChunks, isInLoadedChunk, stepEntities, type LoadedChunks } from './entity';
-import { Health } from './health';
+import { fallDamage, Health } from './health';
 import { ItemType } from './item';
 import { hashCoords } from './noise';
 import {
   decayedKnockback,
+  FallTracker,
   fallStep,
   hitboxAt,
   isBlockedAlong,
@@ -62,6 +63,24 @@ export const ZOMBIE_DESPAWN_RANGE = 64;
 /** 游走时每隔这么多 tick 重新选一次方向或停下。 */
 export const ZOMBIE_WANDER_TICKS = 60;
 
+/** 燃烧时每隔这么多 tick 扣一次血：tick 计数能被它整除的那些 tick。 */
+export const ZOMBIE_BURN_INTERVAL = 20;
+
+/** 燃烧一次扣几点。满血 20 点，露天站着 400 tick 烧死。 */
+export const ZOMBIE_BURN_DAMAGE = 1;
+
+/** 自然生成时同时存活的僵尸至多这么多只。`spawnAt` 生成的也算在内。 */
+export const ZOMBIE_MAX_COUNT = 8;
+
+/** 自然生成隔这么多 tick 试一次：tick 计数能被它整除的那些 tick。 */
+export const ZOMBIE_SPAWN_INTERVAL = 20;
+
+/** 自然生成时离玩家的水平距离至少这么多格（含），不会紧挨着玩家生成。 */
+export const ZOMBIE_SPAWN_MIN_DISTANCE = 24;
+
+/** 自然生成时离玩家的水平距离至多这么多格（含）：还在追击范围附近，走得过来。 */
+export const ZOMBIE_SPAWN_MAX_DISTANCE = 48;
+
 /**
  * 游走时选中「停下」的比例。哈希摊成 [0, 1) 之后落在这一段之下就停下，其余的均匀映射成一个方向。
  */
@@ -72,6 +91,9 @@ const WANDER_SALT = 0x6a3d_e91b;
 
 /** 腐肉件数的哈希用的盐，与游走错开：同一 tick、同一编号的两种哈希不该相关。 */
 const LOOT_SALT = 0x2f71_c5a3;
+
+/** 自然生成选候选列的哈希用的盐，与游走、腐肉错开。 */
+const SPAWN_SALT = 0x51c8_0f27;
 
 /** 僵尸的只读视图。渲染层读它摆模型、按 `age + alpha` 摆臂摆腿（ADR-0007）。 */
 export interface ZombieView {
@@ -88,6 +110,8 @@ export interface ZombieView {
   readonly health: number;
   /** 上一次受伤（真的扣了血）是第几个 tick，还没受过伤是 undefined。渲染层据此叠红。 */
   readonly lastHurtTick: number | undefined;
+  /** 是否在燃烧：上一次推进时是白天、它又在露天。渲染层据此叠橙。 */
+  readonly burning: boolean;
 }
 
 /** 僵尸追的、打的那个玩家。 */
@@ -111,18 +135,28 @@ export interface ZombiesView {
 }
 
 /**
- * 世界里的全部僵尸：出现、朝玩家走或游走、跳上 1 格、够得着就打玩家、被玩家打、离得太远或所在区块
- * 没加载就消失、生命归零就死。
+ * 某一列此刻最高的非空气方块的 y。`World` 满足它。
+ *
+ * 「露天」按它判定：列顶低于僵尸就是露天，自然生成也站在列顶之上。用的是这一列实际堆到的高度，
+ * 不是地表高度：地表高度是地形生成给出的地面，不随挖掘与放置变化。
+ */
+export interface ColumnTops {
+  highestBlockY(x: number, z: number): number;
+}
+
+/**
+ * 世界里的全部僵尸：夜晚在露天地表生成、朝玩家走或游走、跳上 1 格、够得着就打玩家、被玩家打、白天
+ * 露天燃烧、摔落受伤、离得太远或所在区块没加载就消失、生命归零就死。
  *
  * 与掉落物、经验球同一套样式（ADR-0007）：持列表、编号自增不复用、`step` 走 `stepEntities`；
- * 重力与碰撞用 `physics.ts` 里与玩家、掉落物同一份解算。僵尸之间、僵尸与玩家之间不做碰撞，
- * 可以重叠。
+ * 重力与碰撞用 `physics.ts` 里与玩家、掉落物同一份解算，摔落的落差也与玩家同一份（`FallTracker`）。
+ * 僵尸之间、僵尸与玩家之间不做碰撞，可以重叠。
  *
  * 打玩家时只管够不够得着、隔没隔够 20 tick，打出去的那一下交给玩家（`ZombieTarget.hitByZombie`）：
  * 生命值、无敌时间与击退都是玩家那边的事。
  *
- * 游走的方向由种子、tick 与编号哈希出来（ADR-0003 的延伸），核心不持随机状态，同一种子同一串
- * tick 每次得到同一条轨迹。
+ * 生成的候选列、游走的方向、腐肉的件数都由种子、tick 与编号哈希出来（ADR-0014），核心不持随机状态，
+ * 同一种子、同一串指令每次得到同样的僵尸。
  *
  * 所在区块没加载就消失（ADR-0013）：僵尸是按规则生成的，走远了本来就该没，不必像掉落物那样暂停
  * 保留。中心还在已加载区块里、这一 tick 可能走到的范围（`reach`）却伸进了没加载的区块时，则原地
@@ -132,7 +166,7 @@ export interface ZombiesView {
  * 还掉一个经验球，交给 `DropSink` 与 `XpOrbSink`；之后怎么落、怎么飞是它们的事。
  */
 export class Zombies implements ZombiesView, EntityRaycast {
-  private readonly blocks: BlockView & LoadedChunks;
+  private readonly blocks: BlockView & LoadedChunks & ColumnTops;
   private readonly seed: number;
   private readonly drops: DropSink;
   private readonly experience: XpOrbSink;
@@ -141,7 +175,7 @@ export class Zombies implements ZombiesView, EntityRaycast {
   private nextId = 1;
 
   constructor(
-    blocks: BlockView & LoadedChunks,
+    blocks: BlockView & LoadedChunks & ColumnTops,
     seed: number,
     drops: DropSink,
     experience: XpOrbSink,
@@ -166,6 +200,34 @@ export class Zombies implements ZombiesView, EntityRaycast {
   }
 
   /**
+   * 第 tick 个 tick 的自然生成，player 是玩家碰撞箱底面中心。每 tick 调一次，至多生成一只。
+   *
+   * 夜晚、现有不到 `ZOMBIE_MAX_COUNT` 只、tick 能被 `ZOMBIE_SPAWN_INTERVAL` 整除时试一次：由种子与 tick
+   * 哈希出一个角度与一个 24 到 48 格的距离，从玩家的水平位置量过去落在哪一列，那一列就是候选列。
+   * 候选列所在区块已加载、列顶方块实心，就在列顶之上、列的中心生成一只；列顶之上本来就是空气，身位
+   * 两格因此都空着。列的中心离玩家的水平距离也要在 24 到 48 格之间：取整到列上会偏出去不到一格。
+   * 哪一条不满足，这一次就放弃，不另选一列重试。
+   *
+   * 看的是候选列，不是玩家脚下那一列：玩家头顶盖着东西不影响生成。
+   */
+  spawnNaturally(tick: number, player: Vec3, night: boolean): void {
+    if (!night || this.list.length >= ZOMBIE_MAX_COUNT || tick % ZOMBIE_SPAWN_INTERVAL !== 0) return;
+    const angle = this.roll(SPAWN_SALT, tick, 0) * TAU;
+    const reach =
+      ZOMBIE_SPAWN_MIN_DISTANCE +
+      this.roll(SPAWN_SALT, tick, 1) * (ZOMBIE_SPAWN_MAX_DISTANCE - ZOMBIE_SPAWN_MIN_DISTANCE);
+    const bx = Math.floor(player.x + Math.cos(angle) * reach);
+    const bz = Math.floor(player.z + Math.sin(angle) * reach);
+    const at = { x: bx + 0.5, y: 0, z: bz + 0.5 };
+    if (!isInLoadedChunk(this.blocks, at)) return;
+    const away = Math.hypot(at.x - player.x, at.z - player.z);
+    if (away < ZOMBIE_SPAWN_MIN_DISTANCE || away > ZOMBIE_SPAWN_MAX_DISTANCE) return;
+    const top = this.blocks.highestBlockY(bx, bz);
+    if (!isSolid(this.blocks.getBlock(bx, top, bz))) return;
+    this.spawnAt({ ...at, y: top + 1 });
+  }
+
+  /**
    * 视线最先碰到的那一只活着的僵尸（碰撞箱求交，`raycastBox`）。死了还没移除的不算：它们这一 tick
    * 结束前就会消失。
    */
@@ -185,7 +247,8 @@ export class Zombies implements ZombiesView, EntityRaycast {
    * 眼睛位置，击退只用它的水平分量。
    * 返回这一下生效了没有：还在受击后的无敌时间里、已经死了、没有这只时都不生效。
    *
-   * 生效时扣血、被击退（`knockbackFrom`）。生命归零不当场移除，等 `step` 结算掉落：伤害可能来自一 tick 里的任何一步，掉落只在一处出。
+   * 生效时扣血、被击退（`knockbackFrom`）。生命归零不当场移除，等 `step` 结算掉落：玩家的攻击排在
+   * 僵尸推进之前，同一 tick 里就结算了。
    */
   hitByPlayer(id: number, damage: number, attacker: Vec3, now: number): boolean {
     const zombie = this.list.find((candidate) => candidate.id === id);
@@ -193,57 +256,68 @@ export class Zombies implements ZombiesView, EntityRaycast {
   }
 
   /**
-   * 推进一个 tick。`tick` 是核心的 tick 计数，游走与掉落的哈希、出手的间隔要用它；`player` 是玩家，
-   * 追击与消失按它的位置算，走完这一步够得着就打它。
+   * 推进一个 tick。`tick` 是核心的 tick 计数，游走与掉落的哈希、出手的间隔、燃烧的节奏要用它；
+   * `player` 是玩家，追击与消失按它的位置算，走完这一步够得着就打它；`night` 是此刻是不是夜晚，
+   * 白天露天才燃烧。
    *
-   * 死了的最先结算：在它此刻所在的那一格掉落，然后移除，不再走这一步——掉落落在它挨最后一下的地方。
-   * 再判消失，然后走：走这一步之前离玩家正好 64 格的不消失，哪怕这一步会让它远出去一点。原地等区块
-   * 排在选方向之前，等着的那些 tick 里游走的方向与剩余 tick、偏航都不动。出手排在走之后，原地等着的
-   * 也照样出手：出手不读方块。
+   * 已经死了的（被玩家打死的）最先结算：在它此刻所在的那一格掉落，然后移除，不再走这一步。再判消失，
+   * 然后走：走这一步之前离玩家正好 64 格的不消失，哪怕这一步会让它远出去一点。原地等区块排在选方向
+   * 之前，等着的那些 tick 里游走的方向与剩余 tick、偏航都不动。走完再判燃烧：露天与否按这一 tick 走完
+   * 之后的位置算，与渲染层画出来的位置一致。摔落（走的那一步里）与燃烧扣完血再判一次死亡，死了当场
+   * 结算，不等下一 tick：掉落落在它挨最后一下的那一格，腐肉件数的哈希用的也是这一 tick。出手排在最后，
+   * 死了的不出手，原地等着的照样出手：出手不读方块。
    */
-  step(tick: number, player: ZombieTarget): void {
+  step(tick: number, player: ZombieTarget, night: boolean): void {
     const at = player.position;
     stepEntities(this.list, (zombie) => {
-      if (zombie.dead) {
-        this.dropLoot(zombie, tick);
-        return false;
-      }
+      if (zombie.dead) return this.die(zombie, tick);
       if (!isInLoadedChunk(this.blocks, zombie.position)) return false;
       if (distance(zombie.position, at) > ZOMBIE_DESPAWN_RANGE) return false;
       if (isBoxInLoadedChunks(this.blocks, zombie.reach)) {
-        const walk = zombie.chooseWalk(at, () => this.wanderRoll(tick, zombie.id));
-        zombie.step(this.blocks, walk);
+        const walk = zombie.chooseWalk(at, () => this.roll(WANDER_SALT, tick, zombie.id));
+        zombie.step(this.blocks, walk, tick);
       } else {
         zombie.hold();
       }
+      zombie.burn(!night && this.isOpenSky(zombie.position), tick);
+      if (zombie.dead) return this.die(zombie, tick);
       zombie.attack(player, tick);
       return true;
     });
   }
 
+  /** position 在露天吗：它所在那一列的最高方块低于它的脚底。 */
+  private isOpenSky({ x, y, z }: Vec3): boolean {
+    return this.blocks.highestBlockY(Math.floor(x), Math.floor(z)) < y;
+  }
+
   /**
-   * 一只僵尸死了：在它所在的那一格掉 0 到 `ZOMBIE_MAX_FLESH` 件腐肉，合成一堆，再掉一个 `ZOMBIE_XP`
-   * 点的经验球。
-   *
-   * 经验只给玩家打死的。本 issue 里只有玩家伤得了僵尸，所以死了就给；燃烧与摔落伤害（#44）进来时
-   * 要记下最后一下伤害的来源，按它决定给不给。
+   * 一只僵尸死了：在它所在的那一格掉 0 到 `ZOMBIE_MAX_FLESH` 件腐肉，合成一堆。最后一下伤害是玩家打的，
+   * 再掉一个 `ZOMBIE_XP` 点的经验球；烧死、摔死的不给。返回 false，`stepEntities` 据此移除它。
    */
-  private dropLoot(zombie: Zombie, tick: number): void {
+  private die(zombie: Zombie, tick: number): false {
     const { x, y, z } = zombie.position;
     const [bx, by, bz] = [Math.floor(x), Math.floor(y), Math.floor(z)];
     const flesh = hashCoords(this.seed ^ LOOT_SALT, tick, zombie.id) % (ZOMBIE_MAX_FLESH + 1);
     if (flesh > 0) this.drops.spawnInBlock({ item: ItemType.RottenFlesh, count: flesh }, bx, by, bz);
-    this.experience.spawnInBlock(ZOMBIE_XP, bx, by, bz);
+    if (zombie.lastHurtByPlayer) this.experience.spawnInBlock(ZOMBIE_XP, bx, by, bz);
+    return false;
   }
 
-  /** 游走选方向用的哈希，摊成 [0, 1)。 */
-  private wanderRoll(tick: number, id: number): number {
+  /**
+   * 种子加上 salt、第 tick 个 tick、key 的哈希，摊成 [0, 1)。key 区分同一 tick 里的几次取值：游走用僵尸的
+   * 编号，生成用 0（角度）与 1（距离）。
+   */
+  private roll(salt: number, tick: number, key: number): number {
     // hashCoords 给的是 32 位无符号整数，除以 2³² 摊成 [0, 1)。
-    return hashCoords(this.seed ^ WANDER_SALT, tick, id) / 0x1_0000_0000;
+    return hashCoords(this.seed ^ salt, tick, key) / 0x1_0000_0000;
   }
 }
 
-/** 一只僵尸：位置、速度、生命值、偏航、游走的方向与剩余 tick、上次出手的 tick。 */
+/**
+ * 一只僵尸：位置、速度、生命值、偏航、游走的方向与剩余 tick、上次出手的 tick、是否在燃烧、摔落的落差，
+ * 以及最后一下伤害是不是玩家打的。
+ */
 class Zombie implements ZombieView {
   readonly id: number;
   private readonly life = new Health(ZOMBIE_MAX_HEALTH);
@@ -271,12 +345,22 @@ class Zombie implements ZombieView {
   private wanderLeft = 0;
   /** 上一次出手是第几个 tick，不论玩家受没受伤。还没出过手时比任何 tick 都早。 */
   private lastAttack = -Infinity;
+  /** 是否在燃烧，每次推进时由 `burn` 重写。 */
+  private onFire = false;
+  /** 摔落的落差，与玩家同一份。 */
+  private readonly fallHeight: FallTracker;
+  /**
+   * 最后一次生效的伤害是不是玩家打的。死了的时候据此决定给不给经验：玩家打的记为真，燃烧与摔落
+   * 记为假。
+   */
+  private hurtByPlayer = false;
 
   constructor(id: number, position: Vec3) {
     this.id = id;
     this.x = this.prevX = position.x;
     this.y = this.prevY = position.y;
     this.z = this.prevZ = position.z;
+    this.fallHeight = new FallTracker(position.y);
   }
 
   get age(): number {
@@ -295,6 +379,28 @@ class Zombie implements ZombieView {
     return this.life.dead;
   }
 
+  get burning(): boolean {
+    return this.onFire;
+  }
+
+  /** 最后一次生效的伤害是不是玩家打的。还没受过伤是 false。 */
+  get lastHurtByPlayer(): boolean {
+    return this.hurtByPlayer;
+  }
+
+  /**
+   * 第 now 个 tick 的燃烧：sunlit（白天且露天）时燃烧标记为真，tick 能被 `ZOMBIE_BURN_INTERVAL` 整除就
+   * 扣 `ZOMBIE_BURN_DAMAGE` 点；否则标记为假。
+   *
+   * 扣血不看受击后的无敌时间，也不开始无敌时间（`hurtIgnoringInvulnerability`）：刚被玩家打过照样烧掉
+   * 那一点，烧完也不挡玩家的下一击。按 tick 计数整除而不是各自计时，走进阴影再出来不会把节奏重置。
+   */
+  burn(sunlit: boolean, now: number): void {
+    this.onFire = sunlit;
+    if (!sunlit || now % ZOMBIE_BURN_INTERVAL !== 0) return;
+    if (this.life.hurtIgnoringInvulnerability(ZOMBIE_BURN_DAMAGE, now)) this.hurtByPlayer = false;
+  }
+
   /**
    * 第 now 个 tick 被在 attacker 的玩家打了 amount 点，返回生效了没有。无敌时间与扣血的规则在
    * `Health`：与玩家同一份，受击后 10 tick 内（含第 10 tick）再打不掉血。生效时水平被推离攻击者，
@@ -302,6 +408,7 @@ class Zombie implements ZombieView {
    */
   hitByPlayer(amount: number, now: number, attacker: Vec3): boolean {
     if (!this.life.hurt(amount, now)) return false;
+    this.hurtByPlayer = true;
     this.knock = knockbackFrom(attacker, this.position);
     this.velocityY = KNOCKBACK_LIFT;
     return true;
@@ -402,14 +509,17 @@ class Zombie implements ZombieView {
   }
 
   /**
-   * 推进一个 tick：重力与竖直碰撞，再沿两个水平轴各走一步。水平那一步是走路的位移加上击退的速度，
+   * 推进第 now 个 tick：重力与竖直碰撞，再沿两个水平轴各走一步。水平那一步是走路的位移加上击退的速度，
    * 走完击退速度衰减一次。
+   *
+   * 竖直那一步落地时按落差受摔落伤害，规则与玩家同一条（`fallDamage`），受击后的无敌时间里不生效。
+   * 摔死了就停在落点，这一 tick 不再水平走。
    *
    * 水平方向被挡住、脚下踩实、挡住它的那一格上方两格是空气（碰撞箱抬高 1 格再走这一步就走得通）
    * 时起跳。起跳速度在下一 tick 的竖直那一步里生效，与玩家按住跳跃键同一套物理，最高点 1.252 格：
    * 翻得过 1 格高的墙，翻不过 2 格的。
    */
-  step(blocks: BlockView, walk: HorizontalDelta): void {
+  step(blocks: BlockView, walk: HorizontalDelta, now: number): void {
     this.prevX = this.x;
     this.prevY = this.y;
     this.prevZ = this.z;
@@ -419,6 +529,11 @@ class Zombie implements ZombieView {
     const fall = fallStep(blocks, this.hitbox, this.velocityY);
     this.y = fall.y;
     this.velocityY = fall.velocityY;
+    // 落差在竖直这一步之后、水平之前结算，理由与玩家相同（`Player.step`）。摔死的不再水平走：掉落要落在
+    // 它落地的那一格，走完这一步可能已经跨进了下一格。
+    const fell = this.fallHeight.settle(this.y, isOnGround(blocks, this.hitbox));
+    if (this.life.hurt(fallDamage(fell), now)) this.hurtByPlayer = false;
+    if (this.life.dead) return;
 
     // 两个轴分开做碰撞，斜着撞墙时沿着墙滑过去。
     const move = { x: walk.x + this.knock.x, z: walk.z + this.knock.z };

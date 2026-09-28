@@ -53,6 +53,14 @@ import {
 import { recipesFor, type GridSize } from '../src/core/recipe';
 import { HURT_FLASH_TICKS } from '../src/ui/hurt-flash';
 import { ZOMBIE_HURT_TINT_TICKS } from '../src/render/zombie-model';
+import { NIGHT_START } from '../src/core/time-of-day';
+import {
+  ZOMBIE_BURN_DAMAGE,
+  ZOMBIE_BURN_INTERVAL,
+  ZOMBIE_MAX_HEALTH,
+  ZOMBIE_SPAWN_MAX_DISTANCE,
+  ZOMBIE_SPAWN_MIN_DISTANCE,
+} from '../src/core/zombie';
 import { ITEM_NAMES, durabilityLabel, recipeLabel, STRINGS } from '../src/ui/strings';
 import {
   countCanvasColors,
@@ -3359,14 +3367,83 @@ test('调试句柄在玩家前方 3 格生成一只僵尸：下一帧场景里�
   expect(errors).toEqual([]);
 });
 
+test('拨到夜晚推进到僵尸自然生成：场景里多了一个六部件的组，离相机 24 到 48 格；拨回白天，玩家脚下那一只露天烧 400 tick，组消失', async ({
+  page,
+}) => {
+  // 生成要候选列所在区块已加载，先等视距铺满。整段跑在一次同步的 evaluate 里，中途游戏循环不会推进。
+  //
+  // 燃烧那一半不用自然生成的那一只：它在真实地形上走动，会从树冠上摔下来受伤，也会走到树冠底下不烧，
+  // 或者走远了消失，死亡的 tick 因此不固定。改在玩家脚下生成一只：出生点周围没有树，它与玩家水平位置
+  // 重合，一步不走，一直在露天。先推进到 tick 计数能被燃烧间隔整除，第 400 tick 正好是第 20 次燃烧。
+  await waitForFullViewDistance(page);
+  const seen = await page.evaluate(
+    ({ night, day, limit, interval, burnTicks }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      core.setTimeOfDay(night);
+      let nightTicks = 0;
+      for (; nightTicks < limit && core.zombies.count === 0; nightTicks++) core.tick();
+      renderer.render(1);
+      const spawned = { zombies: renderer.zombies, camera: renderer.cameraPosition };
+
+      core.setTimeOfDay(day);
+      while (core.tickCount % interval !== 0) core.tick();
+      const { x, y, z } = core.player.position;
+      core.spawnZombieAt(x, y, z);
+      const id = core.zombies.all().at(-1)!.id;
+      const ours = () => core.zombies.all().find((zombie) => zombie.id === id);
+      core.tick(burnTicks - 1);
+      renderer.render(1);
+      const almost = {
+        zombie: ours() && { health: ours()!.health, burning: ours()!.burning },
+        group: renderer.zombies.some((zombie) => zombie.id === id),
+      };
+      core.tick();
+      renderer.render(1);
+      const burned = {
+        zombie: ours(),
+        group: renderer.zombies.some((zombie) => zombie.id === id),
+        orbs: core.xpOrbs.count,
+        experience: core.experience.total,
+      };
+      return { nightTicks, spawned, almost, burned };
+    },
+    {
+      night: NIGHT_START,
+      day: 0,
+      limit: 2000,
+      interval: ZOMBIE_BURN_INTERVAL,
+      burnTicks: (ZOMBIE_MAX_HEALTH / ZOMBIE_BURN_DAMAGE) * ZOMBIE_BURN_INTERVAL,
+    },
+  );
+  const horizontal = (a: Vec3, b: Vec3) => Math.hypot(a.x - b.x, a.z - b.z);
+
+  // 夜里生成了一只：场景里一个组、六个部件，离相机（玩家）的水平距离在生成的范围里
+  expect(seen.nightTicks).toBeLessThan(2000);
+  expect(seen.spawned.zombies).toHaveLength(1);
+  expect(seen.spawned.zombies[0]!.parts).toBe(6);
+  const away = horizontal(seen.spawned.zombies[0]!.position, seen.spawned.camera);
+  expect(away).toBeGreaterThanOrEqual(ZOMBIE_SPAWN_MIN_DISTANCE);
+  expect(away).toBeLessThanOrEqual(ZOMBIE_SPAWN_MAX_DISTANCE);
+
+  // 白天第 399 tick：还在燃烧，剩 1 点血，组还在场景里
+  expect(seen.almost).toEqual({ zombie: { health: 1, burning: true }, group: true });
+  // 第 400 tick 烧死：核心里没有了，场景里的组也移走了，没有给经验
+  expect(seen.burned).toEqual({ zombie: undefined, group: false, orbs: 0, experience: 0 });
+  expect(errors).toEqual([]);
+});
+
 test('对准 2 格外的僵尸按左键：组的材质带红色叠色，10 tick 后恢复；手持物品挥了一下', async ({
   page,
 }) => {
   // 整段跑在一次同步的 evaluate 里，游戏循环插不进来。平视前方，僵尸生成在视线正前方 2 格那一列的顶面上，
   // 手上拿一把木镐：空手没有东西可挥。
+  //
+  // 先拨到夜晚：白天露天的僵尸在燃烧（#44），材质叠的是橙色。夜里可能另有僵尸自然生成，所以按编号找到
+  // 生成的这一只。
   const seen = await page.evaluate(
-    ({ distance, pickaxe, tintTicks }) => {
+    ({ distance, pickaxe, tintTicks, night }) => {
       const { core, renderer } = window.__VOXEL__!;
+      core.setTimeOfDay(night);
       core.turn(0, -core.player.pitch);
       core.giveItem(pickaxe, 1);
       core.selectHotbarSlot(0);
@@ -3374,25 +3451,27 @@ test('对准 2 格外的僵尸按左键：组的材质带红色叠色，10 tick 
       const x = position.x - Math.sin(yaw) * distance;
       const z = position.z - Math.cos(yaw) * distance;
       core.spawnZombieAt(x, core.highestBlockY(Math.floor(x), Math.floor(z)) + 1, z);
+      const id = core.zombies.all().at(-1)!.id;
+      const ours = () => renderer.zombies.find((zombie) => zombie.id === id);
       core.tick();
       renderer.render(1);
-      const before = { zombie: renderer.zombies[0], held: renderer.heldItem };
+      const before = { zombie: ours(), held: renderer.heldItem };
 
       core.setMining(true);
       core.tick();
       core.setMining(false);
       renderer.render(0.5);
       const hit = {
-        zombie: renderer.zombies[0],
-        health: core.zombies.all()[0]?.health,
+        zombie: ours(),
+        health: core.zombies.all().find((zombie) => zombie.id === id)?.health,
         held: renderer.heldItem,
       };
 
       core.tick(tintTicks);
       renderer.render(1);
-      return { before, hit, after: { zombie: renderer.zombies[0], held: renderer.heldItem } };
+      return { id, before, hit, after: { zombie: ours(), held: renderer.heldItem } };
     },
-    { distance: 2, pickaxe: ItemType.WoodenPickaxe, tintTicks: ZOMBIE_HURT_TINT_TICKS },
+    { distance: 2, pickaxe: ItemType.WoodenPickaxe, tintTicks: ZOMBIE_HURT_TINT_TICKS, night: NIGHT_START },
   );
   const rgb = (hex: number) => [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff] as const;
 
@@ -3409,7 +3488,7 @@ test('对准 2 格外的僵尸按左键：组的材质带红色叠色，10 tick 
   expect(seen.hit.held!.swing).toBeGreaterThan(0);
 
   // 10 tick 后恢复本色，手持物品回到原位
-  expect(seen.after.zombie!.id).toBe(seen.before.zombie!.id);
+  expect(seen.after.zombie!.id).toBe(seen.id);
   expect(seen.after.zombie!.tint).toBe(0xffffff);
   expect(seen.after.held!.swing).toBe(0);
   expect(errors).toEqual([]);

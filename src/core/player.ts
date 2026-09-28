@@ -3,6 +3,7 @@ import { TAU, TICK_RATE } from './constants';
 import { isBoxInLoadedChunks, type LoadedChunks } from './entity';
 import {
   decayedKnockback,
+  FallTracker,
   fallStep,
   hitboxAt,
   isOnGround,
@@ -105,11 +106,8 @@ export class Player implements PlayerView {
    * 两者每 tick 相加，与僵尸一致。没被打过时是 `NO_WALK`。
    */
   private knock: HorizontalDelta = NO_WALK;
-  /**
-   * 离地之后到过的最高 y。站在地上时就是脚下的高度；落地那一 tick 拿它减去落点得到落差，
-   * 摔落伤害按落差算（`fallDamage`）。跳起来的那一段也算在内。
-   */
-  private fallFromY: number;
+  /** 摔落的落差，与僵尸同一份（`FallTracker`）。摔落伤害按落差算（`fallDamage`）。 */
+  private readonly fallHeight: FallTracker;
   private yawAngle = 0;
   private pitchAngle = 0;
 
@@ -118,7 +116,7 @@ export class Player implements PlayerView {
     this.x = this.prevX = spawn.x;
     this.y = this.prevY = spawn.y;
     this.z = this.prevZ = spawn.z;
-    this.fallFromY = spawn.y;
+    this.fallHeight = new FallTracker(spawn.y);
   }
 
   /** 碰撞箱底面中心。y 就是脚底所在的高度。 */
@@ -213,7 +211,7 @@ export class Player implements PlayerView {
     this.z = this.prevZ = spawn.z;
     this.velocityY = 0;
     this.knock = NO_WALK;
-    this.fallFromY = spawn.y;
+    this.fallHeight.reset(spawn.y);
   }
 
   /**
@@ -245,7 +243,7 @@ export class Player implements PlayerView {
     this.velocityY = fall.velocityY;
     // 落差在竖直这一步之后、水平移动之前结算：落地只发生在竖直这一步。放到水平走完之后再看，
     // 同一 tick 里先落到一级台阶、再水平走下它边缘的那一次落地就漏掉了，几级台阶的落差会累计成一段。
-    const fell = this.settleFall();
+    const fell = this.fallHeight.settle(this.y, this.onGround);
 
     // 竖直走完再走水平：跳到台阶上时这一 tick 已经抬到了台阶顶面之上，
     // 水平方向因此不再被台阶挡住。从边缘走下去时，离地前的高度已经在上面记下，下一 tick 起算落差。
@@ -254,21 +252,6 @@ export class Player implements PlayerView {
     this.knock = decayedKnockback(this.knock);
     this.x = this.movedAlong('x', move.x);
     this.z = this.movedAlong('z', move.z);
-    return fell;
-  }
-
-  /**
-   * 竖直走完这一步之后更新 `fallFromY`，返回这一步落地时的落差，没有落地返回 0。
-   *
-   * 落点不会高于最高点：落到哪一格顶面之前，碰撞箱一定先在那个高度之上待过一 tick。
-   */
-  private settleFall(): number {
-    if (!this.onGround) {
-      this.fallFromY = Math.max(this.fallFromY, this.y);
-      return 0;
-    }
-    const fell = this.fallFromY - this.y;
-    this.fallFromY = this.y;
     return fell;
   }
 

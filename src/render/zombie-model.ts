@@ -6,8 +6,8 @@ import { TILE, boxUvs } from './atlas';
 /**
  * 僵尸的六部件人形：头、身体、两条手臂、两条腿，各是一个长方体，拼成一个 `Group`。
  *
- * 表现整个在渲染层（ADR-0007）：核心只报位置、上一 tick 的位置、偏航、存活 tick 数与上次受伤的 tick，
- * 摆臂摆腿的角度由这里按 `age + alpha` 算，受击叠红按 tick 差算。不碰 DOM，所以能在 Node 里建出模型
+ * 表现整个在渲染层（ADR-0007）：核心只报位置、上一 tick 的位置、偏航、存活 tick 数、上次受伤的 tick 与
+ * 是否在燃烧，摆臂摆腿的角度由这里按 `age + alpha` 算，受击叠红按 tick 差算，燃烧叠橙。不碰 DOM，所以能在 Node 里建出模型
  * 对它断言。
  */
 
@@ -48,6 +48,9 @@ export const ZOMBIE_HURT_TINT_TICKS = 10;
  * 叠红的颜色，乘在贴图上：红分量不动，绿与蓝压到四成多。灰绿的皮肤乘出来是暗红，夜里也看得出。
  */
 const HURT_TINT = 0xff7070;
+
+/** 燃烧中叠橙的颜色，乘在贴图上：红分量不动，绿压到七成，蓝压到三成。与叠红分得开。 */
+const BURNING_TINT = 0xffb050;
 
 /** 模型按像素量尺寸，16 像素一格，与贴图的像素一样大。 */
 const PX = 1 / 16;
@@ -147,20 +150,26 @@ export function poseZombieModel(group: THREE.Group, zombie: ZombieView, alpha: n
   leftLeg!.rotation.x = swing;
 }
 
-/** 僵尸模型轮换使用的两份材质：平时那一份，与受击后叠红的那一份。所有僵尸共用这两份。 */
+/** 僵尸模型轮换使用的三份材质：平时那一份、受击后叠红的那一份、燃烧中叠橙的那一份。所有僵尸共用。 */
 export interface ZombieMaterials {
   readonly normal: THREE.Material;
   readonly hurt: THREE.Material;
+  readonly burning: THREE.Material;
 }
 
 /**
- * 由方块那一份材质派生出僵尸的两份材质：平时就用它本身，叠红那一份是它的克隆乘上 `HURT_TINT`，
- * 贴图是同一张。叠红靠换材质而不是给每只僵尸各克隆一份：同一时刻叠红的僵尸都长一个样，两份就够。
+ * 由方块那一份材质派生出僵尸的三份材质：平时就用它本身，叠红、叠橙那两份是它的克隆乘上 `HURT_TINT`、
+ * `BURNING_TINT`，贴图是同一张。叠色靠换材质而不是给每只僵尸各克隆一份：同一时刻叠同一种颜色的僵尸
+ * 都长一个样，三份就够。
  */
 export function zombieMaterials(base: THREE.MeshLambertMaterial): ZombieMaterials {
-  const hurt = base.clone();
-  hurt.color.setHex(HURT_TINT);
-  return { normal: base, hurt };
+  return { normal: base, hurt: tinted(base, HURT_TINT), burning: tinted(base, BURNING_TINT) };
+}
+
+function tinted(base: THREE.MeshLambertMaterial, color: number): THREE.MeshLambertMaterial {
+  const material = base.clone();
+  material.color.setHex(color);
+  return material;
 }
 
 /** 上次受伤在 lastHurtTick、此刻是第 now 个 tick 时，该不该叠红。还没受过伤不叠。 */
@@ -169,8 +178,12 @@ export function zombieHurtTinted(lastHurtTick: number | undefined, now: number):
 }
 
 /**
- * 受击后 `ZOMBIE_HURT_TINT_TICKS` 内六个部件换成叠红的材质，之后换回来。now 是核心的 tick 计数。
- * 按 tick 而不是按毫秒算，与玩家的受伤红闪同一条理由：时长与游戏时间一致。
+ * 受击后 `ZOMBIE_HURT_TINT_TICKS` 内六个部件换成叠红的材质；不在叠红里、燃烧中的换成叠橙的；都不是就用
+ * 平时那一份。now 是核心的 tick 计数。按 tick 而不是按毫秒算，与玩家的受伤红闪同一条理由：时长与游戏
+ * 时间一致。
+ *
+ * 叠红压过叠橙：燃烧中的僵尸被打了，那一下也要看得出来。燃烧本身每 20 tick 扣一次血，所以烧着的僵尸
+ * 红橙交替，与原版一样。
  */
 export function tintZombieModel(
   group: THREE.Group,
@@ -178,7 +191,11 @@ export function tintZombieModel(
   now: number,
   materials: ZombieMaterials,
 ): void {
-  const material = zombieHurtTinted(zombie.lastHurtTick, now) ? materials.hurt : materials.normal;
+  const material = zombieHurtTinted(zombie.lastHurtTick, now)
+    ? materials.hurt
+    : zombie.burning
+      ? materials.burning
+      : materials.normal;
   for (const child of group.children) (child as THREE.Mesh).material = material;
 }
 

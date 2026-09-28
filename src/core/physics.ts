@@ -98,6 +98,42 @@ export function fallStep(blocks: BlockView, hitbox: Hitbox, velocityY: number): 
 }
 
 /**
+ * 摔落的落差：离地之后到过的最高 y，落地那一 tick 拿它减去落点。
+ *
+ * 玩家与僵尸共用这一份，摔落伤害因此是同一条规则：落差怎么算写在一处，受几点伤由调用方按
+ * `fallDamage` 算。跳起来的那一段也算在内。
+ */
+export class FallTracker {
+  /** 离地之后到过的最高 y。站在地上时就是脚下的高度。 */
+  private highest: number;
+
+  constructor(y: number) {
+    this.highest = y;
+  }
+
+  /** 从 y 重新算起：重生这类瞬移之后调，瞬移之前的高度不算进落差。 */
+  reset(y: number): void {
+    this.highest = y;
+  }
+
+  /**
+   * 竖直走完一步之后调：y 是新的高度，onGround 是此刻踩实了没有。返回这一步落地时的落差，
+   * 没有落地、或者一直站在地上，返回 0。
+   *
+   * 落点不会高于最高点：落到哪一格顶面之前，碰撞箱一定先在那个高度之上待过一 tick。
+   */
+  settle(y: number, onGround: boolean): number {
+    if (!onGround) {
+      this.highest = Math.max(this.highest, y);
+      return 0;
+    }
+    const fell = this.highest - y;
+    this.highest = y;
+    return fell;
+  }
+}
+
+/**
  * 沿一个轴移动 `delta` 会不会被实心方块挡住，哪怕只挡住一部分。
  *
  * 与 `movedAlong` 同一次扫掠，只是问的是「走没走满」：落点由扫掠钳在方块边界上，没被挡时

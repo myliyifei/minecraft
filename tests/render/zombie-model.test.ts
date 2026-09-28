@@ -25,6 +25,7 @@ function zombie(overrides: Partial<ZombieView> = {}): ZombieView {
     age: 0,
     health: 20,
     lastHurtTick: undefined,
+    burning: false,
     ...overrides,
   };
 }
@@ -200,5 +201,47 @@ describe('僵尸受击后叠红（#42）', () => {
     expect(partMaterials(group)).toEqual(Array(6).fill(shared.hurt));
     tintZombieModel(group, hurt, 210, shared);
     expect(partMaterials(group)).toEqual(Array(6).fill(shared.normal));
+  });
+});
+
+describe('燃烧中的僵尸叠橙（#44）', () => {
+  function materials() {
+    return zombieMaterials(new THREE.MeshLambertMaterial({ map: new THREE.Texture() }));
+  }
+
+  function partMaterials(group: THREE.Group): THREE.Material[] {
+    return group.children.map((child) => (child as THREE.Mesh).material as THREE.Material);
+  }
+
+  it('燃烧标记为真时六个部件都换成叠橙的材质；标记为假时换回来', () => {
+    const shared = materials();
+    const group = createZombieModel(zombieGeometries(), shared.normal);
+
+    tintZombieModel(group, zombie({ burning: true }), 100, shared);
+    expect(partMaterials(group)).toEqual(Array(6).fill(shared.burning));
+    tintZombieModel(group, zombie({ burning: false }), 101, shared);
+    expect(partMaterials(group)).toEqual(Array(6).fill(shared.normal));
+  });
+
+  it('叠橙的材质是同一张贴图乘上橙色：红分量满，绿居中，蓝最低', () => {
+    const { normal, burning, hurt } = materials();
+    expect(burning).not.toBe(normal);
+    expect(burning).not.toBe(hurt);
+    expect((burning as THREE.MeshLambertMaterial).map).toBe((normal as THREE.MeshLambertMaterial).map);
+    const { r, g, b } = (burning as THREE.MeshLambertMaterial).color;
+    expect(r).toBe(1);
+    expect(g).toBeLessThan(r);
+    expect(g).toBeGreaterThan(b);
+  });
+
+  it('燃烧中又刚受伤：叠红，受伤那一下看得出来；10 tick 后回到叠橙', () => {
+    const shared = materials();
+    const group = createZombieModel(zombieGeometries(), shared.normal);
+    const hurtWhileBurning = zombie({ burning: true, lastHurtTick: 200 });
+
+    tintZombieModel(group, hurtWhileBurning, 205, shared);
+    expect(partMaterials(group)).toEqual(Array(6).fill(shared.hurt));
+    tintZombieModel(group, hurtWhileBurning, 210, shared);
+    expect(partMaterials(group)).toEqual(Array(6).fill(shared.burning));
   });
 });

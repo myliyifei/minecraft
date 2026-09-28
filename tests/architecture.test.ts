@@ -66,12 +66,12 @@ describe('无头游戏核心的隔离（ADR-0001：世界状态与渲染层分�
   });
 });
 
-describe('地形生成的纯性（ADR-0003：地形生成是纯函数）', () => {
+describe('核心的确定性（ADR-0003：地形生成是纯函数；ADR-0014：运行时随机也用种子哈希）', () => {
   const coreFiles = tsFilesIn(join(SRC, 'core'));
 
   it('核心不用非确定性的来源', () => {
-    // 同一个种子必须每次生成同一个世界。真随机与真实时钟一旦进入核心，
-    // 「先加载 A 再 B 与反过来一致」这类断言就不成立了。
+    // 同一个种子必须每次生成同一个世界，同一串指令每次得到同样的实体。真随机与真实时钟一旦进入核心，
+    // 「先加载 A 再 B 与反过来一致」「两次运行僵尸列表逐字段相同」这类断言就不成立了。
     const forbidden = /\b(Math\.random|Date\.now|performance\.now)\b/;
     for (const file of coreFiles) {
       expect(codeOf(file)).not.toMatch(forbidden);

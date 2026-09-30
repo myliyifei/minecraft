@@ -142,6 +142,41 @@ describe('僵尸的出现（spawnZombieAt）', () => {
   });
 });
 
+describe('僵尸之间不互相推挤，可以重叠（#36 用户故事 20）', () => {
+  it('两只生成在同一点：各自朝玩家走，一直叠在一起，不互相推开', () => {
+    const { zombies, advance } = zombiesOnFlatGround();
+    zombies.spawnAt({ x: 10.5, y: FLAT_STAND_Y, z: 4.5 });
+    zombies.spawnAt({ x: 10.5, y: FLAT_STAND_Y, z: 4.5 });
+    const start = horizontalDistance(zombies.all()[0]!);
+
+    for (let i = 1; i <= 20; i++) {
+      advance(1);
+      const [a, b] = zombies.all();
+      expect(b!.position, `第 ${i} tick`).toEqual(a!.position);
+    }
+    // 两只都照追击规则走了 20 tick
+    for (const zombie of zombies.all()) {
+      expect(start - horizontalDistance(zombie)).toBeCloseTo(20 * ZOMBIE_STEP, 9);
+    }
+  });
+
+  it('一只站在玩家脚下，另一只走过来：走进它的碰撞箱，一直走到玩家脚下，两只重叠', () => {
+    const { zombies, advance } = zombiesOnFlatGround();
+    zombies.spawnAt(PLAYER);
+    zombies.spawnAt({ x: 5.5, y: FLAT_STAND_Y, z: 0.5 });
+
+    // 逐 tick 看：只看终点的话，接近途中推开一下、之后再走回来的也能过
+    for (let i = 1; i <= 40; i++) {
+      advance(1);
+      const [still, walker] = zombies.all();
+      expect(still!.position, `第 ${i} tick`).toEqual(PLAYER);
+      expect(horizontalDistance(walker!), `第 ${i} tick`).toBeCloseTo(Math.max(0, 5 - i * ZOMBIE_STEP), 9);
+      expect(walker!.position.y, `第 ${i} tick`).toBe(FLAT_STAND_Y);
+      expect(walker!.position.z, `第 ${i} tick`).toBe(PLAYER.z);
+    }
+  });
+});
+
 describe('僵尸在 32 格内朝玩家直线走', () => {
   it('每 tick 靠近 3 格/秒那么多，斜着走也不更快', () => {
     const { zombies, advance } = zombiesOnFlatGround();

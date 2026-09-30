@@ -406,6 +406,36 @@ describe('击杀', () => {
     expect(game.experience.total).toBe(50);
   });
 
+  it('石剑打 4 下僵尸消失：前 3 下各掉 5 点、它还在，第 4 下消失，原位有 50 点经验球与 0 到 2 件腐肉', () => {
+    const game = core();
+    game.giveItem(ItemType.StoneSword, 1);
+    pennedZombie(game);
+    // 隔 11 tick 一下，与 `beatToDeath` 同一个理由：隔 10 tick 那一下落在无敌时间里
+    press(game);
+    let last = onlyZombie(game).position;
+    for (const health of [15, 10, 5]) {
+      expect(onlyZombie(game).health).toBe(health);
+      game.setMining(false);
+      game.tick(10);
+      last = onlyZombie(game).position;
+      press(game);
+    }
+    expect(game.zombies.count).toBe(0);
+    expect(wear(game)).toBe(4);
+
+    expect(game.xpOrbs.all().map((orb) => orb.amount)).toEqual([50]);
+    const [orb] = game.xpOrbs.all();
+    expect(Math.abs(orb!.position.x - last.x)).toBeLessThan(1);
+    expect(Math.abs(orb!.position.z - last.z)).toBeLessThan(1);
+    const flesh = fleshOnGround(game);
+    expect(flesh).toBeGreaterThanOrEqual(0);
+    expect(flesh).toBeLessThanOrEqual(2);
+    for (const drop of game.drops.all()) {
+      expect(Math.abs(drop.position.x - last.x)).toBeLessThan(1);
+      expect(Math.abs(drop.position.z - last.z)).toBeLessThan(1);
+    }
+  });
+
   it('同一种子、同一串操作，腐肉件数每次相同；这几个种子下 0、1、2 件都出现过', () => {
     const counts = new Set<number>();
     for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {

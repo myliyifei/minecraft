@@ -4,8 +4,8 @@ import { CHUNK_SIZE, UNLOAD_MARGIN } from '../../src/core/constants';
 import type { Chunk } from '../../src/core/chunk';
 import { PICKUP_DELAY_TICKS } from '../../src/core/drop';
 import { GameCore } from '../../src/core/game';
-import { INVENTORY_SIZE } from '../../src/core/inventory';
-import { BARE_HAND, ItemType, miningToolOf } from '../../src/core/item';
+import { HOTBAR_SIZE, INVENTORY_SIZE } from '../../src/core/inventory';
+import { BARE_HAND, ItemType, miningToolOf, type ItemStack } from '../../src/core/item';
 import { IDLE_INTENT, MAX_PITCH, PLAYER_EYE_HEIGHT, WALK_STEP } from '../../src/core/player';
 import { SMELT_TICKS } from '../../src/core/smelting';
 import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTestTerrain } from '../helpers/flat-terrain';
@@ -46,14 +46,14 @@ function walkEast(game: GameCore, ticks: number): void {
   game.setMoveIntent(IDLE_INTENT);
 }
 
+/** 背包 36 格，按下标顺序，空格是 undefined。 */
+function allSlots(game: GameCore): Array<ItemStack | undefined> {
+  return Array.from({ length: INVENTORY_SIZE }, (_, i) => game.inventory.slot(i));
+}
+
 /** 背包 36 格里有东西的那些格。 */
-function filledSlots(game: GameCore): unknown[] {
-  const slots = [];
-  for (let i = 0; i < INVENTORY_SIZE; i++) {
-    const stack = game.inventory.slot(i);
-    if (stack) slots.push(stack);
-  }
-  return slots;
+function filledSlots(game: GameCore): ItemStack[] {
+  return allSlots(game).filter((stack): stack is ItemStack => stack !== undefined);
 }
 
 /**
@@ -73,6 +73,78 @@ function withBelongings(): GameCore {
   game.giveItem(ItemType.Coal, 5);
   expect(game.inventory.slot(0)).toEqual({ ...PICKAXE, damage: 1 });
   expect(game.experience.total).toBe(30);
+  return game;
+}
+
+/** 12 种工具：一格一件，给几件占几格。 */
+const TOOLS = [
+  ItemType.WoodenPickaxe,
+  ItemType.WoodenAxe,
+  ItemType.WoodenShovel,
+  ItemType.WoodenSword,
+  ItemType.StonePickaxe,
+  ItemType.StoneAxe,
+  ItemType.StoneShovel,
+  ItemType.StoneSword,
+  ItemType.IronPickaxe,
+  ItemType.IronAxe,
+  ItemType.IronShovel,
+  ItemType.IronSword,
+];
+
+/** 12 种可堆叠的物品：每种给 64 加一个零头，占两格。 */
+const STACKABLES = [
+  ItemType.Dirt,
+  ItemType.OakLog,
+  ItemType.OakPlanks,
+  ItemType.Stick,
+  ItemType.CraftingTable,
+  ItemType.Cobblestone,
+  ItemType.Furnace,
+  ItemType.Coal,
+  ItemType.RawIron,
+  ItemType.IronIngot,
+  ItemType.Charcoal,
+  ItemType.RottenFlesh,
+];
+
+/** 拿着选中格那件工具，把正前方眼高那一格的树叶挖掉 blocks 次。树叶什么都不掉，背包不多东西。 */
+function wearOnLeaves(game: GameCore, blocks: number): void {
+  const at: [number, number, number] = [0, Math.floor(FLAT_STAND_Y + PLAYER_EYE_HEIGHT), -1];
+  for (let i = 0; i < blocks; i++) {
+    game.setBlock(...at, BlockType.OakLeaves);
+    game.setMining(true);
+    for (let n = 0; n < 100 && game.getBlock(...at) !== BlockType.Air; n++) game.tick();
+    if (game.getBlock(...at) !== BlockType.Air) throw new Error('100 tick 还没挖掉树叶');
+    game.setMining(false);
+    game.tick();
+  }
+}
+
+/**
+ * 36 格全部放满、每格都不一样的核心：前 12 格是 12 种工具，快捷栏里那 9 件第 i 格挖掉 i + 1 块树叶，
+ * 损耗各不相同；之后 24 格是 12 种可堆叠物品，每种一堆 64、一堆零头（零头各不相同）。
+ * 储物格里也要有带损耗的工具：打开背包，把快捷栏第 0 格那件与储物格倒数第二格那一堆 64 对调。
+ * 对调的是整 64 那一堆而不是零头：零头排在同种的整堆前面的话，拾回时零头先占一格，整堆随后拾取、
+ * 并入那一格，排列就与死前不同了。
+ */
+function withFullInventory(): GameCore {
+  const game = core();
+  for (const tool of TOOLS) game.giveItem(tool, 1);
+  for (let slot = 0; slot < HOTBAR_SIZE; slot++) {
+    game.selectHotbarSlot(slot);
+    game.tick();
+    wearOnLeaves(game, slot + 1);
+  }
+  STACKABLES.forEach((item, i) => game.giveItem(item, 64 + i + 1));
+  game.toggleInventory();
+  game.tick();
+  game.clickSlot(0);
+  game.clickSlot(INVENTORY_SIZE - 2);
+  game.clickSlot(0);
+  game.tick();
+  game.toggleInventory();
+  game.tick();
   return game;
 }
 
@@ -96,6 +168,36 @@ describe('GameCore 的死亡', () => {
     expect(filledSlots(game)).toEqual([]);
     expect(game.experience.total).toBe(0);
     expect(game.experience.level).toBe(0);
+  });
+
+  it('36 格全部放满：死亡时恰好 36 个掉落物，逐堆对应；重生后拾回，工具的损耗随堆保留', () => {
+    const game = withFullInventory();
+    const before = allSlots(game);
+    expect(before.every((stack) => stack !== undefined)).toBe(true);
+    // 每格都不一样：掉落物与原来那一堆对应错了时，下面的逐堆比较能检测到
+    expect(new Set(before.map((stack) => JSON.stringify(stack))).size).toBe(INVENTORY_SIZE);
+    // 快捷栏与储物格里都有带损耗的工具
+    const worn = before.flatMap((stack, i) => (stack?.damage ? [i] : []));
+    expect(worn.some((i) => i < HOTBAR_SIZE)).toBe(true);
+    expect(worn.some((i) => i >= HOTBAR_SIZE)).toBe(true);
+
+    const at = fallToDeath(game);
+    expect(game.drops.count).toBe(INVENTORY_SIZE);
+    expect(game.drops.all().map(({ item, count }) => ({ item, count }))).toEqual(
+      before.map((stack) => ({ item: stack!.item, count: stack!.count })),
+    );
+    for (const drop of game.drops.all()) {
+      expect(Math.floor(drop.position.x)).toBe(Math.floor(at.x));
+      expect(Math.floor(drop.position.z)).toBe(Math.floor(at.z));
+    }
+    expect(filledSlots(game)).toEqual([]);
+
+    // 死在出生点那一列：重生的落点就是坑底，36 个掉落物都在脚边
+    game.tick(PICKUP_DELAY_TICKS + 2);
+    game.respawn();
+    game.tick(20);
+    expect(game.drops.count).toBe(0);
+    expect(allSlots(game)).toEqual(before);
   });
 
   it('没有经验时不生成经验球', () => {

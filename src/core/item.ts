@@ -188,7 +188,7 @@ export interface ItemDef {
   /** 这种物品是哪一件工具，不是工具的物品是 undefined。 */
   readonly tool: ToolDef | undefined;
   /**
-   * 拿着它攻击一下造成几点伤害（ADR-0015）。不是工具的物品与空手一样是
+   * 拿着它攻击一下造成几点伤害（见 CONTEXT.md 的「攻击」「伤害」）。不是工具的物品与空手一样是
    * `BARE_HAND_DAMAGE`。同一类别的三档各不相同（石斧与铁斧都是 9），所以按物品记，不按材质档查。
    */
   readonly attackDamage: number;

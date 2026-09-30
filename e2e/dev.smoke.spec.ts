@@ -53,13 +53,18 @@ import {
 import { recipesFor, type GridSize } from '../src/core/recipe';
 import { HURT_FLASH_TICKS } from '../src/ui/hurt-flash';
 import { ZOMBIE_HURT_TINT_TICKS } from '../src/render/zombie-model';
+import { ATTACK_COOLDOWN_TICKS, ATTACK_RANGE } from '../src/core/attack';
+import { XP_ATTRACT_RANGE } from '../src/core/xp-orb';
 import { NIGHT_START } from '../src/core/time-of-day';
 import {
+  ZOMBIE_ATTACK_RANGE,
   ZOMBIE_BURN_DAMAGE,
   ZOMBIE_BURN_INTERVAL,
+  ZOMBIE_HEIGHT,
   ZOMBIE_MAX_HEALTH,
   ZOMBIE_SPAWN_MAX_DISTANCE,
   ZOMBIE_SPAWN_MIN_DISTANCE,
+  ZOMBIE_XP,
 } from '../src/core/zombie';
 import { ITEM_NAMES, durabilityLabel, recipeLabel, STRINGS } from '../src/ui/strings';
 import {
@@ -3595,6 +3600,354 @@ test('调试句柄把僵尸生成在玩家身旁：下一 tick 少一颗半心�
     hearts: Array(MAX_HEALTH / 2).fill('full'),
   });
   await expect(page.locator('#death-screen')).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 整条战斗流程从这个 tick 计数开始。生成的候选列、游走的方向、腐肉的件数都由 tick 哈希出来（ADR-0014），
+ * 起点固定，打僵尸那一段每次跑出同样的结果；之后两次 evaluate 之间游戏循环可能推进几个 tick，不再逐 tick
+ * 相同。页面打开、等视距铺满的那段时间里游戏循环已经推进了几百 tick，这个值要比那更晚，还要落在白天。
+ */
+const COMBAT_CHAIN_START_TICK = 2000;
+
+/** 整条战斗流程每一段最多推进这么多 tick：等第一只生成、打死一只、走开再被打死、跑回去拾取，各自够用。 */
+const COMBAT_CHAIN_PHASE_TICKS = 3000;
+
+/** 僵尸水平中心距小于这个值才按左键：碰撞箱半宽 0.3，眼睛到它表面的斜距约 2.6 格，在攻击距离之内。 */
+const STRIKE_WITHIN = ATTACK_RANGE - 0.2;
+
+/**
+ * 最近那只的水平中心距小于这个值就面朝它往后退。玩家比僵尸快，退着打能让它留在攻击距离边上：站着不动的话
+ * 几只会走到玩家身上与他重叠，眼睛落进它们的碰撞箱里，左键打不中，它们却一直在打他。
+ */
+const RETREAT_WITHIN = 2.2;
+
+/**
+ * 打死一只之后走到离出生点这么远（水平）、又在露天的地方，站着不动，等僵尸把他打死。离出生点要超过经验球的
+ * 吸引范围，重生之后经验球不会自己飞过来，得跑回死亡处；露天是为了让聚在死亡处的僵尸天亮后都在烧。
+ */
+const DEATH_SITE_DISTANCE = 16;
+
+/**
+ * 天亮后在死亡画面上等僵尸烧死最多等这么多 tick。满血烧死至多 400 tick，走过来的路上钻进树冠底下的那几 tick
+ * 不烧，所以留一倍的余量。
+ */
+const BURN_WAIT_TICKS = 2 * (ZOMBIE_MAX_HEALTH / ZOMBIE_BURN_DAMAGE) * ZOMBIE_BURN_INTERVAL;
+
+test('整条战斗流程：夜里等到僵尸，铁剑打死一只拾到腐肉、经验涨；被僵尸打死，死亡画面上天亮，露天的僵尸烧死；重生回出生点，跑回死亡处拾回掉落物', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  // 生成要候选列所在区块已加载，先等视距铺满。每一段都整段跑在一次同步的 evaluate 里，中途游戏循环不会推进。
+  await waitForFullViewDistance(page);
+
+  // 第一段：白天开局，拨到夜晚，等第一只自然生成。拿一把铁剑，每 tick 转向最近的那只，离得太近就往后退，
+  // 进了攻击距离就按一下左键。打死一只不一定掉腐肉（0 到 2 件），没掉就接着打下一只，掉了就走过去拾起来，
+  // 经验球自己飞过来
+  const fight = await page.evaluate(
+    ({ startTick, night, limit, sword, flesh, strikeWithin, retreatWithin, cooldown, bodyHeight, xpPerKill }) => {
+      const core = window.__VOXEL__!.core;
+      const idle = { forward: false, back: false, left: false, right: false, jump: false };
+      const horizontal = (a: Vec3, b: Vec3) => Math.hypot(a.x - b.x, a.z - b.z);
+      /** 把视线转向 (x, y, z)。 */
+      const aimAt = (x: number, y: number, z: number) => {
+        const eye = core.player.eyePosition;
+        const [dx, dy, dz] = [x - eye.x, y - eye.y, z - eye.z];
+        const yaw = Math.atan2(-dx, -dz) - core.player.yaw;
+        const pitch = Math.atan2(dy, Math.hypot(dx, dz)) - core.player.pitch;
+        core.turn(Math.atan2(Math.sin(yaw), Math.cos(yaw)), pitch);
+      };
+      const carried = (item: number) => {
+        let count = 0;
+        for (let i = 0; i < core.inventory.size; i++) {
+          const stack = core.inventory.slot(i);
+          if (stack?.item === item) count += stack.count;
+        }
+        return count;
+      };
+
+      while (core.tickCount < startTick) core.tick();
+      const dayAtStart = !core.isNight;
+      core.setTimeOfDay(night);
+      let waited = 0;
+      for (; waited < limit && core.zombies.count === 0; waited++) core.tick();
+      const first = core.zombies.all()[0];
+      const firstDistance = first && horizontal(first.position, core.player.position);
+
+      core.giveItem(sword, 1);
+      core.selectHotbarSlot(0);
+      core.tick();
+      let lastPress = -Infinity;
+      let fought = 0;
+      for (; fought < limit && !core.health.dead; fought++) {
+        if (carried(flesh) > 0 && core.experience.total >= xpPerKill) break;
+        const me = core.player.position;
+        const drop = core.drops.all().find((candidate) => candidate.item === flesh);
+        if (drop) {
+          aimAt(drop.position.x, core.player.eyePosition.y, drop.position.z);
+          core.setMoveIntent({ ...idle, forward: true, jump: true });
+          core.tick();
+          continue;
+        }
+        const nearest = [...core.zombies.all()]
+          .filter((zombie) => zombie.health > 0)
+          .sort((a, b) => horizontal(a.position, me) - horizontal(b.position, me))[0];
+        const away = nearest ? horizontal(nearest.position, me) : Infinity;
+        core.setMoveIntent(away < retreatWithin ? { ...idle, back: true, jump: true } : idle);
+        if (nearest) {
+          aimAt(nearest.position.x, nearest.position.y + bodyHeight / 2, nearest.position.z);
+          if (away < strikeWithin && core.tickCount - lastPress >= cooldown) {
+            core.setMining(true);
+            core.tick();
+            core.setMining(false);
+            lastPress = core.tickCount;
+            continue;
+          }
+        }
+        core.tick();
+      }
+      core.setMoveIntent(idle);
+      return {
+        dayAtStart,
+        waited,
+        firstDistance,
+        fought,
+        dead: core.health.dead,
+        experience: core.experience.total,
+        flesh: carried(flesh),
+        sword: core.inventory.slot(0),
+      };
+    },
+    {
+      startTick: COMBAT_CHAIN_START_TICK,
+      night: NIGHT_START,
+      limit: COMBAT_CHAIN_PHASE_TICKS,
+      sword: ItemType.IronSword,
+      flesh: ItemType.RottenFlesh,
+      strikeWithin: STRIKE_WITHIN,
+      retreatWithin: RETREAT_WITHIN,
+      cooldown: ATTACK_COOLDOWN_TICKS,
+      bodyHeight: ZOMBIE_HEIGHT,
+      xpPerKill: ZOMBIE_XP,
+    },
+  );
+  expect(fight.dayAtStart).toBe(true);
+  // 夜里生成了一只，离玩家 24 到 48 格
+  expect(fight.waited).toBeLessThan(COMBAT_CHAIN_PHASE_TICKS);
+  expect(fight.firstDistance).toBeGreaterThanOrEqual(ZOMBIE_SPAWN_MIN_DISTANCE);
+  expect(fight.firstDistance).toBeLessThanOrEqual(ZOMBIE_SPAWN_MAX_DISTANCE);
+  // 打死了至少一只：经验只来自击杀，每只 50 点；拾到了腐肉；铁剑还在手上，出手损耗了耐久
+  expect(fight.fought).toBeLessThan(COMBAT_CHAIN_PHASE_TICKS);
+  expect(fight.dead).toBe(false);
+  expect(fight.experience).toBeGreaterThan(0);
+  expect(fight.experience % ZOMBIE_XP).toBe(0);
+  expect(fight.flesh).toBeGreaterThan(0);
+  expect(fight.sword).toMatchObject({ item: ItemType.IronSword, count: 1 });
+  expect(fight.sword!.damage).toBeGreaterThan(0);
+
+  // 第二段：朝 −Z 走，走到离出生点 16 格以外的露天处站住，等僵尸把玩家打死。每 tick 记下身上带着什么，以及
+  // 已有哪些掉落物与经验球：死亡那一 tick 背包清空，新出现的那些就是从他身上掉出来的
+  const death = await page.evaluate(
+    ({ away, limit, step }) => {
+      const core = window.__VOXEL__!.core;
+      const idle = { forward: false, back: false, left: false, right: false, jump: false };
+      const spawn = core.spawnPoint;
+      const fromSpawn = () => Math.hypot(core.player.position.x - spawn.x, core.player.position.z - spawn.z);
+      const openSky = ({ x, y, z }: Vec3) => core.highestBlockY(Math.floor(x), Math.floor(z)) < y;
+      const stacks = () =>
+        Array.from({ length: core.inventory.size }, (_, i) => core.inventory.slot(i)).filter(
+          (stack) => stack !== undefined,
+        );
+
+      // 视角转回朝 −Z。往前走不动就侧身让一步，侧身也走不动就换另一边，与 `walkTicks` 相同。走的路上也可能
+      // 被打死，所以从第一步起就记
+      core.turn(-core.player.yaw, 0);
+      let sidestep: 'none' | 'right' | 'left' = 'none';
+      let previous = core.player.position;
+      let arrived = false;
+      let before = { carried: stacks(), experience: core.experience.total };
+      let dropIds = new Set<number>();
+      let orbIds = new Set<number>();
+      for (let ticks = 0; ticks < limit && !core.health.dead; ticks++) {
+        before = { carried: stacks(), experience: core.experience.total };
+        dropIds = new Set(core.drops.all().map((drop) => drop.id));
+        orbIds = new Set(core.xpOrbs.all().map((orb) => orb.id));
+        arrived ||= fromSpawn() >= away && openSky(core.player.position);
+        core.setMoveIntent(
+          arrived
+            ? idle
+            : { forward: true, back: false, left: sidestep === 'left', right: sidestep === 'right', jump: true },
+        );
+        core.tick();
+        const now = core.player.position;
+        if (now.z < previous.z) sidestep = 'none';
+        else if (sidestep === 'none') sidestep = 'right';
+        else if (Math.abs(now.x - previous.x) < step / 2) sidestep = sidestep === 'right' ? 'left' : 'right';
+        previous = now;
+      }
+      core.setMoveIntent(idle);
+      const site = core.player.position;
+      const fromSite = (at: Vec3) => Math.hypot(at.x - site.x, at.z - site.z);
+      return {
+        dead: core.health.dead,
+        distance: fromSpawn(),
+        openSky: openSky(site),
+        before,
+        carriedAfter: stacks(),
+        experienceAfter: core.experience.total,
+        drops: core.drops
+          .all()
+          .filter((drop) => !dropIds.has(drop.id))
+          .map((drop) => ({ id: drop.id, item: drop.item, count: drop.count, fromSite: fromSite(drop.position) })),
+        orbs: core.xpOrbs
+          .all()
+          .filter((orb) => !orbIds.has(orb.id))
+          .map((orb) => ({ id: orb.id, amount: orb.amount, fromSite: fromSite(orb.position) })),
+      };
+    },
+    { away: DEATH_SITE_DISTANCE, limit: COMBAT_CHAIN_PHASE_TICKS, step: WALK_STEP },
+  );
+  expect(death.dead).toBe(true);
+  // 死在离出生点经验球吸引范围以外的露天处
+  expect(death.distance).toBeGreaterThan(XP_ATTRACT_RANGE);
+  expect(death.openSky).toBe(true);
+  // 身上的东西全部留在死亡处：每一堆一个掉落物，累计经验装进一个经验球，都在他倒下的那一格；背包空了、经验归零
+  expect(death.carriedAfter).toEqual([]);
+  expect(death.experienceAfter).toBe(0);
+  const byItem = (a: { item: number }, b: { item: number }) => a.item - b.item;
+  expect(death.drops.map(({ item, count }) => ({ item, count })).sort(byItem)).toEqual(
+    death.before.carried.map(({ item, count }) => ({ item, count })).sort(byItem),
+  );
+  expect(death.orbs.map((orb) => orb.amount)).toEqual([death.before.experience]);
+  for (const spawned of [...death.drops, ...death.orbs]) expect(spawned.fromSite).toBeLessThan(1);
+
+  // 第三段：死亡画面显示着，拨回白天。世界照常推进，僵尸照样朝死亡处走，只是打不到死了的玩家；聚在死亡处的
+  // 那些都在露天，一直烧到死
+  await expect(page.locator('#death-screen')).toBeVisible();
+  const day = await page.evaluate(
+    ({ limit, reach, burnDamage }) => {
+      const core = window.__VOXEL__!.core;
+      const site = core.player.position;
+      const orbsAtDawn = core.xpOrbs.all().map((orb) => orb.id);
+      core.setTimeOfDay(0);
+      const last = new Map<number, { health: number; burning: boolean }>();
+      const atSite = new Set<number>();
+      let ticks = 0;
+      for (; ticks < limit && core.zombies.count > 0; ticks++) {
+        core.tick();
+        for (const zombie of core.zombies.all()) {
+          last.set(zombie.id, { health: zombie.health, burning: zombie.burning });
+          const { x, z } = zombie.position;
+          if (Math.hypot(x - site.x, z - site.z) <= reach) atSite.add(zombie.id);
+        }
+      }
+      const alive = new Set(core.zombies.all().map((zombie) => zombie.id));
+      const burned = [...atSite].filter((id) => {
+        const seen = last.get(id)!;
+        return !alive.has(id) && seen.burning && seen.health <= burnDamage;
+      });
+      return {
+        dead: core.health.dead,
+        points: core.health.points,
+        atSite: atSite.size,
+        burned: burned.length,
+        orbsAtDawn,
+        orbsAfter: core.xpOrbs.all().map((orb) => orb.id),
+        experience: core.experience.total,
+      };
+    },
+    { limit: BURN_WAIT_TICKS, reach: ZOMBIE_ATTACK_RANGE, burnDamage: ZOMBIE_BURN_DAMAGE },
+  );
+  // 死了的玩家不受伤，也没有重生
+  expect(day.dead).toBe(true);
+  expect(day.points).toBe(0);
+  // 走到死亡处的僵尸全部烧死；烧死的不给经验：没有新的经验球，死亡处那一个也没被吸收
+  expect(day.atSite).toBeGreaterThan(0);
+  expect(day.burned).toBe(day.atSite);
+  expect(day.orbsAfter).toEqual(day.orbsAtDawn);
+  expect(day.experience).toBe(0);
+  await expect(page.locator('#death-screen')).toBeVisible();
+
+  // 点重生按钮：回到出生点、满血、背包是空的
+  await page.getByRole('button', { name: STRINGS.respawn }).click();
+  await expect(page.locator('#death-screen')).toBeHidden();
+  const respawned = await page.evaluate(() => {
+    const core = window.__VOXEL__!.core;
+    return {
+      atSpawn: JSON.stringify(core.player.position) === JSON.stringify(core.spawnPoint),
+      points: core.health.points,
+      dead: core.health.dead,
+      empty: Array.from({ length: core.inventory.size }, (_, i) => core.inventory.slot(i)).every(
+        (stack) => stack === undefined,
+      ),
+    };
+  });
+  expect(respawned).toEqual({ atSpawn: true, points: MAX_HEALTH, dead: false, empty: true });
+
+  // 第四段：跑回死亡处，把掉在那里的东西一件件拾回来。经验球进了吸引范围就自己飞过来
+  const returned = await page.evaluate(
+    ({ dropIds, orbIds, limit, step, flesh }) => {
+      const core = window.__VOXEL__!.core;
+      const horizontal = (a: Vec3, b: Vec3) => Math.hypot(a.x - b.x, a.z - b.z);
+      const waiting = () => core.drops.all().filter((drop) => dropIds.includes(drop.id));
+      const floating = () => core.xpOrbs.all().filter((orb) => orbIds.includes(orb.id));
+
+      // 朝最近的那一件走；离它没有更近就侧身让一步，侧身也走不动就换另一边
+      let sidestep: 'none' | 'right' | 'left' = 'none';
+      let previous = core.player.position;
+      let ticks = 0;
+      for (; ticks < limit && (waiting().length > 0 || floating().length > 0); ticks++) {
+        const me = core.player.position;
+        const target = [...waiting(), ...floating()].sort(
+          (a, b) => horizontal(a.position, me) - horizontal(b.position, me),
+        )[0]!;
+        const yaw = Math.atan2(-(target.position.x - me.x), -(target.position.z - me.z)) - core.player.yaw;
+        core.turn(Math.atan2(Math.sin(yaw), Math.cos(yaw)), 0);
+        core.setMoveIntent({
+          forward: true,
+          back: false,
+          left: sidestep === 'left',
+          right: sidestep === 'right',
+          jump: true,
+        });
+        const distance = horizontal(target.position, me);
+        core.tick();
+        const now = core.player.position;
+        if (horizontal(target.position, now) < distance - step / 2) sidestep = 'none';
+        else if (sidestep === 'none') sidestep = 'right';
+        else if (horizontal(now, previous) < step / 2) sidestep = sidestep === 'right' ? 'left' : 'right';
+        previous = now;
+      }
+      core.setMoveIntent({ forward: false, back: false, left: false, right: false, jump: false });
+      const stacks = Array.from({ length: core.inventory.size }, (_, i) => core.inventory.slot(i));
+      return {
+        ticks,
+        dead: core.health.dead,
+        experience: core.experience.total,
+        exceptFlesh: stacks.filter((stack) => stack !== undefined && stack.item !== flesh),
+        flesh: stacks.reduce((sum, stack) => sum + (stack?.item === flesh ? stack.count : 0), 0),
+      };
+    },
+    {
+      dropIds: death.drops.map((drop) => drop.id),
+      orbIds: death.orbs.map((orb) => orb.id),
+      limit: COMBAT_CHAIN_PHASE_TICKS,
+      step: WALK_STEP,
+      flesh: ItemType.RottenFlesh,
+    },
+  );
+  // 死亡处的掉落物与经验球都收回来了：铁剑带着死前的耐久损耗，腐肉一件不少（路上还可能拾到烧死的那些
+  // 掉的），经验回到死前的累计值
+  expect(returned.ticks).toBeLessThan(COMBAT_CHAIN_PHASE_TICKS);
+  expect(returned.dead).toBe(false);
+  expect(returned.exceptFlesh).toEqual(
+    death.before.carried.filter((stack) => stack.item !== ItemType.RottenFlesh),
+  );
+  const fleshBefore = death.before.carried
+    .filter((stack) => stack.item === ItemType.RottenFlesh)
+    .reduce((sum, stack) => sum + stack.count, 0);
+  expect(returned.flesh).toBeGreaterThanOrEqual(fleshBefore);
+  expect(returned.experience).toBe(death.before.experience);
   expect(errors).toEqual([]);
 });
 

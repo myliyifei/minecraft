@@ -40,7 +40,7 @@ export const ZOMBIE_MAX_FLESH = 2;
 export const ZOMBIE_XP = 50;
 
 /** 移动速度（方块/秒）。比玩家步行的 4.317 慢，玩家总跑得掉。 */
-export const ZOMBIE_SPEED = 3;
+export const ZOMBIE_SPEED = 1;
 
 /** 一 tick 的移动距离（方块）。 */
 export const ZOMBIE_STEP = ZOMBIE_SPEED / TICK_RATE;

@@ -165,8 +165,9 @@ describe('僵尸之间不互相推挤，可以重叠（#36 用户故事 20）', 
     zombies.spawnAt(PLAYER);
     zombies.spawnAt({ x: 5.5, y: FLAT_STAND_Y, z: 0.5 });
 
-    // 逐 tick 看：只看终点的话，接近途中推开一下、之后再走回来的也能过
-    for (let i = 1; i <= 40; i++) {
+    // 逐 tick 看：只看终点的话，接近途中推开一下、之后再走回来的也能过。走完 5 格之后再看 1 秒，
+    // 确认它走进另一只的碰撞箱、到了玩家脚下之后停在那里
+    for (let i = 1; i <= Math.ceil(5 / ZOMBIE_STEP) + 20; i++) {
       advance(1);
       const [still, walker] = zombies.all();
       expect(still!.position, `第 ${i} tick`).toEqual(PLAYER);
@@ -178,7 +179,7 @@ describe('僵尸之间不互相推挤，可以重叠（#36 用户故事 20）', 
 });
 
 describe('僵尸在 32 格内朝玩家直线走', () => {
-  it('每 tick 靠近 3 格/秒那么多，斜着走也不更快', () => {
+  it('每 tick 靠近 1 格/秒那么多，斜着走也不更快', () => {
     const { zombies, advance } = zombiesOnFlatGround();
     // 斜对着玩家，水平距离 20
     zombies.spawnAt({ x: 12.5, y: FLAT_STAND_Y, z: 16.5 });
@@ -191,7 +192,7 @@ describe('僵尸在 32 格内朝玩家直线走', () => {
     }
     // 20 tick 是 1 秒
     expect(distances[0]! - distances[20]!).toBeCloseTo(ZOMBIE_SPEED, 9);
-    expect(ZOMBIE_SPEED).toBe(3);
+    expect(ZOMBIE_SPEED).toBe(1);
   });
 
   it('偏航朝着玩家：视线方向的水平分量指向玩家', () => {
@@ -208,8 +209,9 @@ describe('僵尸在 32 格内朝玩家直线走', () => {
 
   it('走到玩家的水平位置就停住，不冲过头', () => {
     const { zombies, advance } = zombiesOnFlatGround();
-    zombies.spawnAt({ x: 2.5, y: FLAT_STAND_Y, z: 0.5 });
-    advance(40);
+    // 2.02 格不是一步的整数倍：最后一步要按剩下的距离截短，不然就冲过头
+    zombies.spawnAt({ x: 2.52, y: FLAT_STAND_Y, z: 0.5 });
+    advance(Math.ceil(2.02 / ZOMBIE_STEP) + 20);
     expect(horizontalDistance(zombies.all()[0]!)).toBeLessThan(1e-9);
   });
 
@@ -227,7 +229,8 @@ describe('僵尸在 32 格内朝玩家直线走', () => {
 
     let stoodOnWall = false;
     let highest = -Infinity;
-    advance(200, PLAYER, (zombie) => {
+    // 平地走完 20 格要这么多 tick，再留 2 秒给跳上墙、落下来
+    advance(Math.ceil(20 / ZOMBIE_STEP) + 40, PLAYER, (zombie) => {
       if (zombie.position.y === FLAT_STAND_Y + 1) stoodOnWall = true;
       highest = Math.max(highest, zombie.position.y);
     });
@@ -616,9 +619,10 @@ describe('僵尸的摔落伤害（#44）', () => {
 
   it('追着玩家摔死：落地那一 tick 不再水平走，掉落落在落地时所在的那一格', () => {
     const { zombies, advance, dropped } = zombiesOnFlatGround(1, FLESH_SEED);
-    // 玩家在 +X 方向 20 格外，僵尸从 28 格高处一边落一边朝它走：落地时 x 在 4.85，再走一步就进了下一格
+    // 玩家在 +X 方向 20 格外，僵尸从 28 格高处一边落一边朝它走，落地前走了 29 步：x 在 1.97，再走一步
+    // 到 2.02 就进了下一格。起点偏开 0.02 格，这一步才不会正好停在格子边界上，由浮点误差决定进没进去
     const player: Vec3 = { ...PLAYER, x: 20.5 };
-    zombies.spawnAt({ ...PLAYER, y: FLAT_STAND_Y + 28 });
+    zombies.spawnAt({ ...PLAYER, x: PLAYER.x + 0.02, y: FLAT_STAND_Y + 28 });
     let lastX = 0;
     advance(60, player, (zombie) => (lastX = zombie.position.x));
 

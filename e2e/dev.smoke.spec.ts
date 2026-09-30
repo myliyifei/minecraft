@@ -64,6 +64,7 @@ import {
   ZOMBIE_MAX_HEALTH,
   ZOMBIE_SPAWN_MAX_DISTANCE,
   ZOMBIE_SPAWN_MIN_DISTANCE,
+  ZOMBIE_SPEED,
   ZOMBIE_XP,
 } from '../src/core/zombie';
 import { ITEM_NAMES, durabilityLabel, recipeLabel, STRINGS } from '../src/ui/strings';
@@ -3392,12 +3393,13 @@ test('调试句柄在玩家前方 3 格生成一只僵尸：下一帧场景里�
   expect(g).toBeGreaterThan(r);
   expect(g).toBeGreaterThan(b);
 
-  // 走动时臂在摆；推进 20 tick 之后还是同一只，离相机更近了
+  // 走动时臂在摆；推进 20 tick 之后还是同一只，离相机更近了。20 tick 是 1 秒，走近 ZOMBIE_SPEED 格，
+  // 只要求走近一半：要求正好走近那么多的话，比较结果取决于浮点误差
   expect(seen.walking[0]!.armSwing).not.toBe(0);
   expect(seen.count).toBe(1);
   expect(seen.later.zombies[0]!.id).toBe(1);
   expect(horizontal(seen.later.zombies[0]!.position, seen.later.camera)).toBeLessThan(
-    horizontal(seen.spawned.zombies[0]!.position, seen.spawned.camera) - 1,
+    horizontal(seen.spawned.zombies[0]!.position, seen.spawned.camera) - ZOMBIE_SPEED / 2,
   );
   expect(errors).toEqual([]);
 });

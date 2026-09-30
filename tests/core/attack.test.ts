@@ -345,12 +345,14 @@ describe('挖掘途中僵尸挡到视线前面', () => {
  * 空着。视线从空着的那一格穿过去打得到它；它走不过来（身子被脚下那块挡住），也跳不上去（抬高一格
  * 会顶到上面那块）。不关住的话它追到玩家身上，掉的经验球同一 tick 就被吸走了。
  *
- * 墙在 z = −1 那一格，僵尸贴着墙站在 z = −1.3，碰撞箱正面离眼睛 1.5 格。它身后被击退到的那几格
- * 头顶也盖上，挡住太阳：白天露天的僵尸会燃烧（#44），不挡的话它掉的血就不全是打出来的。
+ * 墙在 z = −1 那一格，僵尸贴着墙站在 z = −1.3，碰撞箱正面离眼睛 1.5 格。它身后 z = −3 那一格也立一道
+ * 两格高的墙：它贴着前墙时中心在 z = −1.3，击退最多把它推到 −1.7，推开 0.4 格，下一下照样打得到，打几下死不取决于它走回来有多快。头顶也盖上，
+ * 挡住太阳：白天露天的僵尸会燃烧（#44），不挡的话它掉的血就不全是打出来的。
  */
 function pennedZombie(game: GameCore): void {
   game.setBlock(0, EYE_LAYER - 1, -1, BlockType.Stone);
-  for (let z = -5; z <= -1; z++) game.setBlock(0, EYE_LAYER + 1, z, BlockType.Stone);
+  for (let y = FLAT_STAND_Y; y <= EYE_LAYER; y++) game.setBlock(0, y, -3, BlockType.Stone);
+  for (let z = -2; z <= -1; z++) game.setBlock(0, EYE_LAYER + 1, z, BlockType.Stone);
   zombieAhead(game, 2);
 }
 

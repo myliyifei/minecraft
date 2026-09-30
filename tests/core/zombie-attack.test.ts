@@ -138,10 +138,11 @@ describe('被僵尸打死', () => {
 });
 
 describe('僵尸打得到的范围', () => {
-  it('2 格外不打：走近到 1.5 格以内那一 tick 才打（每 tick 走 0.15 格，第 4 tick）', () => {
+  it('2 格外不打：走近到 1.5 格以内那一 tick 才打（每 tick 走 0.05 格，2.02 格外第 11 tick）', () => {
+    // 2.02 而不是 2：从 2 格走 10 tick 正好落在 1.5 格上，打不打取决于浮点误差
     const game = core();
-    zombieBeside(game, 2);
-    game.tick(3);
+    zombieBeside(game, 2.02);
+    game.tick(10);
     expect(game.health.points).toBe(20);
     game.tick();
     expect(game.health.points).toBe(17);

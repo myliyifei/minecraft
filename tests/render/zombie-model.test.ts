@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import type { ZombieView } from '../../src/core/zombie';
+import { ZOMBIE_STEP, type ZombieView } from '../../src/core/zombie';
 import { TILE, tileAtUv } from '../../src/render/atlas';
 import {
   ZOMBIE_HURT_TINT_TICKS,
@@ -32,7 +32,7 @@ function zombie(overrides: Partial<ZombieView> = {}): ZombieView {
 
 /** 这一 tick 朝 −Z 走了一步的僵尸。 */
 function walking(age: number): ZombieView {
-  return zombie({ age, previousPosition: { x: 0, y: 0, z: 0.15 } });
+  return zombie({ age, previousPosition: { x: 0, y: 0, z: ZOMBIE_STEP } });
 }
 
 function model(): THREE.Group {

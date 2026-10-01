@@ -314,17 +314,17 @@ describe('世界里的熔炉每 tick 推进，只推进已加载区块里的（i
 
   it('点火时方块换成燃烧中的编号，熄火时换回熔炉；状态还是那一条', () => {
     const { world, state } = worldWithFurnace();
-    world.takeChangedBlocks();
+    world.takeStaleChunks();
     runWorld(world, 1);
     expect(world.getBlock(...SPOT)).toBe(BlockType.LitFurnace);
     expect(world.blockStateAt(...SPOT)).toBe(state);
-    // 走正常的写方块路径：网格重建靠「哪些方块变过」这份记录
-    expect(world.takeChangedBlocks()).toEqual([{ x: SPOT[0], y: SPOT[1], z: SPOT[2] }]);
+    // 走正常的写方块路径：网格重建靠「哪些区块的网格过期了」这份记录
+    expect(world.takeStaleChunks()).toEqual([{ cx: 0, cz: 0 }]);
 
     runWorld(world, COAL_TICKS - 2);
     expect(world.getBlock(...SPOT)).toBe(BlockType.LitFurnace);
     // 一直在烧，中间没有换过编号
-    expect(world.takeChangedBlocks()).toEqual([]);
+    expect(world.takeStaleChunks()).toEqual([]);
     runWorld(world, 1);
     expect(world.getBlock(...SPOT)).toBe(BlockType.Furnace);
     expect(world.blockStateAt(...SPOT)).toBe(state);
@@ -334,11 +334,11 @@ describe('世界里的熔炉每 tick 推进，只推进已加载区块里的（i
   it('原料格空、燃料格有煤：方块一直是熔炉，中间没有换过编号', () => {
     const { world, state } = worldWithFurnace();
     state.input = undefined;
-    world.takeChangedBlocks();
+    world.takeStaleChunks();
     runWorld(world, SMELT);
     expect(world.getBlock(...SPOT)).toBe(BlockType.Furnace);
-    // 点火又熄火会留下变过的记录，只看最后的编号查不出来
-    expect(world.takeChangedBlocks()).toEqual([]);
+    // 点火又熄火会让网格过期，只看最后的编号查不出来
+    expect(world.takeStaleChunks()).toEqual([]);
   });
 
   it('所在区块卸载 500 tick，进度与燃料不变；重新加载后接着推进', () => {

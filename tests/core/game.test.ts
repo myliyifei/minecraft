@@ -330,6 +330,17 @@ describe('GameCore 的方块写入', () => {
   });
 });
 
+describe('GameCore 的光照查询（issue #51 的占位，由 #52、#54 替换）', () => {
+  // 核心透出世界上的同名查询。接口位置先定下来，#52、#54 填真正的实现，调用方不改
+  it('天光恒为 15，方块光恒为 0', () => {
+    const core = coreOnFlatGround();
+    for (const y of [FLAT_GROUND_Y + 1, FLAT_GROUND_Y - 3]) {
+      expect(core.skyLightAt(3, y, 4)).toBe(15);
+      expect(core.blockLightAt(3, y, 4)).toBe(0);
+    }
+  });
+});
+
 describe('GameCore 的出生点', () => {
   it('出生点在地表之上，脚下是实心方块、脚位与头位是空气', () => {
     const core = sampleCore();
@@ -458,14 +469,17 @@ describe('GameCore 的空手挖掘', () => {
     expect(core.getBlock(...UNDERFOOT)).toBe(BlockType.Grass);
   });
 
-  it('挖掉的那一格出现在「变过的方块」里，取走后清空', () => {
+  it('挖掉的那一格让它所在的区块与那一侧的邻居过期，取走后清空', () => {
     const core = lookingDown();
     core.setMining(true);
     core.tick(GRASS_TICKS);
-    expect(core.takeChangedBlocks()).toEqual([
-      { x: UNDERFOOT[0], y: UNDERFOOT[1], z: UNDERFOOT[2] },
+    // 脚下 (0, 0) 坐在原点区块的 −X 与 −Z 两条边上
+    expect(core.takeStaleChunks()).toEqual([
+      { cx: 0, cz: 0 },
+      { cx: -1, cz: 0 },
+      { cx: 0, cz: -1 },
     ]);
-    expect(core.takeChangedBlocks()).toEqual([]);
+    expect(core.takeStaleChunks()).toEqual([]);
   });
 
   it('挖穿脚下之后玩家掉进坑里', () => {
@@ -557,18 +571,18 @@ describe('GameCore 的空手挖掘', () => {
       expect(core.drops.count).toBe(0);
     });
 
-    it('掉落物是实体，不进「变过的方块」那份记录', () => {
+    it('掉落物是实体，不让网格过期', () => {
       const core = lookingDown();
       core.setMining(true);
       core.tick(GRASS_TICKS);
       core.setMining(false);
-      // 挖掉那一格是方块变更，取走之后记录就该是空的
-      expect(core.takeChangedBlocks()).toHaveLength(1);
+      // 挖掉那一格是方块变更：脚下 (0, 0) 坐在两条区块边上，过期的是自己与两个侧向邻居
+      expect(core.takeStaleChunks()).toHaveLength(3);
 
       // 掉落物在这几十 tick 里下落、被吸走，一次都不该让网格重建
       core.tick(PICKUP_DELAY_TICKS + TICK_RATE);
       expect(core.drops.count).toBe(0);
-      expect(core.takeChangedBlocks()).toEqual([]);
+      expect(core.takeStaleChunks()).toEqual([]);
     });
   });
 
@@ -645,7 +659,7 @@ describe('GameCore 的空手挖掘', () => {
       for (let depth = 0; depth < blocks; depth++) {
         core.setBlock(UNDERFOOT[0], UNDERFOOT[1] - depth, UNDERFOOT[2], BlockType.Grass);
       }
-      core.takeChangedBlocks();
+      core.takeStaleChunks();
 
       core.setMining(true);
       // 一路往下挖：每挖穿一块，目标当场落到下面那块上。每块多给几 tick 的落地余量
@@ -661,17 +675,17 @@ describe('GameCore 的空手挖掘', () => {
       expect(core.experience.progress).toBeLessThan(1);
     });
 
-    it('经验球是实体，不进「变过的方块」那份记录', () => {
+    it('经验球是实体，不让网格过期', () => {
       const core = lookingDown();
       core.setMining(true);
       core.tick(GRASS_TICKS);
       core.setMining(false);
-      expect(core.takeChangedBlocks()).toHaveLength(1);
+      expect(core.takeStaleChunks()).toHaveLength(3);
 
       // 经验球在这几十 tick 里飞过来、被吸收，一次都不该让网格重建
       core.tick(ABSORB_TICKS);
       expect(core.xpOrbs.count).toBe(0);
-      expect(core.takeChangedBlocks()).toEqual([]);
+      expect(core.takeStaleChunks()).toEqual([]);
     });
   });
 });
@@ -759,17 +773,24 @@ describe('GameCore 的连锁挖掘', () => {
     expect(remaining(core, cells)).toEqual(cells.slice(1));
   });
 
-  it('挖掉的每一格都出现在「变过的方块」里', () => {
+  it('挖掉的那些格让所在的区块过期，一个区块只报一次', () => {
     const { core, cells } = trunkUnderfoot();
     core.setMining(true);
     core.setChainMining(true);
     core.tick(LOG_TICKS);
+    expect(remaining(core, cells)).toEqual([]);
 
-    // 顺序是连锁的发现顺序，这里只关心「一格都没漏、也没多」
-    const changed = core.takeChangedBlocks();
-    expect(changed).toHaveLength(TRUNK_HEIGHT);
-    expect(changed).toEqual(expect.arrayContaining(cells));
-    expect(core.takeChangedBlocks()).toEqual([]);
+    // 整根树干在 (0, 0) 那一列，坐在原点区块的 −X 与 −Z 两条边上：五格只让这三个区块过期
+    const stale = core.takeStaleChunks();
+    expect(stale).toHaveLength(3);
+    expect(stale).toEqual(
+      expect.arrayContaining([
+        { cx: 0, cz: 0 },
+        { cx: -1, cz: 0 },
+        { cx: 0, cz: -1 },
+      ]),
+    );
+    expect(core.takeStaleChunks()).toEqual([]);
   });
 });
 
@@ -922,11 +943,11 @@ describe('GameCore 的放置方块', () => {
     core.tick();
     const target = core.mining.target;
     expect(target).toMatchObject({ normal: { x: 0, y: 1, z: 0 } });
-    core.takeChangedBlocks();
+    core.takeStaleChunks();
 
     placeOnce(core);
     expect(core.getBlock(target!.x, target!.y + 1, target!.z)).toBe(BlockType.Air);
-    expect(core.takeChangedBlocks()).toEqual([]);
+    expect(core.takeStaleChunks()).toEqual([]);
   });
 
   it('切换选中格后放置的是新格里的方块', () => {
@@ -954,13 +975,17 @@ describe('GameCore 的放置方块', () => {
     expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Dirt);
   });
 
-  it('放下的那一格进「变过的方块」，渲染层据此重建网格', () => {
+  it('放下的那一格让所在的区块过期，渲染层据此重建网格', () => {
     const core = holdingDirt();
-    core.takeChangedBlocks();
+    core.takeStaleChunks();
 
     placeOnce(core);
-    expect(core.takeChangedBlocks()).toEqual([toVec(ABOVE_ASIDE)]);
-    expect(core.takeChangedBlocks()).toEqual([]);
+    // ABOVE_ASIDE 在 z = 0 上，坐在原点区块的 −Z 边上
+    expect(core.takeStaleChunks()).toEqual([
+      { cx: 0, cz: 0 },
+      { cx: 0, cz: -1 },
+    ]);
+    expect(core.takeStaleChunks()).toEqual([]);
   });
 
   it('同一个 tick 里按两次使用键只放一块', () => {
@@ -1059,13 +1084,13 @@ describe('GameCore 的背包界面', () => {
     core.tick();
     expect(core.mining.target).toBeDefined();
     // 挖出来那一格的变更记录先取走，剩下的变更就只可能来自放置
-    core.takeChangedBlocks();
+    core.takeStaleChunks();
 
     openInventory(core);
     core.use();
     core.tick();
     expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
-    expect(core.takeChangedBlocks()).toEqual([]);
+    expect(core.takeStaleChunks()).toEqual([]);
   });
 
   it('界面模式只挡输入，世界照样在跑：掉落物仍被吸进背包', () => {
@@ -1553,12 +1578,12 @@ describe('GameCore 的工作台', () => {
     look(core, 0, 0);
     core.tick();
     expect(core.mining.target).toMatchObject(toVec(AHEAD_FROM_PIT));
-    core.takeChangedBlocks();
+    core.takeStaleChunks();
 
     useOnce(core);
     expect(core.craftingTableScreen.open).toBe(true);
     expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
-    expect(core.takeChangedBlocks()).toEqual([]);
+    expect(core.takeStaleChunks()).toEqual([]);
   });
 
   it('对着泥土或草按使用键仍是放置', () => {
@@ -1753,22 +1778,22 @@ describe('GameCore 的熔炉界面（issue #33）', () => {
     look(core, 0, 0);
     core.tick();
     expect(core.mining.target).toMatchObject(toVec(AHEAD_FROM_PIT));
-    core.takeChangedBlocks();
+    core.takeStaleChunks();
 
     useOnce(core);
     expect(core.furnaceScreen.open).toBe(true);
     expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
-    expect(core.takeChangedBlocks()).toEqual([]);
+    expect(core.takeStaleChunks()).toEqual([]);
   });
 
   it('熔炉超出触及距离时按使用键什么都不改变', () => {
     const core = facingFurnace(BlockType.Furnace, FAR_AHEAD);
     expect(core.mining.target).toBeUndefined();
-    core.takeChangedBlocks();
+    core.takeStaleChunks();
     useOnce(core);
     expect(core.furnaceScreen.open).toBe(false);
     expect(core.uiMode).toBe(false);
-    expect(core.takeChangedBlocks()).toEqual([]);
+    expect(core.takeStaleChunks()).toEqual([]);
     expect(core.blockStateAt(...FAR_AHEAD)).toEqual(newFurnaceState());
   });
 
@@ -1957,13 +1982,13 @@ describe('GameCore 的熔炼（issue #34）', () => {
 
   it('原料 1 个粗铁、燃料 1 个煤炭：第 1 tick 燃料格空、方块变燃烧中；第 200 tick 出 1 个铁锭、原料空；第 1600 tick 变回熔炉', () => {
     const { core, state } = smeltingAhead(1);
-    core.takeChangedBlocks();
+    core.takeStaleChunks();
 
     core.tick();
     expect(state.fuel).toBeUndefined();
     expect(core.getBlock(...AHEAD)).toBe(BlockType.LitFurnace);
     // 换编号走正常的写方块路径：渲染层据此重建那个区块的网格
-    expect(core.takeChangedBlocks()).toContainEqual(toVec(AHEAD));
+    expect(core.takeStaleChunks()).toContainEqual({ cx: 0, cz: -1 });
     // 换编号不换状态
     expect(core.blockStateAt(...AHEAD)).toBe(state);
 
@@ -2231,13 +2256,13 @@ describe('GameCore 的木石两档工具', () => {
     look(core, EAST_YAW, ASIDE_PITCH);
     core.tick();
     expect(core.mining.target).toMatchObject(toVec(ASIDE));
-    core.takeChangedBlocks();
+    core.takeStaleChunks();
 
     core.use();
     core.tick();
     expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Air);
     expect(core.inventory.held).toEqual(PICKAXE);
-    expect(core.takeChangedBlocks()).toEqual([]);
+    expect(core.takeStaleChunks()).toEqual([]);
     expect(core.uiMode).toBe(false);
   });
 

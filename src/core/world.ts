@@ -6,8 +6,7 @@ import {
   type BlockStateView,
 } from './block-state';
 import { Chunk } from './chunk';
-import { CHUNK_SHIFT, CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from './constants';
-import type { Vec3 } from './vec3';
+import { CHUNK_SHIFT, CHUNK_SIZE, MAX_LIGHT_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from './constants';
 
 export interface ChunkCoord {
   readonly cx: number;
@@ -53,14 +52,17 @@ export class World implements BlockEdit, BlockStateView {
    */
   private readonly editedChunks = new Map<number, Chunk>();
   /**
-   * 自上次取走以来内容变过的方块，按坐标去重。
+   * 自上次取走以来网格过期了的区块，按区块键去重。
    *
-   * 键用 `"x,y,z"` 字符串而不是像 `chunkKey` 那样打包成数字：这条路每 tick 最多走几次
-   * （挖掉一块、放下一块），不是网格生成那种每帧几十万次的热路径，而三个无界的整数
-   * 打包成安全整数并不划算。没人来取时它会一直攒着——浏览器里渲染层每帧取一次
-   * （见 `WorldRenderer.syncChunkMeshes`），核心层测试里世界是一次性的。
+   * 由 `setBlock` 记：方块自己的区块一定过期；它坐在区块边界上时，那一侧的邻居也过期——边界上的
+   * 面生不生成取决于隔壁那一格是什么，只重建自己就会在挖开的地方留下一个看穿到虚空的洞，或者留下
+   * 一堵本该消失的墙。只记四个侧向的邻居，不记斜角：网格只问六个轴向的邻居。有了光照数组之后
+   * （#52、ADR-0017），光照变过的区块也记进这里，渲染层不必知道是哪一种原因。
+   *
+   * 没加载的邻居也记：要不要重建网格由渲染层判断。没人来取时记录会一直累积——浏览器里渲染层
+   * 每帧取一次（见 `WorldRenderer.syncChunkMeshes`），核心层测试里世界是一次性的。
    */
-  private readonly changed = new Map<string, Vec3>();
+  private readonly stale = new Map<number, ChunkCoord>();
   /**
    * 方块状态表（见 CONTEXT.md 的「方块状态」、ADR-0011）：键是世界坐标，值是那一格方块的额外状态。
    *
@@ -68,7 +70,8 @@ export class World implements BlockEdit, BlockStateView {
    * 切换（熄火与燃烧中的熔炉）那条不动。区块卸载不删这里的条目——带状态的方块一定是玩家放的，
    * 那个区块因此是已改区块，卸载后整块留着（ADR-0008），走回来时方块与状态都还在。
    *
-   * 键用 `"x,y,z"` 字符串，理由同 `changed`：放下、挖掉每 tick 最多几次。值连坐标一起存（`BlockStateEntry`），
+   * 键用 `"x,y,z"` 字符串而不是像 `chunkKey` 那样打包成数字：放下、挖掉每 tick 最多几次，不是网格生成
+   * 那种每帧几十万次的热路径，而三个无界的整数打包成安全整数并不划算。值连坐标一起存（`BlockStateEntry`），
    * 每 tick 推进熔炉（`loadedBlockStates`）时不必再从键里解出坐标。
    */
   private readonly blockStates = new Map<string, BlockStateEntry>();
@@ -177,7 +180,7 @@ export class World implements BlockEdit, BlockStateView {
     this.syncBlockState(bx, by, bz, previous, block);
     // 这一下让它成了已改区块，卸载后不再丢弃。
     this.editedChunks.set(key, chunk);
-    this.changed.set(blockKey(bx, by, bz), { x: bx, y: by, z: bz });
+    this.markStale(bx, bz);
     return true;
   }
 
@@ -221,19 +224,52 @@ export class World implements BlockEdit, BlockStateView {
   }
 
   /**
-   * 取走「哪些方块变过」的记录并清空。
-   *
-   * 世界不知道网格是怎么回事，只报格子；哪些网格因此过期由渲染层判断
-   * （边界上的方块还牵动邻居区块，见 `staleChunksFor`）。
+   * (bx, bz) 那一列的方块变了：它的区块过期，坐在区块边界上时那一侧的邻居也过期（见 `stale`）。
+   * 要求整数输入。
    */
-  takeChangedBlocks(): Vec3[] {
-    const blocks = [...this.changed.values()];
-    this.changed.clear();
-    return blocks;
+  private markStale(bx: number, bz: number): void {
+    const cx = chunkOf(bx);
+    const cz = chunkOf(bz);
+    this.markChunkStale(cx, cz);
+    const lx = localOf(bx);
+    const lz = localOf(bz);
+    if (lx === 0) this.markChunkStale(cx - 1, cz);
+    if (lx === CHUNK_SIZE - 1) this.markChunkStale(cx + 1, cz);
+    if (lz === 0) this.markChunkStale(cx, cz - 1);
+    if (lz === CHUNK_SIZE - 1) this.markChunkStale(cx, cz + 1);
+  }
+
+  private markChunkStale(cx: number, cz: number): void {
+    this.stale.set(chunkKey(cx, cz), { cx, cz });
+  }
+
+  /** 取走「哪些区块的网格过期了」的记录并清空。渲染层每帧取一次，重建其中已有网格的那些。 */
+  takeStaleChunks(): ChunkCoord[] {
+    const chunks = [...this.stale.values()];
+    this.stale.clear();
+    return chunks;
+  }
+
+  /**
+   * (x, y, z) 那一格的天光等级（见 CONTEXT.md 的「天光」）。
+   *
+   * 占位：恒为 15。#52 换成光照数组里的值（ADR-0017），调用方不改。
+   */
+  skyLightAt(_x: number, _y: number, _z: number): number {
+    return MAX_LIGHT_LEVEL;
+  }
+
+  /**
+   * (x, y, z) 那一格的方块光等级（见 CONTEXT.md 的「方块光」）。
+   *
+   * 占位：恒为 0。#54 换成光照数组里的值（ADR-0017），调用方不改。
+   */
+  blockLightAt(_x: number, _y: number, _z: number): number {
+    return 0;
   }
 }
 
-/** 「变过的方块」与方块状态表共用的坐标键。要求整数输入。 */
+/** 方块状态表的坐标键。要求整数输入。 */
 function blockKey(x: number, y: number, z: number): string {
   return `${x},${y},${z}`;
 }

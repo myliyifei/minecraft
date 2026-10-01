@@ -4,7 +4,7 @@ import { newFurnaceState } from '../../src/core/block-state';
 import { ItemType } from '../../src/core/item';
 import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { plainsSurfaceHeight, plainsTerrain } from '../../src/core/terrain';
-import { World, type ChunkSource } from '../../src/core/world';
+import { World, type ChunkCoord, type ChunkSource } from '../../src/core/world';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 
 /** 一个区块的全部方块。用它比较两次得到的区块是否逐格一致。 */
@@ -343,7 +343,7 @@ describe('World 的方块状态表（issue #30、ADR-0011）', () => {
   });
 });
 
-describe('World 记下变过的方块', () => {
+describe('World 记下网格过期的区块', () => {
   /** 一个已加载区块的平地世界。 */
   function loadedWorld(): World {
     const world = new World(flatTestTerrain);
@@ -351,44 +351,113 @@ describe('World 记下变过的方块', () => {
     return world;
   }
 
-  it('新建的世界没有变过的方块', () => {
-    expect(loadedWorld().takeChangedBlocks()).toEqual([]);
+  function keysOf(coords: readonly ChunkCoord[]): string[] {
+    return coords.map(({ cx, cz }) => `${cx},${cz}`);
+  }
+
+  /** 区块内部、四条边都不挨着的一格。 */
+  const INSIDE = [5, FLAT_GROUND_Y, 7] as const;
+
+  it('新建的世界没有过期的区块', () => {
+    expect(loadedWorld().takeStaleChunks()).toEqual([]);
   });
 
-  it('挖掉一格之后记下它的方块坐标', () => {
+  it('区块内部的一格只让自己那个区块过期', () => {
     const world = loadedWorld();
-    world.setBlock(3.7, FLAT_GROUND_Y, 4.2, BlockType.Air);
-    // 坐标按 floor 取整，记的是格子而不是传进来的小数
-    expect(world.takeChangedBlocks()).toEqual([{ x: 3, y: FLAT_GROUND_Y, z: 4 }]);
+    world.setBlock(...INSIDE, BlockType.Air);
+    expect(keysOf(world.takeStaleChunks())).toEqual(['0,0']);
+  });
+
+  it('区块边界上的一格连那一侧的邻居一起过期', () => {
+    const cases: Array<[string, number, number, string[]]> = [
+      ['−X 边', 0, 7, ['0,0', '-1,0']],
+      ['+X 边', CHUNK_SIZE - 1, 7, ['0,0', '1,0']],
+      ['−Z 边', 5, 0, ['0,0', '0,-1']],
+      ['+Z 边', 5, CHUNK_SIZE - 1, ['0,0', '0,1']],
+    ];
+    for (const [name, x, z, expected] of cases) {
+      const world = loadedWorld();
+      world.setBlock(x, FLAT_GROUND_Y, z, BlockType.Air);
+      expect(keysOf(world.takeStaleChunks()), name).toEqual(expected);
+    }
+  });
+
+  it('区块角上的一格让两个侧向邻居过期，斜对角不过期', () => {
+    // 网格只问六个轴向的邻居，斜对角那一格与谁的面都无关
+    const world = loadedWorld();
+    world.setBlock(0, FLAT_GROUND_Y, 0, BlockType.Air);
+    expect(keysOf(world.takeStaleChunks())).toEqual(['0,0', '-1,0', '0,-1']);
+  });
+
+  it('负坐标归到正确的区块', () => {
+    const world = new World(flatTestTerrain);
+    world.loadChunk(-1, -2);
+    world.setBlock(-1, FLAT_GROUND_Y, -17, BlockType.Air);
+    expect(keysOf(world.takeStaleChunks())).toEqual(['-1,-2', '0,-2', '-1,-1']);
+  });
+
+  it('小数坐标按 floor 归格', () => {
+    const world = loadedWorld();
+    world.setBlock(15.9, FLAT_GROUND_Y, 7.2, BlockType.Air);
+    expect(keysOf(world.takeStaleChunks())).toEqual(['0,0', '1,0']);
+  });
+
+  it('同一个区块里改了几格、同一格改了几次，都只报一次', () => {
+    const world = loadedWorld();
+    world.setBlock(...INSIDE, BlockType.Air);
+    world.setBlock(...INSIDE, BlockType.Stone);
+    world.setBlock(6, FLAT_GROUND_Y + 1, 7, BlockType.Stone);
+    world.setBlock(5, FLAT_GROUND_Y + 2, 8, BlockType.Stone);
+    expect(keysOf(world.takeStaleChunks())).toEqual(['0,0']);
+  });
+
+  it('两格的邻居重叠时去重：两格都在 −X 边上，邻居只报一次', () => {
+    const world = loadedWorld();
+    world.setBlock(0, FLAT_GROUND_Y, 5, BlockType.Air);
+    world.setBlock(0, FLAT_GROUND_Y, 9, BlockType.Air);
+    expect(keysOf(world.takeStaleChunks())).toEqual(['0,0', '-1,0']);
   });
 
   it('取走之后清空，同一次改动不会报两遍', () => {
     const world = loadedWorld();
-    world.setBlock(3, FLAT_GROUND_Y, 4, BlockType.Air);
-    expect(world.takeChangedBlocks()).toHaveLength(1);
-    expect(world.takeChangedBlocks()).toEqual([]);
+    world.setBlock(...INSIDE, BlockType.Air);
+    expect(world.takeStaleChunks()).toHaveLength(1);
+    expect(world.takeStaleChunks()).toEqual([]);
   });
 
-  it('同一格改了几次只报一遍', () => {
+  it('写成原本就是的方块不让网格过期', () => {
     const world = loadedWorld();
-    world.setBlock(3, FLAT_GROUND_Y, 4, BlockType.Air);
-    world.setBlock(3, FLAT_GROUND_Y, 4, BlockType.Stone);
-    expect(world.takeChangedBlocks()).toEqual([{ x: 3, y: FLAT_GROUND_Y, z: 4 }]);
+    expect(world.setBlock(...INSIDE, BlockType.Grass)).toBe(true);
+    expect(world.takeStaleChunks()).toEqual([]);
   });
 
-  it('写成原本就是的方块不算变过', () => {
-    const world = loadedWorld();
-    expect(world.setBlock(3, FLAT_GROUND_Y, 4, BlockType.Grass)).toBe(true);
-    expect(world.takeChangedBlocks()).toEqual([]);
-  });
-
-  it('没落到世界里的写入不算变过', () => {
+  it('没落到世界里的写入不让网格过期', () => {
     const world = loadedWorld();
     // 区块未加载
     world.setBlock(1000, FLAT_GROUND_Y, 0, BlockType.Air);
     // y 越界
     world.setBlock(3, WORLD_MAX_Y + 1, 4, BlockType.Stone);
-    expect(world.takeChangedBlocks()).toEqual([]);
+    expect(world.takeStaleChunks()).toEqual([]);
+  });
+});
+
+describe('光照查询的占位（issue #51，由 #52、#54 替换）', () => {
+  /**
+   * 接口位置先定下来：调用方从现在起就按这两个方法读光照，#52、#54 填真正的实现，调用方不改。
+   * 那时这一组整体换成真正的天光与方块光测试。
+   */
+  it('天光恒为 15', () => {
+    const world = new World(flatTestTerrain);
+    world.loadChunk(0, 0);
+    expect(world.skyLightAt(3, FLAT_GROUND_Y + 1, 4)).toBe(15);
+    expect(world.skyLightAt(3, FLAT_GROUND_Y - 5, 4)).toBe(15);
+  });
+
+  it('方块光恒为 0', () => {
+    const world = new World(flatTestTerrain);
+    world.loadChunk(0, 0);
+    expect(world.blockLightAt(3, FLAT_GROUND_Y + 1, 4)).toBe(0);
+    expect(world.blockLightAt(3, FLAT_GROUND_Y - 5, 4)).toBe(0);
   });
 });
 

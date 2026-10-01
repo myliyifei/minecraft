@@ -1,14 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { CHUNK_SIZE, DEFAULT_VIEW_RADIUS } from '../../src/core/constants';
+import { DEFAULT_VIEW_RADIUS } from '../../src/core/constants';
 import { GameCore } from '../../src/core/game';
 import { IDLE_INTENT } from '../../src/core/player';
-import type { Vec3 } from '../../src/core/vec3';
 import { chunkKey, chunksAround, type ChunkCoord } from '../../src/core/world';
-import {
-  MESH_BUDGET_PER_FRAME,
-  planChunkMeshes,
-  staleChunksFor,
-} from '../../src/render/mesh-plan';
+import { MESH_BUDGET_PER_FRAME, planChunkMeshes } from '../../src/render/mesh-plan';
 
 /** 已加载区块由一组 "cx,cz" 决定的世界。 */
 function worldWith(loaded: Iterable<ChunkCoord>) {
@@ -28,7 +23,7 @@ function square(radius: number, center: ChunkCoord = CENTER): ChunkCoord[] {
 }
 
 describe('该给哪些区块建网格', () => {
-  it('只给四邻都已加载的区块建：最外一圈等邻居到位', () => {
+  it('只给 8 个邻居都已加载的区块建：最外一圈等邻居到位', () => {
     const plan = planChunkMeshes({
       world: worldWith(square(2)),
       meshed: [],
@@ -37,7 +32,7 @@ describe('该给哪些区块建网格', () => {
       budget: Infinity,
     });
 
-    // 半径 2 已加载 5×5，其中四邻齐全的只有中间的 3×3
+    // 半径 2 已加载 5×5，其中 8 个邻居齐全的只有中间的 3×3
     expect(plan.build).toHaveLength(9);
     expect(keysOf(plan.build)).toContain('0,0');
     expect(keysOf(plan.build)).toContain('1,-1');
@@ -56,41 +51,41 @@ describe('该给哪些区块建网格', () => {
     expect(plan.build).toHaveLength(8);
   });
 
-  it('缺一个邻居就不建，邻居到位后才建', () => {
-    const missingNeighbor = square(1).filter(({ cx, cz }) => !(cx === 1 && cz === 0));
-    expect(
-      planChunkMeshes({
-        world: worldWith(missingNeighbor),
+  it('8 个邻居（含对角）缺任何一个都不建', () => {
+    const neighbors = square(1).filter(({ cx, cz }) => !(cx === 0 && cz === 0));
+    expect(neighbors).toHaveLength(8);
+    for (const missing of neighbors) {
+      const plan = planChunkMeshes({
+        world: worldWith(square(1).filter(({ cx, cz }) => cx !== missing.cx || cz !== missing.cz)),
         meshed: [],
         center: CENTER,
         radius: 1,
         budget: Infinity,
-      }).build,
-    ).toEqual([]);
-
-    expect(
-      keysOf(
-        planChunkMeshes({
-          world: worldWith(square(1)),
-          meshed: [],
-          center: CENTER,
-          radius: 1,
-          budget: Infinity,
-        }).build,
-      ),
-    ).toEqual(['0,0']);
+      });
+      expect(plan.build, `缺 ${missing.cx},${missing.cz}`).toEqual([]);
+    }
   });
 
-  it('对角线上的邻居不影响：网格只看四个侧面的邻居', () => {
-    const withoutCorner = square(1).filter(({ cx, cz }) => !(cx === 1 && cz === 1));
+  it('自己与 8 个邻居都在才建', () => {
     const plan = planChunkMeshes({
-      world: worldWith(withoutCorner),
+      world: worldWith(square(1)),
       meshed: [],
       center: CENTER,
       radius: 1,
       budget: Infinity,
     });
     expect(keysOf(plan.build)).toEqual(['0,0']);
+  });
+
+  it('邻居都在但自己没加载时不建', () => {
+    const plan = planChunkMeshes({
+      world: worldWith(square(1).filter(({ cx, cz }) => !(cx === 0 && cz === 0))),
+      meshed: [],
+      center: CENTER,
+      radius: 1,
+      budget: Infinity,
+    });
+    expect(plan.build).toEqual([]);
   });
 });
 
@@ -209,52 +204,5 @@ describe('该丢掉哪些网格', () => {
       budget: Infinity,
     });
     expect(plan.drop).toEqual([]);
-  });
-});
-
-describe('变过的方块让哪些网格过期', () => {
-  /** 区块内部、四条边都不挨着的一格。 */
-  const INSIDE: Vec3 = { x: 5, y: 70, z: 7 };
-
-  it('区块内部的一格只让自己那个区块过期', () => {
-    expect(keysOf(staleChunksFor([INSIDE]))).toEqual(['0,0']);
-  });
-
-  it('没有变过的方块时没有网格过期', () => {
-    expect(staleChunksFor([])).toEqual([]);
-  });
-
-  it('区块边界上的一格连对面那个区块一起过期', () => {
-    const cases: Array<[string, Vec3, string[]]> = [
-      ['−X 边', { x: 0, y: 70, z: 7 }, ['0,0', '-1,0']],
-      ['+X 边', { x: CHUNK_SIZE - 1, y: 70, z: 7 }, ['0,0', '1,0']],
-      ['−Z 边', { x: 5, y: 70, z: 0 }, ['0,0', '0,-1']],
-      ['+Z 边', { x: 5, y: 70, z: CHUNK_SIZE - 1 }, ['0,0', '0,1']],
-    ];
-    for (const [name, block, expected] of cases) {
-      expect(keysOf(staleChunksFor([block])), name).toEqual(expected);
-    }
-  });
-
-  it('区块角上的一格牵动两个侧向邻居，不牵动斜对角', () => {
-    // 网格只问六个轴向的邻居，斜对角那一格与谁的面都无关
-    expect(keysOf(staleChunksFor([{ x: 0, y: 70, z: 0 }]))).toEqual(['0,0', '-1,0', '0,-1']);
-  });
-
-  it('负坐标归到正确的区块', () => {
-    expect(keysOf(staleChunksFor([{ x: -1, y: 70, z: -17 }]))).toEqual([
-      '-1,-2',
-      '0,-2',
-      '-1,-1',
-    ]);
-  });
-
-  it('同一个区块里的几格只报一次', () => {
-    const changed: Vec3[] = [INSIDE, { x: 6, y: 71, z: 7 }, { x: 5, y: 72, z: 8 }];
-    expect(keysOf(staleChunksFor(changed))).toEqual(['0,0']);
-  });
-
-  it('小数坐标按 floor 归格', () => {
-    expect(keysOf(staleChunksFor([{ x: 15.9, y: 70, z: 7.2 }]))).toEqual(['0,0', '1,0']);
   });
 });

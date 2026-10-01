@@ -1,13 +1,4 @@
-import { CHUNK_SIZE } from '../core/constants';
-import type { Vec3 } from '../core/vec3';
-import {
-  byDistanceTo,
-  chunkKey,
-  chunkOf,
-  chunksAround,
-  localOf,
-  type ChunkCoord,
-} from '../core/world';
+import { byDistanceTo, chunkKey, chunksAround, type ChunkCoord } from '../core/world';
 
 /**
  * 一帧最多建几个区块的网格。
@@ -51,10 +42,10 @@ export interface MeshPlanOptions {
  *
  * 两条规则：
  *
- * 1. **四个侧面的邻居都已加载才建网格。** 未加载的邻居读到空气，边界上那一整面
+ * 1. **周围 8 个邻居（含对角）都已加载才建网格。** 未加载的邻居读到空气，边界上那一整面
  *    石头都会被当成暴露面——一个四邻皆空的区块产生 8842 个面，四邻齐全时只有 273 个。
- *    等邻居到位再建，就不必在邻居后到时重建一遍，也不会把三十倍的几何送上显卡。
- *    代价是看得见的范围比加载范围小一圈。
+ *    等邻居到位再建，就不必在邻居后到时重建一遍，也不会把三十倍的几何送上显卡。对角邻居
+ *    不影响面数，但光照要从那里读（见 `isMeshable`）。代价是看得见的范围比加载范围小一圈。
  * 2. **一帧只建预算内的几个，先建离玩家近的。** 建一个区块的网格实测 1.3–1.6ms，
  *    跨过区块边界时一次要补一整列区块，全挤在一帧里就是一次可见的卡顿。
  *
@@ -84,43 +75,16 @@ export function planChunkMeshes({
 }
 
 /**
- * 变过的方块让哪些区块的网格过期了。
+ * 区块自己与周围 8 个邻居（含对角）都已加载。
  *
- * 方块自己那个区块一定要重建。它坐在区块边界上时，对面那个区块也要：边界上的面生不生成
- * 取决于隔壁那一格是什么（见 `buildChunkMesh`），只重建自己就会在挖开的地方留下一个
- * 看穿到虚空的洞，或者留下一堵本该消失的墙。
- *
- * 只看四个侧向的邻居，不看斜角：网格只问六个轴向的邻居，斜对角那一格与谁的面都无关。
+ * 对角也要：平滑光照（ADR-0016）给区块角上的顶点取亮度时要读斜对角那个区块里的方块与光照，
+ * 光照也从对角区块传进来（ADR-0017）。
  */
-export function staleChunksFor(changed: Iterable<Vec3>): ChunkCoord[] {
-  const stale = new Map<number, ChunkCoord>();
-  const mark = (cx: number, cz: number): void => {
-    stale.set(chunkKey(cx, cz), { cx, cz });
-  };
-
-  for (const { x, z } of changed) {
-    const bx = Math.floor(x);
-    const bz = Math.floor(z);
-    const cx = chunkOf(bx);
-    const cz = chunkOf(bz);
-    mark(cx, cz);
-    const lx = localOf(bx);
-    const lz = localOf(bz);
-    if (lx === 0) mark(cx - 1, cz);
-    if (lx === CHUNK_SIZE - 1) mark(cx + 1, cz);
-    if (lz === 0) mark(cx, cz - 1);
-    if (lz === CHUNK_SIZE - 1) mark(cx, cz + 1);
-  }
-  return [...stale.values()];
-}
-
-/** 区块自己与四个侧面的邻居都已加载。 */
 function isMeshable(world: LoadedChunkView, cx: number, cz: number): boolean {
-  return (
-    world.isChunkLoaded(cx, cz) &&
-    world.isChunkLoaded(cx - 1, cz) &&
-    world.isChunkLoaded(cx + 1, cz) &&
-    world.isChunkLoaded(cx, cz - 1) &&
-    world.isChunkLoaded(cx, cz + 1)
-  );
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      if (!world.isChunkLoaded(cx + dx, cz + dz)) return false;
+    }
+  }
+  return true;
 }

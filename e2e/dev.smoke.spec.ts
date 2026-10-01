@@ -542,7 +542,7 @@ test('走远到区块卸载再走回来，挖过的洞还在，网格也还带�
   await walkUntil(page, 'back', async () => (await readOriginChunkState(page)).loaded, 1000);
 
   // 网格还要再往回走几格才有：刚跨过加载线时原点区块朝外那一侧的邻居仍在视距之外，
-  // 而网格要四邻齐全才建（见 planChunkMeshes）。补网格由游戏循环逐帧发起，一帧两个。
+  // 而网格要周围 8 个邻居齐全才建（见 planChunkMeshes）。补网格由游戏循环逐帧发起，一帧两个。
   await walkUntil(page, 'back', async () => (await readOriginChunkState(page)).hasMesh, 1000);
 
   const back = await page.evaluate(({ x, y, z }) => {

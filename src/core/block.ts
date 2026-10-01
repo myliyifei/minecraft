@@ -67,6 +67,23 @@ export const BlockStateKind = {
 
 export type BlockStateKind = (typeof BlockStateKind)[keyof typeof BlockStateKind];
 
+/**
+ * 天光与方块光经过这种方块时怎么走（见 CONTEXT.md 的「天光」「方块光」「不透明」、ADR-0017）。
+ *
+ * - `Opaque`：不透明，两种光都完全挡住。与 `BlockDef.opaque` 为 true 的方块是同一批。
+ * - `Leaves`：树叶式，天光竖直穿过每格减 1；横向传播与方块光按空格算。
+ * - `Clear`：不衰减，光照常通过。空气是这一档，火把（#56）加入后也是。
+ *
+ * 值是字符串，理由同 `BlockUse`：它不进存档。
+ */
+export const LightPassage = {
+  Opaque: 'opaque',
+  Leaves: 'leaves',
+  Clear: 'clear',
+} as const;
+
+export type LightPassage = (typeof LightPassage)[keyof typeof LightPassage];
+
 /** 挖不动的方块的硬度。基岩是唯一一个。 */
 export const UNBREAKABLE = Infinity;
 
@@ -127,6 +144,14 @@ export interface BlockDef {
    * `Furnace`：世界按这一列决定放下时建不建状态、换成别的方块时删不删。
    */
   readonly state: BlockStateKind;
+  /**
+   * 发光等级：这种方块发出多强的方块光（0 到 15，见 CONTEXT.md 的「方块光」），0 是不发光。
+   *
+   * 现有方块全部为 0。燃烧中的熔炉（13）由 #54 填，火把（14）由 #56 加入，那之前没有地方读它。
+   */
+  readonly lightEmission: number;
+  /** 光经过它时怎么走（见 `LightPassage`）。 */
+  readonly lightPassage: LightPassage;
 }
 
 /** 一个某种物品的掉落。掉落表里绝大多数行都是这个形状。 */
@@ -159,6 +184,8 @@ const FURNACE: BlockDef = {
   experience: COMMON_EXPERIENCE,
   use: BlockUse.Furnace,
   state: BlockStateKind.Furnace,
+  lightEmission: 0,
+  lightPassage: LightPassage.Opaque,
 };
 
 /**
@@ -179,6 +206,8 @@ function ore(minimumMaterial: ToolMaterial, drop: ItemType, experience: number):
     experience,
     use: BlockUse.None,
     state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Opaque,
   };
 }
 
@@ -196,6 +225,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     experience: 0,
     use: BlockUse.None,
     state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Clear,
   },
   // 草方块掉的是泥土，不是草方块本身——与原版一致。
   [BlockType.Grass]: {
@@ -209,6 +240,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
     state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Opaque,
   },
   [BlockType.Dirt]: {
     opaque: true,
@@ -221,6 +254,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
     state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Opaque,
   },
   // 石头要镐：持镐挖掉掉圆石（与原版一致），空手挖得掉但什么也拿不到。
   [BlockType.Stone]: {
@@ -234,6 +269,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
     state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Opaque,
   },
   [BlockType.Bedrock]: {
     opaque: true,
@@ -248,6 +285,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     experience: 0,
     use: BlockUse.None,
     state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Opaque,
   },
   [BlockType.OakLog]: {
     opaque: true,
@@ -261,6 +300,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     experience: 60,
     use: BlockUse.None,
     state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Opaque,
   },
   // 树叶什么都不掉。树苗与苹果要等树叶凋落（后续切片）。
   [BlockType.OakLeaves]: {
@@ -277,6 +318,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
     state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Leaves,
   },
   // 挖掉掉回木板本身：放下去再挖起来材料不损失，木板因此是可以反复用的建材。
   [BlockType.OakPlanks]: {
@@ -291,6 +334,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
     state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Opaque,
   },
   // 工作台（见 CONTEXT.md）：木制，比木板硬半点；挖掉掉回工作台本身，搬得走。
   // 它是本切片唯一的可使用方块：使用键对着它打开工作台界面，而不是往它上面放方块。
@@ -305,6 +350,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     experience: COMMON_EXPERIENCE,
     use: BlockUse.CraftingTable,
     state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Opaque,
   },
   // 圆石（issue #22）：石头持镐挖出来的建材，比石头硬半点。同样要镐，挖掉掉回圆石本身，
   // 放下去再挖起来材料不损失。
@@ -319,6 +366,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     experience: COMMON_EXPERIENCE,
     use: BlockUse.None,
     state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Opaque,
   },
   [BlockType.Furnace]: FURNACE,
   [BlockType.LitFurnace]: FURNACE,

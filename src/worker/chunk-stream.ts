@@ -6,7 +6,7 @@ import type { ChunkWorkerPort } from './protocol';
  * 进世界之前先等好的区块半径（区块数）。
  *
  * 出生点要有地形才算得出来，否则玩家一进世界就掉进「未加载即空气」的虚空。多等一圈是
- * 为了首帧不是一片虚空：网格要四邻齐全才建（见 `planChunkMeshes`），所以等半径 3
+ * 为了首帧不是一片虚空：网格要周围 8 个邻居齐全才建（见 `planChunkMeshes`），所以等半径 3
  * 才能铺出半径 2 的一片地。视距内其余的区块由 tick 逐步补上。
  */
 export const SPAWN_READY_RADIUS = 3;

@@ -4,6 +4,7 @@ import {
   BlockStateKind,
   BlockType,
   BlockUse,
+  LightPassage,
   UNBREAKABLE,
   baseBlock,
   blockDrop,
@@ -519,6 +520,34 @@ describe('方块表的「方块状态」一列（issue #30）', () => {
 
   it('燃烧中的熔炉与熄火的熔炉除贴图外是同一行数据：硬度、合格工具、掉落、状态都相同', () => {
     expect(BLOCKS[BlockType.LitFurnace]).toEqual(BLOCKS[BlockType.Furnace]);
+  });
+});
+
+describe('方块表的发光等级与透光方式两列（issue #51）', () => {
+  it('现有方块都不发光：燃烧中的熔炉也先填 0，熔炉发光由 #54 填', () => {
+    for (const block of Object.values(BlockType)) {
+      expect(BLOCKS[block].lightEmission, `方块 ${block}`).toBe(0);
+    }
+  });
+
+  it('树叶是树叶式，空气不衰减，其余都是不透明', () => {
+    const passages: Partial<Record<BlockType, LightPassage>> = {
+      [BlockType.Air]: LightPassage.Clear,
+      [BlockType.OakLeaves]: LightPassage.Leaves,
+    };
+    for (const block of Object.values(BlockType)) {
+      expect(BLOCKS[block].lightPassage, `方块 ${block}`).toBe(
+        passages[block] ?? LightPassage.Opaque,
+      );
+    }
+  });
+
+  it('透光方式是不透明的方块，正是 opaque 一列为 true 的那些', () => {
+    for (const block of Object.values(BlockType)) {
+      expect(BLOCKS[block].lightPassage === LightPassage.Opaque, `方块 ${block}`).toBe(
+        BLOCKS[block].opaque,
+      );
+    }
   });
 });
 

@@ -510,9 +510,22 @@ export class GameCore implements BlockEdit, BlockStateView {
     return this.world.allBlockStates();
   }
 
-  /** 取走「哪些方块变过」的记录并清空。渲染层每帧取一次，据此重建过期的区块网格。 */
-  takeChangedBlocks(): Vec3[] {
-    return this.world.takeChangedBlocks();
+  /**
+   * 取走「哪些区块的网格过期了」的记录并清空。渲染层每帧取一次，重建其中已有网格的那些。
+   * 哪些区块算过期由世界在 `setBlock` 时定（见 `World.takeStaleChunks`）。
+   */
+  takeStaleChunks(): ChunkCoord[] {
+    return this.world.takeStaleChunks();
+  }
+
+  /** (x, y, z) 那一格的天光等级（见 CONTEXT.md 的「天光」）。占位：恒为 15，见 `World.skyLightAt`。 */
+  skyLightAt(x: number, y: number, z: number): number {
+    return this.world.skyLightAt(x, y, z);
+  }
+
+  /** (x, y, z) 那一格的方块光等级（见 CONTEXT.md 的「方块光」）。占位：恒为 0，见 `World.blockLightAt`。 */
+  blockLightAt(x: number, y: number, z: number): number {
+    return this.world.blockLightAt(x, y, z);
   }
 
   /**

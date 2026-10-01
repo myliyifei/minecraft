@@ -33,7 +33,7 @@ import {
 import { dropBob, dropSpin } from './drop-motion';
 import { heldSwingPhase, heldSwingPose } from './held-swing';
 import { buildChunkMesh, meshTiles, type MeshData } from './mesh';
-import { MESH_BUDGET_PER_FRAME, planChunkMeshes, staleChunksFor } from './mesh-plan';
+import { MESH_BUDGET_PER_FRAME, planChunkMeshes } from './mesh-plan';
 import {
   ZombiePart,
   createZombieModel,
@@ -266,8 +266,8 @@ export interface SkyView {
  * 渲染适配器：把核心的方块数据画成 Three.js 场景。
  *
  * 相机是第一人称的：跟着核心里的玩家走，位置在两次 tick 之间插值（ADR-0002）。
- * 游戏状态一概只读——唯一往核心里写的是 `takeChangedBlocks()`，它取走的是「哪些方块变过」
- * 这份待处理记录，不是世界本身。
+ * 游戏状态一概只读——唯一往核心里写的是 `takeStaleChunks()`，它取走的是「哪些区块的网格
+ * 过期了」这份待处理记录，不是世界本身。
  */
 export class WorldRenderer {
   private readonly renderer: THREE.WebGLRenderer;
@@ -569,8 +569,8 @@ export class WorldRenderer {
   syncChunkMeshes(budget = MESH_BUDGET_PER_FRAME): void {
     // 挖掉的方块必须当帧就从画面上消失，所以重建不占这一帧的建网格预算——一次改动最多
     // 牵动三个区块（自己加两个侧向邻居），远小于铺开视距时的积压。还没建过网格的区块跳过：
-    // 它得等四邻齐全（见 planChunkMeshes），在这里建会绕过那条规则。
-    for (const { cx, cz } of staleChunksFor(this.core.takeChangedBlocks())) {
+    // 它得等 8 个邻居齐全（见 planChunkMeshes），在这里建会绕过那条规则。
+    for (const { cx, cz } of this.core.takeStaleChunks()) {
       if (this.hasChunkMesh(cx, cz)) this.rebuildChunk(cx, cz);
     }
 

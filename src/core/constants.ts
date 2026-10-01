@@ -57,3 +57,6 @@ export const DEFAULT_VIEW_RADIUS = 8;
  * 玩家在区块边界上来回走时，没有这点滞后会让边界那一圈区块反复卸载又重新生成。
  */
 export const UNLOAD_MARGIN = 1;
+
+/** 光照等级的上限（见 CONTEXT.md 的「天光」「方块光」）：两种光都是 0 到 15。露天的天光就是它。 */
+export const MAX_LIGHT_LEVEL = 15;

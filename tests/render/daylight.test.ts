@@ -1,14 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { DAY_LENGTH_TICKS, NIGHT_END, NIGHT_START, TWILIGHT_TICKS } from '../../src/core/time-of-day';
 import {
-  DAY_LIGHTING,
-  MIN_AMBIENT,
-  NIGHT_LIGHTING,
   celestialAngle,
   celestialVisible,
   dayFactor,
+  daylightAt,
   frameTimeOfDay,
-  lightingAt,
   moonDirection,
   sunDirection,
   type Rgb,
@@ -58,50 +55,36 @@ describe('白天到夜晚的比例', () => {
   });
 });
 
-describe('亮度与天空色', () => {
-  it('白天是白天那组常量，夜晚是夜晚那组', () => {
-    const noon = lightingAt(6000, SKY);
-    expect(noon.ambient).toBe(DAY_LIGHTING.ambient);
-    expect(noon.directional).toBe(DAY_LIGHTING.directional);
-    expect(noon.sky).toEqual(DAY_SKY);
-    const midnight = lightingAt(18000, SKY);
-    expect(midnight.ambient).toBe(NIGHT_LIGHTING.ambient);
-    expect(midnight.directional).toBe(NIGHT_LIGHTING.directional);
-    expect(midnight.sky).toEqual(NIGHT_SKY);
+describe('天光减量与天空色', () => {
+  it('天光减量：6000 为 0，18000 为 11，12500 在两者之间且不取整', () => {
+    expect(daylightAt(6000, SKY).skyDarkening).toBe(0);
+    expect(daylightAt(18000, SKY).skyDarkening).toBe(11);
+    const dusk = daylightAt(12500, SKY).skyDarkening;
+    expect(dusk).toBeCloseTo(5.5, 10);
+    expect(Number.isInteger(dusk)).toBe(false);
   });
 
-  it('黄昏正中是两端的插值：环境光、方向光与天空色的每个分量都取两端的平均', () => {
-    const dusk = lightingAt(NIGHT_START - TWILIGHT_TICKS / 2, SKY);
-    expect(dusk.ambient).toBeCloseTo((DAY_LIGHTING.ambient + NIGHT_LIGHTING.ambient) / 2, 10);
-    expect(dusk.directional).toBeCloseTo(
-      (DAY_LIGHTING.directional + NIGHT_LIGHTING.directional) / 2,
-      10,
-    );
+  it('天光减量在黄昏连续增大、黎明连续减小，插值后的时刻也连续', () => {
+    for (let t = NIGHT_START - TWILIGHT_TICKS; t < NIGHT_START; t += 10) {
+      expect(daylightAt(t + 10, SKY).skyDarkening).toBeGreaterThan(daylightAt(t, SKY).skyDarkening);
+    }
+    for (let t = NIGHT_END; t < DAY_LENGTH_TICKS - 10; t += 10) {
+      expect(daylightAt(t + 10, SKY).skyDarkening).toBeLessThan(daylightAt(t, SKY).skyDarkening);
+    }
+    const t = NIGHT_START - 100;
+    expect(daylightAt(t + 0.5, SKY).skyDarkening).toBeGreaterThan(daylightAt(t, SKY).skyDarkening);
+  });
+
+  it('天空色：白天是白天那一端，夜晚是夜晚那一端', () => {
+    expect(daylightAt(6000, SKY).sky).toEqual(DAY_SKY);
+    expect(daylightAt(18000, SKY).sky).toEqual(NIGHT_SKY);
+  });
+
+  it('天空色在黄昏正中是两端的平均', () => {
+    const dusk = daylightAt(NIGHT_START - TWILIGHT_TICKS / 2, SKY);
     for (let i = 0; i < 3; i++) {
       expect(dusk.sky[i]).toBeCloseTo((DAY_SKY[i]! + NIGHT_SKY[i]!) / 2, 10);
     }
-  });
-
-  it('按比例插值：黄昏过了四分之一，离白天那一端四分之一', () => {
-    const t = NIGHT_START - TWILIGHT_TICKS * 0.75;
-    const f = dayFactor(t);
-    expect(f).toBeCloseTo(0.75, 10);
-    const { ambient } = lightingAt(t, SKY);
-    expect(ambient).toBeCloseTo(NIGHT_LIGHTING.ambient + (DAY_LIGHTING.ambient - NIGHT_LIGHTING.ambient) * f, 10);
-  });
-
-  it('夜晚比白天暗，而且一整天的环境光都不低于下限', () => {
-    expect(NIGHT_LIGHTING.ambient).toBeLessThan(DAY_LIGHTING.ambient);
-    expect(NIGHT_LIGHTING.directional).toBeLessThan(DAY_LIGHTING.directional);
-    expect(NIGHT_LIGHTING.ambient).toBeGreaterThanOrEqual(MIN_AMBIENT);
-    expect(MIN_AMBIENT).toBeGreaterThan(0);
-    for (const t of WHOLE_DAY) {
-      expect(lightingAt(t, SKY).ambient, `时刻 ${t}`).toBeGreaterThanOrEqual(MIN_AMBIENT);
-    }
-  });
-
-  it('夜晚还留着方向光：方块的六个面仍有明暗差，轮廓分得出', () => {
-    expect(NIGHT_LIGHTING.directional).toBeGreaterThan(0);
   });
 });
 

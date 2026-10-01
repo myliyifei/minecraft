@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { TAU } from '../core/constants';
 import type { ZombieView } from '../core/zombie';
 import { TILE, boxUvs } from './atlas';
+import { setTint, tintOf } from './light-material';
 
 /**
  * 僵尸的六部件人形：头、身体、两条手臂、两条腿，各是一个长方体，拼成一个 `Group`。
@@ -51,6 +52,9 @@ const HURT_TINT = 0xff7070;
 
 /** 燃烧中叠橙的颜色，乘在贴图上：红分量不动，绿压到七成，蓝压到三成。与叠红分得开。 */
 const BURNING_TINT = 0xffb050;
+
+/** 不叠色：乘白色，就是贴图本色。 */
+const NO_TINT = 0xffffff;
 
 /** 模型按像素量尺寸，16 像素一格，与贴图的像素一样大。 */
 const PX = 1 / 16;
@@ -109,10 +113,15 @@ export function zombieGeometries(): ZombieGeometries {
   return geometries;
 }
 
-/** 一只僵尸的模型：一个组，六个部件各一个 `Mesh`，按名字找得到。组的原点在脚底中心。 */
+/**
+ * 一只僵尸的模型：一个组，六个部件各一个 `Mesh`，按名字找得到。组的原点在脚底中心。
+ *
+ * 六个部件共用传进来的这一份材质。渲染层给每只僵尸一份自己的光照材质（`entityMaterial`）：所在格的光照
+ * 等级与叠色都是这一只自己的。
+ */
 export function createZombieModel(
   geometries: ZombieGeometries,
-  material: THREE.Material,
+  material: THREE.ShaderMaterial,
 ): THREE.Group {
   const group = new THREE.Group();
   for (const name of Object.values(ZombiePart)) {
@@ -150,53 +159,36 @@ export function poseZombieModel(group: THREE.Group, zombie: ZombieView, alpha: n
   leftLeg!.rotation.x = swing;
 }
 
-/** 僵尸模型轮换使用的三份材质：平时那一份、受击后叠红的那一份、燃烧中叠橙的那一份。所有僵尸共用。 */
-export interface ZombieMaterials {
-  readonly normal: THREE.Material;
-  readonly hurt: THREE.Material;
-  readonly burning: THREE.Material;
-}
-
-/**
- * 由方块那一份材质派生出僵尸的三份材质：平时就用它本身，叠红、叠橙那两份是它的克隆乘上 `HURT_TINT`、
- * `BURNING_TINT`，贴图是同一张。叠色靠换材质而不是给每只僵尸各克隆一份：同一时刻叠同一种颜色的僵尸
- * 都长一个样，三份就够。
- */
-export function zombieMaterials(base: THREE.MeshLambertMaterial): ZombieMaterials {
-  return { normal: base, hurt: tinted(base, HURT_TINT), burning: tinted(base, BURNING_TINT) };
-}
-
-function tinted(base: THREE.MeshLambertMaterial, color: number): THREE.MeshLambertMaterial {
-  const material = base.clone();
-  material.color.setHex(color);
-  return material;
-}
-
 /** 上次受伤在 lastHurtTick、此刻是第 now 个 tick 时，该不该叠红。还没受过伤不叠。 */
 export function zombieHurtTinted(lastHurtTick: number | undefined, now: number): boolean {
   return lastHurtTick !== undefined && now - lastHurtTick < ZOMBIE_HURT_TINT_TICKS;
 }
 
 /**
- * 受击后 `ZOMBIE_HURT_TINT_TICKS` 内六个部件换成叠红的材质；不在叠红里、燃烧中的换成叠橙的；都不是就用
- * 平时那一份。now 是核心的 tick 计数。按 tick 而不是按毫秒算，与玩家的受伤红闪同一条理由：时长与游戏
- * 时间一致。
+ * 受击后 `ZOMBIE_HURT_TINT_TICKS` 内叠红；不在叠红里、燃烧中的叠橙；都不是就不叠色。叠色是模型那一份材质
+ * 上的 uniform（`setTint`），六个部件一起变。now 是核心的 tick 计数。按 tick 而不是按毫秒算，与玩家的
+ * 受伤红闪同一条理由：时长与游戏时间一致。
  *
  * 叠红压过叠橙：燃烧中的僵尸被打了，那一下也要看得出来。燃烧本身每 20 tick 扣一次血，所以烧着的僵尸
  * 红橙交替，与原版一样。
  */
-export function tintZombieModel(
-  group: THREE.Group,
-  zombie: ZombieView,
-  now: number,
-  materials: ZombieMaterials,
-): void {
-  const material = zombieHurtTinted(zombie.lastHurtTick, now)
-    ? materials.hurt
+export function tintZombieModel(group: THREE.Group, zombie: ZombieView, now: number): void {
+  const tint = zombieHurtTinted(zombie.lastHurtTick, now)
+    ? HURT_TINT
     : zombie.burning
-      ? materials.burning
-      : materials.normal;
-  for (const child of group.children) (child as THREE.Mesh).material = material;
+      ? BURNING_TINT
+      : NO_TINT;
+  setTint(zombieMaterial(group), tint);
+}
+
+/** 模型此刻的叠色（sRGB 十六进制）：平时是白色，受击后偏红，燃烧中偏橙。 */
+export function zombieTint(group: THREE.Group): number {
+  return tintOf(zombieMaterial(group));
+}
+
+/** 模型那一份光照材质：六个部件共用，读头那一个就够。 */
+export function zombieMaterial(group: THREE.Group): THREE.ShaderMaterial {
+  return (group.getObjectByName(ZombiePart.Head) as THREE.Mesh).material as THREE.ShaderMaterial;
 }
 
 /** 相位（tick，可带小数）对应的摆角（弧度），落在 ±`ZOMBIE_SWING_ANGLE` 之间。 */

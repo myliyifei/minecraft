@@ -4,16 +4,17 @@ import {
   NIGHT_END,
   NIGHT_START,
   TWILIGHT_TICKS,
+  skyDarkeningAt,
   wrapTimeOfDay,
 } from '../core/time-of-day';
 
 /**
- * 昼夜在画面上的样子：亮度、天空色、太阳与月亮的方向，全由世界时刻算出来。
+ * 昼夜在画面上的样子：天光减量、天空色、太阳与月亮的方向，全由世界时刻算出来。
  *
  * 纯数学、不 import three，因此能在 Node 里测。时刻允许带小数：渲染层传的是两次 tick 之间
  * 插值后的时刻（ADR-0002），黄昏变暗与太阳移动因此是连续的。
  *
- * 本切片没有光照传播：整个场景一起变暗变亮，地下与地面同一个亮度。
+ * 地形与实体的明暗不在这里：每个顶点带天光与方块光，着色器拿这里算出的天光减量自己折算（ADR-0016）。
  */
 
 /** 一种 RGB 颜色，三个分量在 [0, 1]。插值在调用方给的颜色空间里按分量做。 */
@@ -21,29 +22,6 @@ export type Rgb = readonly [number, number, number];
 
 /** 一个方向（单位向量，世界坐标）：x 朝东、y 朝上。 */
 export type Direction = readonly [number, number, number];
-
-/** 一组灯的强度：环境光打底，方向光让方块的六个面有明暗区分。 */
-export interface LightIntensity {
-  readonly ambient: number;
-  readonly directional: number;
-}
-
-/**
- * 白天的两盏灯。
- * 两者的比例决定体积感——环境光太强，六个面的明暗差别就没了，方块看上去是平的。
- */
-export const DAY_LIGHTING: LightIntensity = { ambient: 1.05, directional: 1.45 };
-
-/**
- * 夜晚的两盏灯。仍留着一点方向光：六个面的明暗差还在，方块的轮廓在夜里分得出来。
- */
-export const NIGHT_LIGHTING: LightIntensity = { ambient: 0.34, directional: 0.3 };
-
-/**
- * 环境光的下限：`lightingAt` 算出的环境光一整天都不低于它，夜晚那组常量调得再低也一样。
- * 再暗下去，背光的那几个面与夜空分不开，看不出方块的轮廓。
- */
-export const MIN_AMBIENT = 0.3;
 
 /** 黄昏从这一刻开始。 */
 const DUSK_START = NIGHT_START - TWILIGHT_TICKS;
@@ -60,9 +38,14 @@ export function dayFactor(timeOfDay: number): number {
   return Math.min(1, (timeOfDay - NIGHT_END) / TWILIGHT_TICKS);
 }
 
-/** 这一刻的灯光强度与天空色。 */
-export interface Lighting extends LightIntensity {
+/** 这一刻天上的样子。 */
+export interface Daylight {
   readonly sky: Rgb;
+  /**
+   * 天光减量（见 CONTEXT.md 的「折算天光」），不取整：着色器拿它折算每一处的天光，黄昏因此连续变暗。
+   * 规则用的是核心取整之后的值（`GameCore.skyDarkening`），两者只差在取整。
+   */
+  readonly skyDarkening: number;
 }
 
 /** 天空色的两端：白天与夜晚各一个颜色。 */
@@ -72,21 +55,19 @@ export interface SkyEnds {
 }
 
 /**
- * 这一刻的灯光强度与天空色：白天那组与夜晚那组按 `dayFactor` 插值，环境光再以 `MIN_AMBIENT`
- * 为下限。
+ * 这一刻的天光减量与天空色：天空色在两端之间按 `dayFactor` 插值，减量取核心的 `skyDarkeningAt`。
  *
  * 天空色两端由调用方给：白天那一端是世界色板的 `--sky`，界面与 3D 场景共用一份颜色。
  */
-export function lightingAt(timeOfDay: number, sky: SkyEnds): Lighting {
+export function daylightAt(timeOfDay: number, sky: SkyEnds): Daylight {
   const f = dayFactor(timeOfDay);
   return {
-    ambient: Math.max(MIN_AMBIENT, mix(NIGHT_LIGHTING.ambient, DAY_LIGHTING.ambient, f)),
-    directional: mix(NIGHT_LIGHTING.directional, DAY_LIGHTING.directional, f),
     sky: [
       mix(sky.night[0], sky.day[0], f),
       mix(sky.night[1], sky.day[1], f),
       mix(sky.night[2], sky.day[2], f),
     ],
+    skyDarkening: skyDarkeningAt(timeOfDay),
   };
 }
 

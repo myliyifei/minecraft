@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BlockType, type BlockView } from '../../src/core/block';
+import { BlockType } from '../../src/core/block';
 import { Chunk } from '../../src/core/chunk';
 import {
   CHUNK_SIZE,
@@ -12,7 +12,7 @@ import { oakTreesTouching } from '../../src/core/tree';
 import { chunkOf, chunksAround, ORIGIN_CHUNK, World } from '../../src/core/world';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 import { tileUvRect, TILE } from '../../src/render/atlas';
-import { buildChunkMesh, meshTiles, type MeshData } from '../../src/render/mesh';
+import { buildChunkMesh, meshTiles, type MeshData, type MeshView } from '../../src/render/mesh';
 
 /**
  * 待生成网格的区块，配一个「区块之外」的视图。
@@ -20,7 +20,12 @@ import { buildChunkMesh, meshTiles, type MeshData } from '../../src/render/mesh'
  */
 interface MeshInput {
   readonly chunk: Chunk;
-  readonly view: BlockView;
+  readonly view: MeshView;
+}
+
+/** 只给方块的假视图：区块之外的光照一律读作 0。只看面剔除与贴图的测试用它。 */
+function blocksOnly(getBlock: MeshView['getBlock']): MeshView {
+  return { getBlock, skyLightAt: () => 0, blockLightAt: () => 0 };
 }
 
 function meshOf({ chunk, view }: MeshInput): MeshData {
@@ -31,7 +36,7 @@ function meshOf({ chunk, view }: MeshInput): MeshData {
 function uniform(block: BlockType): MeshInput {
   const chunk = new Chunk(0, 0);
   chunk.blocks.fill(block);
-  return { chunk, view: { getBlock: () => block } };
+  return { chunk, view: blocksOnly(() => block) };
 }
 
 /** 只有指定坐标有方块、其余全是空气；坐标必须落在区块 (0, 0) 内。 */
@@ -41,7 +46,7 @@ function sparse(blocks: Array<[number, number, number, BlockType]>): MeshInput {
   const map = new Map(blocks.map(([x, y, z, b]) => [`${x},${y},${z}`, b]));
   return {
     chunk,
-    view: { getBlock: (x, y, z) => map.get(`${x},${y},${z}`) ?? BlockType.Air },
+    view: blocksOnly((x, y, z) => map.get(`${x},${y},${z}`) ?? BlockType.Air),
   };
 }
 
@@ -360,5 +365,82 @@ describe('区块网格的坐标系', () => {
     for (const [, cy] of tops) {
       expect(cy).toBe(FLAT_GROUND_Y + 1);
     }
+  });
+});
+
+describe('顶点光照：每个角取这一面外侧挨着它的 4 格的平均（ADR-0016）', () => {
+  const G = FLAT_GROUND_Y;
+
+  /**
+   * 朝 normal 的那些面里，落在区块局部坐标 corner 上的顶点各带的两个等级 [天光, 方块光]，去重。
+   * 同一平面上共用一个角的几个面取的是同样 4 格，读出来应当只有一个值。
+   */
+  function cornerLight(
+    mesh: MeshData,
+    normal: readonly [number, number, number],
+    corner: readonly [number, number, number],
+  ): Array<[number, number]> {
+    const seen = new Map<string, [number, number]>();
+    for (let v = 0; v < mesh.positions.length / 3; v++) {
+      const same = (a: ArrayLike<number>, b: readonly number[]) =>
+        a[v * 3] === b[0] && a[v * 3 + 1] === b[1] && a[v * 3 + 2] === b[2];
+      if (!same(mesh.normals, normal) || !same(mesh.positions, corner)) continue;
+      const light: [number, number] = [mesh.light[v * 2]!, mesh.light[v * 2 + 1]!];
+      seen.set(light.join(','), light);
+    }
+    return [...seen.values()];
+  }
+
+  const UP = [0, 1, 0] as const;
+
+  it('平地：所有顶面顶点天光 15、方块光 0', () => {
+    const world = new World(flatTestTerrain);
+    for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 1)) world.loadChunk(cx, cz);
+    const mesh = meshOf(fromWorld(world, 0, 0));
+    expect(mesh.light).toHaveLength((mesh.positions.length / 3) * 2);
+    for (let v = 0; v < mesh.positions.length / 3; v++) {
+      expect([mesh.light[v * 2], mesh.light[v * 2 + 1]]).toEqual([15, 0]);
+    }
+  });
+
+  it('屋顶开一格洞：洞口地面的顶点天光往外每格减 1', () => {
+    // 地面以上隔两格整层铺石头，只在 (8, 8) 留一个洞。光只从洞里进来：洞下那一格 15，
+    // 地面上一层离洞水平距离 d 的格子是 15 − d。角上取 4 格平均，所以沿 +X 每过一个角少 1。
+    const hole = 8;
+    const world = new World((cx, cz) => {
+      const chunk = flatTestTerrain(cx, cz);
+      chunk.fillLayer(G + 3, BlockType.Stone);
+      if (cx === 0 && cz === 0) chunk.set(hole, G + 3, hole, BlockType.Air);
+      return chunk;
+    });
+    for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 1)) world.loadChunk(cx, cz);
+    const mesh = meshOf(fromWorld(world, 0, 0));
+
+    // 洞那一格的 +X+Z 角：15、14、14、13 的平均
+    expect(cornerLight(mesh, UP, [hole + 1, G + 1, hole + 1])).toEqual([[14, 0]]);
+    expect(cornerLight(mesh, UP, [hole + 2, G + 1, hole + 1])).toEqual([[13, 0]]);
+    expect(cornerLight(mesh, UP, [hole + 3, G + 1, hole + 1])).toEqual([[12, 0]]);
+    expect(cornerLight(mesh, UP, [hole + 4, G + 1, hole + 1])).toEqual([[11, 0]]);
+  });
+
+  it('墙脚的顶点暗于平面中央，两面墙的内角更暗：不透明的格子按 0 计入平均', () => {
+    // 地面上摆一个 L 形的矮墙：(8, 8)、(9, 8)、(8, 9) 三格石头，内角朝 +X+Z。四周都是露天，天光 15。
+    const world = new World(flatTestTerrain);
+    for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 1)) world.loadChunk(cx, cz);
+    for (const [x, z] of [
+      [8, 8],
+      [9, 8],
+      [8, 9],
+    ] as const) {
+      world.setBlock(x, G + 1, z, BlockType.Stone);
+    }
+    const mesh = meshOf(fromWorld(world, 0, 0));
+
+    // 平面中央：4 格都是 15
+    expect(cornerLight(mesh, UP, [12, G + 1, 12])).toEqual([[15, 0]]);
+    // 贴着一面墙：4 格里 1 格是石头，(0 + 15 × 3) / 4
+    expect(cornerLight(mesh, UP, [10, G + 1, 9])).toEqual([[11.25, 0]]);
+    // 内角：4 格里 3 格是石头，15 / 4
+    expect(cornerLight(mesh, UP, [9, G + 1, 9])).toEqual([[3.75, 0]]);
   });
 });

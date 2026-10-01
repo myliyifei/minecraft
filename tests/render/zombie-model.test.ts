@@ -12,8 +12,9 @@ import {
   tintZombieModel,
   zombieGeometries,
   zombieHurtTinted,
-  zombieMaterials,
+  zombieTint,
 } from '../../src/render/zombie-model';
+import { entityMaterial, frameLighting } from '../../src/render/light-material';
 
 /** 一只僵尸的视图：默认在原点站着不动。 */
 function zombie(overrides: Partial<ZombieView> = {}): ZombieView {
@@ -36,7 +37,7 @@ function walking(age: number): ZombieView {
 }
 
 function model(): THREE.Group {
-  return createZombieModel(zombieGeometries(), new THREE.MeshBasicMaterial());
+  return createZombieModel(zombieGeometries(), entityMaterial(new THREE.Texture(), frameLighting()));
 }
 
 function part(group: THREE.Group, name: ZombiePart): THREE.Object3D {
@@ -159,16 +160,13 @@ describe('僵尸模型跟着核心摆', () => {
   });
 });
 
-describe('僵尸受击后叠红（#42）', () => {
-  /** 与渲染层同一种基础材质：贴图乘白色，就是贴图本身的颜色。 */
-  function materials() {
-    return zombieMaterials(new THREE.MeshLambertMaterial({ map: new THREE.Texture() }));
+describe('叠色：受击叠红（#42）、燃烧叠橙（#44），是材质上的一个 uniform', () => {
+  /** 与渲染层同一种做法：每只僵尸一份光照材质，六个部件共用。 */
+  function tintable(): THREE.Group {
+    return createZombieModel(zombieGeometries(), entityMaterial(new THREE.Texture(), frameLighting()));
   }
 
-  /** 六个部件此刻各用的是哪一份材质。 */
-  function partMaterials(group: THREE.Group): THREE.Material[] {
-    return group.children.map((child) => (child as THREE.Mesh).material as THREE.Material);
-  }
+  const channels = (hex: number) => [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff] as const;
 
   it('受伤那一 tick 起 10 tick 内叠红，第 10 tick 起恢复；没受过伤不叠', () => {
     expect(ZOMBIE_HURT_TINT_TICKS).toBe(10);
@@ -180,68 +178,60 @@ describe('僵尸受击后叠红（#42）', () => {
     expect(zombieHurtTinted(100, 400)).toBe(false);
   });
 
-  it('叠红的材质是同一张贴图乘上红色：红分量满，绿与蓝压低', () => {
-    const { normal, hurt } = materials();
-    expect(hurt).not.toBe(normal);
-    expect((hurt as THREE.MeshLambertMaterial).map).toBe((normal as THREE.MeshLambertMaterial).map);
-    const { r, g, b } = (hurt as THREE.MeshLambertMaterial).color;
-    expect(r).toBe(1);
-    expect(g).toBeLessThan(0.7);
-    expect(b).toBeLessThan(0.7);
+  it('六个部件共用一份材质，叠色是它的 uniform；平时是白色，贴图本色', () => {
+    const group = tintable();
+    const materials = new Set(group.children.map((child) => (child as THREE.Mesh).material));
+    expect(materials.size).toBe(1);
+    const [material] = materials as Set<THREE.ShaderMaterial>;
+    expect(material!.uniforms.tint).toBeDefined();
+    tintZombieModel(group, zombie(), 100);
+    expect(zombieTint(group)).toBe(0xffffff);
   });
 
-  it('受击后 10 tick 内六个部件都换成叠红的材质，之后换回来', () => {
-    const shared = materials();
-    const group = createZombieModel(zombieGeometries(), shared.normal);
+  it('受击后 10 tick 内报告红色：红分量满、绿与蓝压低；之后回到白色', () => {
+    const group = tintable();
     const hurt = zombie({ lastHurtTick: 200 });
-
-    tintZombieModel(group, hurt, 200, shared);
-    expect(partMaterials(group)).toEqual(Array(6).fill(shared.hurt));
-    tintZombieModel(group, hurt, 209, shared);
-    expect(partMaterials(group)).toEqual(Array(6).fill(shared.hurt));
-    tintZombieModel(group, hurt, 210, shared);
-    expect(partMaterials(group)).toEqual(Array(6).fill(shared.normal));
-  });
-});
-
-describe('燃烧中的僵尸叠橙（#44）', () => {
-  function materials() {
-    return zombieMaterials(new THREE.MeshLambertMaterial({ map: new THREE.Texture() }));
-  }
-
-  function partMaterials(group: THREE.Group): THREE.Material[] {
-    return group.children.map((child) => (child as THREE.Mesh).material as THREE.Material);
-  }
-
-  it('燃烧标记为真时六个部件都换成叠橙的材质；标记为假时换回来', () => {
-    const shared = materials();
-    const group = createZombieModel(zombieGeometries(), shared.normal);
-
-    tintZombieModel(group, zombie({ burning: true }), 100, shared);
-    expect(partMaterials(group)).toEqual(Array(6).fill(shared.burning));
-    tintZombieModel(group, zombie({ burning: false }), 101, shared);
-    expect(partMaterials(group)).toEqual(Array(6).fill(shared.normal));
+    for (const now of [200, 209]) {
+      tintZombieModel(group, hurt, now);
+      const [r, g, b] = channels(zombieTint(group));
+      expect(r, `第 ${now} tick`).toBe(0xff);
+      expect(g).toBeLessThan(0xc0);
+      expect(b).toBeLessThan(0xc0);
+    }
+    tintZombieModel(group, hurt, 210);
+    expect(zombieTint(group)).toBe(0xffffff);
   });
 
-  it('叠橙的材质是同一张贴图乘上橙色：红分量满，绿居中，蓝最低', () => {
-    const { normal, burning, hurt } = materials();
-    expect(burning).not.toBe(normal);
-    expect(burning).not.toBe(hurt);
-    expect((burning as THREE.MeshLambertMaterial).map).toBe((normal as THREE.MeshLambertMaterial).map);
-    const { r, g, b } = (burning as THREE.MeshLambertMaterial).color;
-    expect(r).toBe(1);
+  it('燃烧中报告橙红：红分量满，绿居中，蓝最低；不烧了回到白色', () => {
+    const group = tintable();
+    tintZombieModel(group, zombie({ burning: true }), 100);
+    const [r, g, b] = channels(zombieTint(group));
+    expect(r).toBe(0xff);
     expect(g).toBeLessThan(r);
     expect(g).toBeGreaterThan(b);
+    tintZombieModel(group, zombie({ burning: false }), 101);
+    expect(zombieTint(group)).toBe(0xffffff);
   });
 
   it('燃烧中又刚受伤：叠红，受伤那一下看得出来；10 tick 后回到叠橙', () => {
-    const shared = materials();
-    const group = createZombieModel(zombieGeometries(), shared.normal);
+    const group = tintable();
     const hurtWhileBurning = zombie({ burning: true, lastHurtTick: 200 });
+    tintZombieModel(group, zombie({ burning: true }), 199);
+    const burning = zombieTint(group);
+    tintZombieModel(group, hurtWhileBurning, 205);
+    const hurt = zombieTint(group);
+    expect(hurt).not.toBe(burning);
+    expect(channels(hurt)[1]).toBeLessThan(channels(burning)[1]);
+    tintZombieModel(group, hurtWhileBurning, 210);
+    expect(zombieTint(group)).toBe(burning);
+  });
 
-    tintZombieModel(group, hurtWhileBurning, 205, shared);
-    expect(partMaterials(group)).toEqual(Array(6).fill(shared.hurt));
-    tintZombieModel(group, hurtWhileBurning, 210, shared);
-    expect(partMaterials(group)).toEqual(Array(6).fill(shared.burning));
+  it('每只僵尸的叠色各管各的：一只受伤，另一只仍是白色', () => {
+    const first = tintable();
+    const second = tintable();
+    tintZombieModel(first, zombie({ lastHurtTick: 100 }), 100);
+    tintZombieModel(second, zombie(), 100);
+    expect(zombieTint(first)).not.toBe(0xffffff);
+    expect(zombieTint(second)).toBe(0xffffff);
   });
 });

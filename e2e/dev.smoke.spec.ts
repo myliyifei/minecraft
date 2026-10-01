@@ -3275,7 +3275,7 @@ test('调试句柄放一块煤矿石在玩家面前：画布上那一块用的�
   expect(errors).toEqual([]);
 });
 
-test('调试句柄把时刻拨到午夜：背景色与环境光比白天暗，月亮在天上、太阳不在；拨回早晨反过来', async ({
+test('调试句柄把时刻拨到午夜：背景色比白天暗、天光减量比白天大，月亮在天上、太阳不在；拨回早晨反过来', async ({
   page,
 }) => {
   // 整段跑在一次同步的 evaluate 里，游戏循环插不进来。朝 −Z 抬头看天：太阳与月亮绕 z 轴转，
@@ -3299,11 +3299,11 @@ test('调试句柄把时刻拨到午夜：背景色与环境光比白天暗，�
 
   expect(seen.day).toMatchObject({ time: 6000, night: false });
   expect(seen.night).toMatchObject({ time: 18000, night: true });
-  // 午夜：背景色、两盏灯都比白天暗，手持那一份跟着一起暗；月亮可见、太阳不可见
+  // 午夜：背景色比白天暗，送进着色器的天光减量比白天大（白天 0、夜晚 11）；月亮可见、太阳不可见
   expect(hexBrightness(seen.night.sky.background)).toBeLessThan(hexBrightness(seen.day.sky.background));
-  expect(seen.night.sky.ambient).toBeLessThan(seen.day.sky.ambient);
-  expect(seen.night.sky.directional).toBeLessThan(seen.day.sky.directional);
-  expect(seen.night.sky.handAmbient).toBe(seen.night.sky.ambient);
+  expect(seen.night.sky.skyDarkening).toBeGreaterThan(seen.day.sky.skyDarkening);
+  expect(seen.day.sky.skyDarkening).toBe(0);
+  expect(seen.night.sky.skyDarkening).toBe(11);
   expect(seen.night.sky).toMatchObject({ moonVisible: true, sunVisible: false });
   // 早晨：太阳可见、月亮不可见
   expect(seen.day.sky).toMatchObject({ moonVisible: false, sunVisible: true });
@@ -3312,6 +3312,87 @@ test('调试句柄把时刻拨到午夜：背景色与环境光比白天暗，�
   // 拨回 6000 与一开始的白天完全相同
   expect(seen.back.sky).toEqual(seen.day.sky);
   expect(seen.back.rgb).toEqual(seen.day.rgb);
+  expect(errors).toEqual([]);
+});
+
+test('场景里没有灯光对象：明暗全由光照材质按光照等级算（ADR-0016）', async ({ page }) => {
+  const count = await page.evaluate(() => window.__VOXEL__!.renderer.sceneLightCount);
+  expect(count).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('白天用石头把玩家四面与头顶都封起来：正前方那块石头的墙面比封起来之前暗得多', async ({ page }) => {
+  // 整段跑在一次同步的 evaluate 里，游戏循环插不进来。平视正前方（−Z），眼睛那一层隔一格摆一块石头，
+  // 画面正中就是它朝着玩家的那一面。先读一次露天的颜色，再以玩家为中心砌一个 5×5 的石头盒子
+  // ——地面、四面墙、屋顶，那块石头正好是前墙的一格——天光进不来，再读一次。
+  const seen = await page.evaluate(
+    ({ stone, air, eyeHeight }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const centerRgb = window.__CENTER_RGB__!;
+      core.setTimeOfDay(6000);
+      core.turn(-core.player.yaw, -core.player.pitch);
+      const px = Math.floor(core.player.position.x);
+      const py = Math.floor(core.player.position.y);
+      const pz = Math.floor(core.player.position.z);
+      const eyeY = Math.floor(core.player.position.y + eyeHeight);
+      // 盒子里面清空：开局那一片可能长着树，挡在视线上的话读到的就不是那块石头
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          core.setBlock(px + dx, py, pz + dz, air);
+          core.setBlock(px + dx, py + 1, pz + dz, air);
+        }
+      }
+      core.setBlock(px, eyeY, pz - 2, stone);
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      const open = centerRgb();
+
+      for (let dx = -2; dx <= 2; dx++) {
+        for (let dz = -2; dz <= 2; dz++) {
+          core.setBlock(px + dx, py - 1, pz + dz, stone);
+          core.setBlock(px + dx, py + 2, pz + dz, stone);
+          if (Math.abs(dx) === 2 || Math.abs(dz) === 2) {
+            core.setBlock(px + dx, py, pz + dz, stone);
+            core.setBlock(px + dx, py + 1, pz + dz, stone);
+          }
+        }
+      }
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      return {
+        open,
+        covered: centerRgb(),
+        // 那一面外侧那一格的天光：露天时有光，封起来之后是 0
+        insideSkyLight: core.skyLightAt(px, eyeY, pz - 1),
+      };
+    },
+    { stone: BlockType.Stone, air: BlockType.Air, eyeHeight: PLAYER_EYE_HEIGHT },
+  );
+  const brightness = ([r, g, b]: readonly number[]) => r! + g! + b!;
+
+  expect(seen.insideSkyLight).toBe(0);
+  // 露天那一面是看得清的石头灰
+  expect(brightness(seen.open)).toBeGreaterThan(3 * 80);
+  // 封起来之后明显更暗，但不是纯黑：等级 0 也看得出轮廓
+  expect(brightness(seen.covered)).toBeLessThan(brightness(seen.open) / 3);
+  expect(brightness(seen.covered)).toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});
+
+test('午夜低头看露天的地面：画面不是一片黑，仍数得出许多种颜色', async ({ page }) => {
+  // 夜晚露天的折算天光是 4：比白天暗，但方块的轮廓与贴图的纹理都还在。
+  const center = await page.evaluate(
+    ({ lookDown }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      core.setTimeOfDay(18000);
+      core.turn(0, lookDown - core.player.pitch);
+      renderer.render(1);
+      return window.__CENTER_RGB__!();
+    },
+    { lookDown: -0.7 },
+  );
+  expect(center[0] + center[1] + center[2]).toBeGreaterThan(3 * 15);
+  expect(await countCanvasColors(page)).toBeGreaterThan(20);
   expect(errors).toEqual([]);
 });
 

@@ -1,6 +1,12 @@
 import { BlockType, isAir, isOpaque, type BlockView } from '../core/block';
-import { blockIndex, type ChunkView } from '../core/chunk';
-import { CHUNK_AREA, CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../core/constants';
+import { BLOCK_LIGHT_MASK, SKY_LIGHT_SHIFT, blockIndex, type ChunkView } from '../core/chunk';
+import {
+  CHUNK_AREA,
+  CHUNK_SIZE,
+  MAX_LIGHT_LEVEL,
+  WORLD_MAX_Y,
+  WORLD_MIN_Y,
+} from '../core/constants';
 import { BLOCK_TILES, faceTile, tileAtUv, tileUvRect, type Face } from './atlas';
 
 /**
@@ -11,7 +17,21 @@ export interface MeshData {
   readonly positions: Float32Array;
   readonly normals: Float32Array;
   readonly uvs: Float32Array;
+  /**
+   * 每个顶点两个数：天光、方块光（ADR-0016），按平滑光照取的是 4 格的平均，所以是 0.25 的倍数。
+   * 存原始等级而不是折算后的亮度：世界时刻与闪烁都只是着色器每帧的输入，网格不必为它们重建。
+   */
+  readonly light: Float32Array;
   readonly indices: Uint32Array;
+}
+
+/**
+ * 网格构建按世界坐标读区块之外的那些格子：方块，加两个光照等级。
+ * 区块边上的面要问隔壁区块的方块，边上的角还要读隔壁（含斜对角）区块的光照。
+ */
+export interface MeshView extends BlockView {
+  skyLightAt(x: number, y: number, z: number): number;
+  blockLightAt(x: number, y: number, z: number): number;
 }
 
 /** 单位立方体内的一个点，或一个轴向方向。 */
@@ -145,6 +165,35 @@ const FACE_OFFSETS = Int32Array.from(
 );
 
 /**
+ * 平滑光照取样的格子：第 f 面第 v 个角挨着的 4 格，相对方块本身的偏移，摊成 `[f][v * 12 + k * 3 + axis]`。
+ *
+ * 4 格都在这一面外侧那一层（方块加上法线），是那一层里围着这个角的 2×2：沿这一面的两条边各往角
+ * 那一侧走 0 或 1 格。角坐标是 1 的那条轴往 +1 走，是 0 的往 −1 走。
+ */
+const CORNER_SAMPLES = FACES.map((spec) => {
+  const offsets: number[] = [];
+  for (const corner of spec.corners) {
+    const toward = corner.map((c) => (c === 1 ? 1 : -1));
+    const tangents = [0, 1, 2].filter((axis) => spec.normal[axis] === 0);
+    for (const [stepU, stepV] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ]) {
+      const offset = [...spec.normal];
+      offset[tangents[0]!]! += stepU! * toward[tangents[0]!]!;
+      offset[tangents[1]!]! += stepV! * toward[tangents[1]!]!;
+      offsets.push(...offset);
+    }
+  }
+  return Int8Array.from(offsets);
+});
+
+/** 世界最高一层之上是天空：天光 15、方块光 0，按光照数组的格式打包。 */
+const OPEN_SKY = MAX_LIGHT_LEVEL << SKY_LIGHT_SHIFT;
+
+/**
  * 一份网格的 uv 用到了哪些贴图格号。
  *
  * 每个面 4 个顶点、每顶点一对 uv，取四个顶点的中点反查（`tileAtUv`）：四个角正落在格的
@@ -164,6 +213,10 @@ export function meshTiles(uvs: ArrayLike<number>): Set<number> {
 /**
  * 为一个区块生成网格：只有暴露面进网格，被不透光方块挡住的面直接跳过。
  *
+ * 每个顶点带天光与方块光（ADR-0016），按**平滑光照**取：这一面外侧那一层里挨着这个角的 4 格，
+ * 两个等级各自平均，不透明的格子按 0 计入，墙脚与凹处因此偏暗。4 格可以落在隔壁区块里，
+ * 所以要等周围 8 个区块都加载、光照算好再建（`planChunkMeshes`）。
+ *
  * 顶点用区块局部的 x/z（[0, 16]）与世界 y，渲染层把网格整体平移到区块位置。
  * 区块内的邻居直接在区块数据上做下标算术；只有跨出区块边界的那些才走 `view`，
  * 因此边界上的面是否生成取决于相邻区块是否已加载——未加载的相邻区块读到空气，
@@ -173,14 +226,32 @@ export function meshTiles(uvs: ArrayLike<number>): Set<number> {
  * 这个函数是每帧预算的大头：一个区块要问二十多万次邻居，逐格走 `view.getBlock`
  * （三次取整 + Map 查找）实测 22ms，下标算术是 4ms。
  */
-export function buildChunkMesh(chunk: ChunkView, view: BlockView): MeshData {
+export function buildChunkMesh(chunk: ChunkView, view: MeshView): MeshData {
   const positions: number[] = [];
   const normals: number[] = [];
   const uvs: number[] = [];
+  const lights: number[] = [];
   const indices: number[] = [];
   const blocks = chunk.blocks;
+  const light = chunk.light;
   const originX = chunk.cx * CHUNK_SIZE;
   const originZ = chunk.cz * CHUNK_SIZE;
+
+  /** 区块局部坐标那一格的光照，按光照数组的格式打包；不透明的格子读作 0。 */
+  const sample = (lx: number, y: number, lz: number): number => {
+    if (y > WORLD_MAX_Y) return OPEN_SKY;
+    // 世界底面之下当作不透明：只有贴着最底层的侧面会读到这里。
+    if (y < WORLD_MIN_Y) return 0;
+    if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) {
+      const j = blockIndex(lx, y, lz);
+      if (isOpaque(blocks[j] as BlockType)) return 0;
+      return light ? light[j]! : 0;
+    }
+    const x = originX + lx;
+    const z = originZ + lz;
+    if (isOpaque(view.getBlock(x, y, z))) return 0;
+    return (view.skyLightAt(x, y, z) << SKY_LIGHT_SHIFT) | view.blockLightAt(x, y, z);
+  };
 
   for (let y = WORLD_MIN_Y; y <= WORLD_MAX_Y; y++) {
     for (let lz = 0; lz < CHUNK_SIZE; lz++) {
@@ -218,7 +289,16 @@ export function buildChunkMesh(chunk: ChunkView, view: BlockView): MeshData {
           const spec = FACES[f]!;
           const base = positions.length / 3;
           const rect = tileUvRect(faceTile(tiles, spec.face));
+          const samples = CORNER_SAMPLES[f]!;
           for (let v = 0; v < 4; v++) {
+            let sky = 0;
+            let blockLight = 0;
+            for (let k = v * 12; k < v * 12 + 12; k += 3) {
+              const s = sample(lx + samples[k]!, y + samples[k + 1]!, lz + samples[k + 2]!);
+              sky += s >> SKY_LIGHT_SHIFT;
+              blockLight += s & BLOCK_LIGHT_MASK;
+            }
+            lights.push(sky / 4, blockLight / 4);
             const [ox, oy, oz] = spec.corners[v]!;
             positions.push(lx + ox, y + oy, lz + oz);
             normals.push(FACE_DX[f]!, dy, FACE_DZ[f]!);
@@ -238,6 +318,7 @@ export function buildChunkMesh(chunk: ChunkView, view: BlockView): MeshData {
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
     uvs: new Float32Array(uvs),
+    light: new Float32Array(lights),
     indices: new Uint32Array(indices),
   };
 }

@@ -7,6 +7,7 @@ import type { ItemType } from '../core/item';
 import { PLAYER_EYE_HEIGHT } from '../core/player';
 import type { Vec3 } from '../core/vec3';
 import { XP_ORB_SIZE } from '../core/xp-orb';
+import { ZOMBIE_HEIGHT } from '../core/zombie';
 import {
   CRACK_STAGES,
   HeldItemShape,
@@ -20,11 +21,10 @@ import {
 import {
   CELESTIAL_DISTANCE,
   CELESTIAL_SIZE,
-  DAY_LIGHTING,
   celestialAngle,
   celestialVisible,
+  daylightAt,
   frameTimeOfDay,
-  lightingAt,
   moonDirection,
   sunDirection,
   type Rgb,
@@ -32,6 +32,13 @@ import {
 } from './daylight';
 import { dropBob, dropSpin } from './drop-motion';
 import { heldSwingPhase, heldSwingPose } from './held-swing';
+import {
+  entityMaterial,
+  frameLighting,
+  setEntityLight,
+  terrainMaterial,
+  type FrameLighting,
+} from './light-material';
 import { buildChunkMesh, meshTiles, type MeshData } from './mesh';
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes } from './mesh-plan';
 import {
@@ -40,9 +47,9 @@ import {
   poseZombieModel,
   tintZombieModel,
   zombieGeometries,
-  zombieMaterials,
+  zombieMaterial,
+  zombieTint,
   type ZombieGeometries,
-  type ZombieMaterials,
 } from './zombie-model';
 import { chunkKey, type ChunkCoord } from '../core/world';
 
@@ -77,28 +84,6 @@ const HELD_ICON_SIZE = 0.52;
  * 转一点，玩家看到的是三个面而不是正对的一面——正对的一面读起来是一张平贴图。
  */
 const HELD_ITEM_TILT = { x: 0.32, y: -0.72, z: 0.12 } as const;
-
-/** 一个场景里的两盏灯。强度每帧按世界时刻改（`updateSky`），方向固定。 */
-interface SceneLights {
-  readonly ambient: THREE.AmbientLight;
-  readonly directional: THREE.DirectionalLight;
-}
-
-/**
- * 光照：环境光打底，方向光让方块的六个面有明暗区分（本切片没有光照传播）。强度按世界时刻在白天
- * 与夜晚两组常量之间插值（`lightingAt`），方向固定，不跟着太阳转。
- *
- * 世界与手持各挂一份（两遍渲染，见 `render`）。手持那一份的方向相对手持相机固定，明暗不随
- * 玩家转头变化，与原版一致：手上那块方块不该因为背对太阳就黑下去。强度两份同步，夜里手上
- * 那块方块与世界一起变暗。
- */
-function addLights(scene: THREE.Scene): SceneLights {
-  const ambient = new THREE.AmbientLight(0xffffff, DAY_LIGHTING.ambient);
-  const directional = new THREE.DirectionalLight(0xffffff, DAY_LIGHTING.directional);
-  directional.position.set(0.5, 1, 0.28);
-  scene.add(ambient, directional);
-  return { ambient, directional };
-}
 
 /**
  * 选框与裂纹这两个方块外壳比方块本身大一点（方块）。
@@ -246,18 +231,18 @@ export interface HeldItemRenderView {
 }
 
 /**
- * 场景里的天空现在是什么样：背景色、两盏灯的强度、太阳与月亮画不画。
+ * 场景里的天空现在是什么样：背景色、这一帧送进着色器的三个数（ADR-0016）、太阳与月亮画不画。
  * 与 `SelectionView` 一样直接从场景对象上读，端到端测试验的是真摆进场景的东西。
  */
 export interface SkyView {
   /** 场景背景色（sRGB 十六进制）。 */
   readonly background: number;
-  /** 世界那一遍的环境光强度。 */
-  readonly ambient: number;
-  /** 世界那一遍的方向光强度。 */
-  readonly directional: number;
-  /** 手持那一遍的环境光强度。与世界那一遍同步。 */
-  readonly handAmbient: number;
+  /** 天光减量（浮点，见 `daylightAt`）：白天 0，夜晚 11。 */
+  readonly skyDarkening: number;
+  /** 闪烁量（见 CONTEXT.md 的「闪烁」）。#58 之前恒为 0。 */
+  readonly flicker: number;
+  /** 手持光等级（见 CONTEXT.md 的「手持光」）。#58 之前恒为 0。 */
+  readonly heldLight: number;
   readonly sunVisible: boolean;
   readonly moonVisible: boolean;
 }
@@ -273,7 +258,12 @@ export class WorldRenderer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
-  private readonly material: THREE.MeshLambertMaterial;
+  /** 方块图集。地形、掉落物、僵尸与手持物品的材质都贴它。 */
+  private readonly texture: THREE.Texture;
+  /** 每帧送进所有光照材质的输入：天光减量、闪烁、手持光（ADR-0016）。 */
+  private readonly frame: FrameLighting = frameLighting();
+  /** 区块网格的材质：所有区块共用，两个光照等级从顶点来。 */
+  private readonly chunkMaterial: THREE.ShaderMaterial;
   private readonly core: GameCore;
   // 值里带上区块坐标：排网格计划要遍历已有网格是哪些区块，键是打包过的数字，反解麻烦。
   private readonly meshes = new Map<number, ChunkMesh>();
@@ -308,10 +298,12 @@ export class WorldRenderer {
   /** 每种物品的平面图标几何体：边长 1 的一张面。只有手持用它，同样建一次共用。 */
   private readonly iconGeometries = new Map<ItemType, THREE.BufferGeometry>();
   /**
-   * 平面图标的材质：与方块同一张图集、同样靠 alphaTest 抠掉图标四周的透明边，但两面都画
-   * ——一张面转过角度之后背面朝着相机的话，单面材质就整张不见了。
+   * 手持物品的两份材质：立方体一份，平面图标一份。图标那份与方块同一张图集、同样靠 alphaTest 抠掉
+   * 图标四周的透明边，但两面都画——一张面转过角度之后背面朝着相机的话，单面材质就整张不见了。
+   * 两份每帧都按玩家眼睛那一格的光照写（`updateHeldItem`）。
    */
-  private readonly iconMaterial: THREE.Material;
+  private readonly heldBlockMaterial: THREE.ShaderMaterial;
+  private readonly heldIconMaterial: THREE.ShaderMaterial;
   /**
    * 手持方块单独一个场景、单独一个相机，在世界之后再画一遍（见 `render`）。
    *
@@ -333,8 +325,6 @@ export class WorldRenderer {
   private readonly zombieModels = new Map<number, THREE.Group>();
   /** 僵尸六个部件的几何体：所有僵尸长得一样，建一份共用，僵尸消失时不销毁。 */
   private readonly zombieGeometries: ZombieGeometries = zombieGeometries();
-  /** 僵尸的两份材质：平时是方块那一份，受击叠红是它乘上红色的克隆。所有僵尸共用。 */
-  private readonly zombieMaterials: ZombieMaterials;
   /** 场景里的经验球小方块，按核心给的编号索引。与掉落物同一套做法，见 ADR-0007。 */
   private readonly xpOrbMeshes = new Map<number, THREE.Mesh>();
   /** 经验球的几何体与材质：所有经验球长得一样，各建一份共用就够。 */
@@ -344,8 +334,6 @@ export class WorldRenderer {
   private readonly skyColor: THREE.Color;
   /** 天空色的两端：白天取世界色板的 `--sky`，夜晚取 `--night-sky`。 */
   private readonly skyEnds: SkyEnds;
-  private readonly worldLights: SceneLights;
-  private readonly handLights: SceneLights;
   /**
    * 太阳与月亮挂在这一层下面：它的位置每帧设成相机的位置，绕 z 轴按时刻转，两张方片分别摆在
    * 它的 ±X 上。位置随相机，玩家走多远离它们都一样远；朝向不随相机，转头时它们停在天上原处。
@@ -369,17 +357,11 @@ export class WorldRenderer {
     this.skyEnds = { day: rgbOf(daySky), night: rgbOf(paletteColor('--night-sky', '#0d1226')) };
     this.skyColor = daySky.clone();
     this.scene.background = this.skyColor;
-    this.material = new THREE.MeshLambertMaterial({
-      map: texture,
-      // 树叶贴图有镂空，用 alphaTest 剔掉透明像素，避免半透明排序问题。
-      alphaTest: 0.5,
-    });
-    this.zombieMaterials = zombieMaterials(this.material);
-    this.iconMaterial = new THREE.MeshLambertMaterial({
-      map: texture,
-      alphaTest: 0.5,
-      side: THREE.DoubleSide,
-    });
+    // 场景里没有灯：明暗全由光照材质按每一处的光照等级算（ADR-0016）。
+    this.texture = texture;
+    this.chunkMaterial = terrainMaterial(texture, this.frame);
+    this.heldBlockMaterial = entityMaterial(texture, this.frame);
+    this.heldIconMaterial = entityMaterial(texture, this.frame, THREE.DoubleSide);
 
     // 经验球不吃光照：它是一团光，六个面明暗一致才像发着光，而不像一小块黄绿方块。
     this.xpOrbMaterial = new THREE.MeshBasicMaterial({
@@ -395,8 +377,6 @@ export class WorldRenderer {
     // 远裁剪面只要够装下它自己。
     this.handCamera = new THREE.PerspectiveCamera(FIELD_OF_VIEW, 1, 0.1, 10);
     this.handScene.add(this.handAnchor);
-    this.worldLights = addLights(this.scene);
-    this.handLights = addLights(this.handScene);
 
     // 太阳与月亮不参与光照，也不吃光照：方片本身就是发光的样子，夜里不该跟着地形一起变暗。
     const celestialMaterial = new THREE.MeshBasicMaterial({
@@ -466,16 +446,30 @@ export class WorldRenderer {
     return { x, y, z };
   }
 
-  /** 上一帧画出来的天空：背景色、灯的强度与太阳月亮。 */
+  /** 上一帧画出来的天空：背景色、送进着色器的三个数与太阳月亮。 */
   get sky(): SkyView {
     return {
       background: this.skyColor.getHex(),
-      ambient: this.worldLights.ambient.intensity,
-      directional: this.worldLights.directional.intensity,
-      handAmbient: this.handLights.ambient.intensity,
+      skyDarkening: this.frame.skyDarkening.value,
+      flicker: this.frame.flicker.value,
+      heldLight: this.frame.heldLight.value,
       sunVisible: this.sun.visible,
       moonVisible: this.moon.visible,
     };
+  }
+
+  /**
+   * 世界与手持两个场景里有几个灯光对象。端到端测试用它确认两盏场景灯真的删掉了：明暗全由光照材质算，
+   * 场景里留着一盏灯也不会让画面出错，只有直接数才看得出。
+   */
+  get sceneLightCount(): number {
+    let count = 0;
+    for (const scene of [this.scene, this.handScene]) {
+      scene.traverse((object) => {
+        if ((object as THREE.Light).isLight) count++;
+      });
+    }
+    return count;
   }
 
   /** 上一帧画出来的选框与裂纹。 */
@@ -605,7 +599,7 @@ export class WorldRenderer {
       return;
     }
 
-    const mesh = new THREE.Mesh(toGeometry(data), this.material);
+    const mesh = new THREE.Mesh(toGeometry(data), this.chunkMaterial);
     mesh.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
     this.scene.add(mesh);
     this.meshes.set(chunkKey(cx, cz), { cx, cz, mesh });
@@ -646,20 +640,17 @@ export class WorldRenderer {
   }
 
   /**
-   * 按世界时刻更新天空：背景色、两个场景的灯光强度、太阳与月亮的位置。
+   * 按世界时刻更新天空：背景色、送进着色器的天光减量、太阳与月亮的位置。
    *
    * 时刻与相机位置一样在上一个 tick 与当前 tick 之间插值（ADR-0002），太阳因此平滑地走，
-   * 黄昏也是连续变暗的。算法都在 `daylight.ts` 里，这里只把结果写进场景对象。
-   * 太阳月亮那一层的位置取相机的位置，所以排在 `updateCamera` 之后。
+   * 黄昏也是连续变暗的——减量不取整，着色器拿到的是浮点值。算法都在 `daylight.ts` 里，这里只把结果
+   * 写进场景对象。太阳月亮那一层的位置取相机的位置，所以排在 `updateCamera` 之后。
    */
   private updateSky(alpha: number): void {
     const time = frameTimeOfDay(this.core.timeOfDay, alpha);
-    const { ambient, directional, sky } = lightingAt(time, this.skyEnds);
+    const { sky, skyDarkening } = daylightAt(time, this.skyEnds);
     this.skyColor.setRGB(...sky);
-    for (const lights of [this.worldLights, this.handLights]) {
-      lights.ambient.intensity = ambient;
-      lights.directional.intensity = directional;
-    }
+    this.frame.skyDarkening.value = skyDarkening;
 
     this.celestialPivot.position.copy(this.camera.position);
     this.celestialPivot.rotation.z = celestialAngle(time);
@@ -676,8 +667,14 @@ export class WorldRenderer {
    *
    * 方块物品画立方体，木棍与工具画一张竖着的平面图标（`heldItemShape`）：同一个 `Mesh`，
    * 换的是几何体、材质与大小，姿态两种共用——图标也斜着拿，与方块一样从右下伸进画面。
+   *
+   * 明暗按玩家眼睛那一格的光照（见 CONTEXT.md 的「亮度」），每帧都写：洞里手上的镐也是暗的。
    */
   private updateHeldItem(): void {
+    for (const material of [this.heldBlockMaterial, this.heldIconMaterial]) {
+      this.lightAt(material, this.camera.position, 0);
+    }
+
     const item = this.core.inventory.held?.item;
     if (item === this.heldItemType) return;
     this.heldItemType = item;
@@ -696,11 +693,11 @@ export class WorldRenderer {
     const mesh = this.heldItemMesh;
     if (heldItemShape(item) === HeldItemShape.Flat) {
       mesh.geometry = this.iconGeometry(item);
-      mesh.material = this.iconMaterial;
+      mesh.material = this.heldIconMaterial;
       mesh.scale.setScalar(HELD_ICON_SIZE);
     } else {
       mesh.geometry = this.itemGeometry(item);
-      mesh.material = this.material;
+      mesh.material = this.heldBlockMaterial;
       mesh.scale.setScalar(HELD_ITEM_SIZE);
     }
     mesh.visible = true;
@@ -743,6 +740,8 @@ export class WorldRenderer {
    *
    * 漂浮与旋转纯粹是表现，核心里没有这两个量——它只报位置与存活 tick 数，相位由
    * `age + alpha` 算，因此在两次 tick 之间也是连续的，不会以 20Hz 一跳一跳地转。
+   *
+   * 每个小方块一份自己的光照材质，按碰撞箱中心那一格的光照画（见 CONTEXT.md 的「亮度」）。
    */
   private updateDrops(alpha: number): void {
     this.syncEntityObjects(
@@ -754,7 +753,9 @@ export class WorldRenderer {
         mesh.position.copy(entityCenter(drop, alpha, DROP_SIZE));
         mesh.position.y += dropBob(phase);
         mesh.rotation.y = dropSpin(phase);
+        this.lightAt(mesh.material as THREE.ShaderMaterial, drop.position, DROP_SIZE);
       },
+      (mesh) => (mesh.material as THREE.Material).dispose(),
     );
   }
 
@@ -777,20 +778,32 @@ export class WorldRenderer {
    * 让场景里的人形模型跟上核心里的僵尸：一只一个六部件的组（`createZombieModel`），摆位与
    * 摆臂摆腿在 `poseZombieModel` 里，相位按 `age + alpha` 算。
    *
-   * 与掉落物同一套做法（ADR-0007）。模型用方块那一份材质：四张贴图在同一张图集里，夜里也与
-   * 地形一起变暗。受击后 10 tick 内换成叠红的那一份，燃烧中换成叠橙的那一份（`tintZombieModel`）。
+   * 与掉落物同一套做法（ADR-0007）。每只一份自己的光照材质，贴图是方块那张图集：按碰撞箱中心那一格的
+   * 光照画，洞里的僵尸是暗的。受击后 10 tick 内叠红，燃烧中叠橙，都是这份材质上的叠色（`tintZombieModel`）。
    */
   private updateZombies(alpha: number): void {
     const now = this.core.tickCount;
     this.syncEntityObjects(
       this.core.zombies.all(),
       this.zombieModels,
-      () => createZombieModel(this.zombieGeometries, this.material),
+      () => createZombieModel(this.zombieGeometries, entityMaterial(this.texture, this.frame)),
       (group, zombie) => {
         poseZombieModel(group, zombie, alpha);
-        tintZombieModel(group, zombie, now, this.zombieMaterials);
+        tintZombieModel(group, zombie, now);
+        this.lightAt(zombieMaterial(group), zombie.position, ZOMBIE_HEIGHT);
       },
+      (group) => zombieMaterial(group).dispose(),
     );
+  }
+
+  /**
+   * 一个实体这一帧按它碰撞箱中心那一格的天光与方块光画：`bottom` 是碰撞箱底面中心，`height` 是碰撞箱高。
+   * 手持物品给的是眼睛的位置、高 0，取的就是眼睛那一格。
+   */
+  private lightAt(material: THREE.ShaderMaterial, bottom: Vec3, height: number): void {
+    const { x, z } = bottom;
+    const y = bottom.y + height / 2;
+    setEntityLight(material, this.core.skyLightAt(x, y, z), this.core.blockLightAt(x, y, z));
   }
 
   /**
@@ -799,12 +812,14 @@ export class WorldRenderer {
    *
    * 掉落物、经验球与僵尸共用这一份：ADR-0007 定的实体同步就是「每帧全量遍历 + 按编号认对象」
    * 这一套，各写一遍迟早有一边忘了从场景里移除。场景对象可以是一个 `Mesh`，也可以是一整个组。
+   * `dispose` 给的是对象自己独占、移出场景后要释放的东西（每个实体一份的材质）；共用的不在其中。
    */
   private syncEntityObjects<T extends { readonly id: number }, O extends THREE.Object3D>(
     entities: readonly T[],
     objects: Map<number, O>,
     create: (entity: T) => O,
     place: (object: O, entity: T) => void,
+    dispose?: (object: O) => void,
   ): void {
     const alive = new Set<number>();
     for (const entity of entities) {
@@ -821,13 +836,14 @@ export class WorldRenderer {
     for (const [id, object] of objects) {
       if (alive.has(id)) continue;
       this.scene.remove(object);
+      dispose?.(object);
       objects.delete(id);
     }
   }
 
-  /** 一块某种物品的小方块，边长 `size`。 */
+  /** 一块某种物品的小方块，边长 `size`，带一份自己的光照材质。 */
   private itemMesh(item: ItemType, size: number): THREE.Mesh {
-    const mesh = new THREE.Mesh(this.itemGeometry(item), this.material);
+    const mesh = new THREE.Mesh(this.itemGeometry(item), entityMaterial(this.texture, this.frame));
     mesh.scale.setScalar(size);
     return mesh;
   }
@@ -930,12 +946,6 @@ export class WorldRenderer {
   }
 }
 
-/** 僵尸模型此刻部件材质乘的颜色：六个部件用的是同一份材质，读头那一个就够。 */
-function zombieTint(group: THREE.Group): number {
-  const head = group.getObjectByName(ZombiePart.Head) as THREE.Mesh;
-  return (head.material as THREE.MeshLambertMaterial).color.getHex();
-}
-
 /**
  * 一个已经建过网格的区块。
  * `mesh` 缺省表示这个区块一个面都没有（整块空气），场景里没有对应的对象。
@@ -996,6 +1006,7 @@ function toGeometry(data: MeshData): THREE.BufferGeometry {
   geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
   geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
   geometry.setAttribute('uv', new THREE.BufferAttribute(data.uvs, 2));
+  geometry.setAttribute('light', new THREE.BufferAttribute(data.light, 2));
   geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
   geometry.computeBoundingSphere();
   return geometry;

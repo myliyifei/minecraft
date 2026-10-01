@@ -29,6 +29,8 @@ export interface ChunkView {
   readonly cx: number;
   readonly cz: number;
   readonly blocks: ChunkBlocks;
+  /** 光照数组（见 `Chunk.light`）。网格构建读它给顶点取光照，理由与 `blocks` 相同。 */
+  readonly light: Uint8Array | undefined;
 }
 
 /**

@@ -287,7 +287,7 @@ export class World implements BlockEdit, BlockStateView {
   /**
    * (x, y, z) 那一格的方块光等级（见 CONTEXT.md 的「方块光」），坐标按 floor 取整，没加载的格子读作 0。
    *
-   * 读的是光照数组的方块光那几位。方块光的传播由 #54 加入，在那之前这几位一直是 0。
+   * 读的是光照数组的方块光那几位：发光方块那一格是它的发光等级，往外每格减 1（见 `light.ts`）。
    */
   blockLightAt(x: number, y: number, z: number): number {
     const bx = Math.floor(x);

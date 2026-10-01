@@ -147,7 +147,7 @@ export interface BlockDef {
   /**
    * 发光等级：这种方块发出多强的方块光（0 到 15，见 CONTEXT.md 的「方块光」），0 是不发光。
    *
-   * 现有方块全部为 0。燃烧中的熔炉（13）由 #54 填，火把（14）由 #56 加入，那之前没有地方读它。
+   * 燃烧中的熔炉是 13，其余现有方块为 0；火把（14）由 #56 加入。
    */
   readonly lightEmission: number;
   /** 光经过它时怎么走（见 `LightPassage`）。 */
@@ -169,7 +169,7 @@ const COMMON_EXPERIENCE = 30;
 
 /**
  * 熔炉（见 CONTEXT.md，issue #30）：石制，比圆石硬得多；要镐，持镐挖掉掉回熔炉本身。
- * 两个编号（熄火与燃烧中）共用这一份：除正面贴图外它们没有任何区别，写两遍就是两处可能
+ * 两个编号（熄火与燃烧中）共用这一份：除正面贴图与发光等级外它们没有任何区别，写两遍就是两处可能
  * 对不上。带熔炉状态——原料、燃料、成品三格与燃烧、熔炼的进度存在世界的方块状态表里。
  * 可使用：使用键对着它打开熔炉界面（#33），不看手上拿的是什么。
  */
@@ -370,7 +370,9 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     lightPassage: LightPassage.Opaque,
   },
   [BlockType.Furnace]: FURNACE,
-  [BlockType.LitFurnace]: FURNACE,
+  // 燃烧中的熔炉发光（#54），比火把暗一级。其余与熄火的那个编号相同：点火熄火换编号走 `setBlock`，
+  // 光照随之更新，熔炼那边不必另外通知光照。
+  [BlockType.LitFurnace]: { ...FURNACE, lightEmission: 13 },
   // 煤矿石：木镐就合格，掉煤炭，经验是普通方块的三倍。
   [BlockType.CoalOre]: ore(ToolMaterial.Wood, ItemType.Coal, 90),
   // 铁矿石：最低档石，持木镐挖得动却什么都不掉（`dropFor`），持石镐掉粗铁。

@@ -331,7 +331,7 @@ describe('GameCore 的方块写入', () => {
 });
 
 describe('GameCore 的光照查询', () => {
-  // 核心透出世界上的同名查询：天光按方块算（ADR-0017），方块光由 #54 填，本切片之前恒为 0
+  // 核心透出世界上的同名查询：两种光都按方块算（ADR-0017），平地上没有发光方块
   it('地表之上天光 15、地表之下 0，方块光都是 0', () => {
     const core = coreOnFlatGround();
     expect(core.skyLightAt(3, FLAT_GROUND_Y + 1, 4)).toBe(15);
@@ -347,6 +347,9 @@ describe('GameCore 的光照查询', () => {
     expect(core.skyLightAt(3, FLAT_GROUND_Y, 4)).toBe(15);
     core.setBlock(3, FLAT_GROUND_Y + 2, 4, BlockType.Stone);
     expect(core.skyLightAt(3, FLAT_GROUND_Y, 4)).toBe(13);
+    core.setBlock(3, FLAT_GROUND_Y + 1, 6, BlockType.LitFurnace);
+    expect(core.blockLightAt(3, FLAT_GROUND_Y + 1, 6)).toBe(13);
+    expect(core.blockLightAt(3, FLAT_GROUND_Y + 1, 8)).toBe(11);
   });
 });
 

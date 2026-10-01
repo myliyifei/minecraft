@@ -1,21 +1,25 @@
 import { BLOCKS, LightPassage, type BlockType } from './block';
-import { BLOCK_LIGHT_MASK, SKY_LIGHT_SHIFT, type Chunk } from './chunk';
-import { CHUNK_AREA, CHUNK_SIZE, MAX_LIGHT_LEVEL, WORLD_HEIGHT, WORLD_MIN_Y } from './constants';
+import { BLOCK_LIGHT_SHIFT, CHUNK_BLOCK_COUNT, SKY_LIGHT_SHIFT, type Chunk } from './chunk';
+import { CHUNK_AREA, CHUNK_SIZE, MAX_LIGHT_LEVEL, WORLD_HEIGHT, WORLD_MAX_Y, WORLD_MIN_Y } from './constants';
 
 /**
- * 天光的计算（见 CONTEXT.md 的「天光」、ADR-0017）：区块加载时算初值，`setBlock` 之后增量更新，
- * 区块卸载时撤掉它传给邻居的光。
+ * 天光与方块光的计算（见 CONTEXT.md 的「天光」「方块光」、ADR-0017）：区块加载时算初值，
+ * `setBlock` 之后增量更新，区块卸载时撤掉它传给邻居的光。
  *
- * 每一格的天光是下面这个唯一解：竖直部分（从天空往下，穿过树叶每格减 1，遇不透明方块归 0）与
- * 六个邻格减 1 中的最大值，不透明方块恒为 0。这个值只由已加载区块里的方块决定，与计算顺序无关
- * （ADR-0014），所以三条路径各自只需保证收敛到它：
+ * 每一格的一种光是下面这个唯一解：这一格自己的来源与六个邻格减 1 中的最大值，不透明方块不收
+ * 邻格传来的光。自己的来源，天光是竖直部分（从天空往下，穿过树叶每格减 1，遇不透明方块归 0），
+ * 方块光是这一格方块的发光等级——不透明的发光方块（燃烧中的熔炉）那一格也是它的发光等级。
+ * 树叶对方块光与空格一样。这个值只由已加载区块里的方块决定，与计算顺序无关（ADR-0014），
+ * 所以三条路径各自只需保证收敛到它：
  *
- * - 加载：先竖直填充，再从「旁边那一列可能更暗」的格子出发做一次减 1 传播，跨进已加载的邻居、
- *   也从邻居的边界格子传进来。
+ * - 加载：天光先竖直填充，再从「旁边那一列可能更暗」的格子出发做一次减 1 传播；方块光从区块里的
+ *   发光方块出发传播。两种都跨进已加载的邻居、也从邻居的边界格子传进来。
  * - 改方块：按「撤光再补光」——先把可能依赖被改那一格的光撤成 0，记下撤光边界上仍有光的格子，
- *   再从它们与撤掉的格子各自的竖直部分重新传播。
+ *   再从它们与撤掉的格子各自的来源重新传播。放下的发光方块不比那一格原来暗时只增不减，直接往外传。
  * - 卸载：把邻居里可能来自这个区块的光撤掉，再补光。
  *
+ * 两种光各自独立算，共用同一套撤光、补光的队列，按通道（`Channel`：这种光在一字节里左移几位）
+ * 区分在算哪一种。
  * 补光按等级分桶，从 15 往下处理：每一格第一次被取出时就是最终值，不会反复改写。
  * 传播在区块数据上直接做下标算术，不走 `World.getBlock`，理由同 `ChunkView`。
  */
@@ -26,15 +30,22 @@ export interface LightChunks {
   markStale(cx: number, cz: number): void;
 }
 
-/** 方块编号 → 透光方式，查表比每格读 `BLOCKS[...]` 再比字符串快。 */
+/** 方块编号 → 透光方式与发光等级，查表比每格读 `BLOCKS[...]` 再比字符串快。 */
 const CLEAR = 0;
 const LEAVES = 1;
 const OPAQUE = 2;
 const PASSAGE = new Uint8Array(256);
+const EMISSION = new Uint8Array(256);
 for (const [id, def] of Object.entries(BLOCKS)) {
   PASSAGE[Number(id)] =
     def.lightPassage === LightPassage.Opaque ? OPAQUE : def.lightPassage === LightPassage.Leaves ? LEAVES : CLEAR;
+  EMISSION[Number(id)] = def.lightEmission;
 }
+
+/** 一种光在光照数组一字节里左移几位，按它区分在算哪一种光：天光 4、方块光 0。 */
+type Channel = typeof SKY_LIGHT_SHIFT | typeof BLOCK_LIGHT_SHIFT;
+const SKY_CHANNEL: Channel = SKY_LIGHT_SHIFT;
+const BLOCK_CHANNEL: Channel = BLOCK_LIGHT_SHIFT;
 
 /** 区块数据里最顶上一层的起始下标。 */
 const TOP_LAYER = (WORLD_HEIGHT - 1) * CHUNK_AREA;
@@ -69,8 +80,9 @@ function passDown(level: number, passage: number): number {
   return level;
 }
 
-function skyAt(chunk: Chunk, i: number): number {
-  return chunk.light![i] >> SKY_LIGHT_SHIFT;
+/** (chunk, i) 那一格 channel 那种光的等级。 */
+function levelAt(chunk: Chunk, i: number, channel: Channel): number {
+  return (chunk.light![i] >> channel) & MAX_LIGHT_LEVEL;
 }
 
 /** 下标 i 那一格的 y（世界坐标）。 */
@@ -85,8 +97,10 @@ function indexOf(column: number, y: number): number {
 
 export class Lighting {
   /**
-   * 传播访问过的格子数，只增不减。工作量测试用它确认平地区块只做竖直填充与一次边界传播
-   * （计访问格数，不计时）。
+   * 传播访问过的格子数，只增不减。工作量测试用它确认平地区块只做竖直填充与一次边界传播、
+   * 点一个光源只走它照得到的那些格子（计访问格数，不计时）。
+   *
+   * 加载时扫一遍区块找发光方块不计：那是对方块数组的一次顺序读，不是传播。
    */
   visits = 0;
 
@@ -112,7 +126,7 @@ export class Lighting {
   private readonly reseedIndices: number[] = [];
   private readonly reseedLevels: number[] = [];
   /**
-   * 撤光再补光期间写过的格子与它们原来的天光。撤光先写 0、补光又可能写回原值，所以这期间不当场
+   * 撤光再补光期间写过的格子与它们原来那一字节。撤光先写 0、补光又可能写回原值，所以这期间不当场
    * 记过期，结束后只记值真正变了的（`relight`）。不在撤光再补光期间时是 undefined，写一格当场记。
    */
   private touched: Map<Chunk, Map<number, number>> | undefined;
@@ -126,15 +140,23 @@ export class Lighting {
   }
 
   /**
-   * 区块刚放进已加载的集合：建光照数组、竖直填充，再与已加载的邻居互相传。
+   * 区块刚放进已加载的集合：建光照数组，算两种光的初值并与已加载的邻居互相传。
    * 已改区块重新加载也走这里，按方块重算（ADR-0017）。
+   */
+  chunkLoaded(chunk: Chunk): void {
+    chunk.resetLight();
+    this.skyLoaded(chunk);
+    this.blockLightLoaded(chunk);
+  }
+
+  /**
+   * 天光初值：竖直填充，再与已加载的邻居互相传。
    *
    * 竖直填充之后，一格只有在旁边那一列可能比它暗 2 级以上时才需要往外传。旁边那一列在它天光
    * 开始变弱的高度（`skyTops`）以上全是 15，所以每一列只从四个邻列里最高的那个高度往下找光源；
    * 平地上这个范围是空的，加载因此只做竖直填充与边界上的一次检查。
    */
-  chunkLoaded(chunk: Chunk): void {
-    chunk.resetLight();
+  private skyLoaded(chunk: Chunk): void {
     const light = chunk.light!;
     const tops = chunk.skyTops!;
     const blocks = chunk.blocks;
@@ -173,30 +195,75 @@ export class Lighting {
     }
 
     // 邻居边界上的光源：它们那一列可以是任意形状（洞里被照亮的格子），所以一直找到底。
+    // 本区块这一列在天光开始变弱的高度以上全是 15，那一段邻居传不进来更亮的光。
+    this.pushFromNeighbors(chunk, SKY_CHANNEL, (own) => tops[own]);
+    this.spread(SKY_CHANNEL);
+  }
+
+  /**
+   * 方块光初值：区块里的发光方块那一格是它的发光等级，从它们出发传播；已加载的邻居边界上有方块光
+   * 的格子也当光源，传进来。邻居没有方块光（`mayHaveBlockLight`）就不扫它的边界，新生成的平地
+   * 区块因此只多一遍找发光方块的顺序读。
+   */
+  private blockLightLoaded(chunk: Chunk): void {
+    const light = chunk.light!;
+    const blocks = chunk.blocks;
+    for (let i = 0; i < CHUNK_BLOCK_COUNT; i++) {
+      const emission = EMISSION[blocks[i]];
+      if (emission === 0) continue;
+      light[i] |= emission << BLOCK_CHANNEL;
+      chunk.mayHaveBlockLight = true;
+      this.push(chunk, i, emission);
+    }
+    this.pushFromNeighbors(chunk, BLOCK_CHANNEL, () => WORLD_MAX_Y);
+    this.spread(BLOCK_CHANNEL);
+  }
+
+  /**
+   * 刚加载的区块四周已加载的邻居：它们紧挨着边界的那一列，从 `startY(本区块这一侧的列)` 往下，
+   * channel 那种光能往外传的格子（等级 2 及以上）放进补光的桶，好传进本区块。
+   * 方块光只看可能有方块光的邻居（`mayHaveBlockLight`）。
+   */
+  private pushFromNeighbors(chunk: Chunk, channel: Channel, startY: (own: number) => number): void {
     for (const side of SIDES) {
       const neighbor = this.world.chunkAt(chunk.cx + side.dx, chunk.cz + side.dz);
-      if (!neighbor) continue;
+      if (!neighbor || (channel === BLOCK_CHANNEL && !neighbor.mayHaveBlockLight)) continue;
       for (let k = 0; k < CHUNK_SIZE; k++) {
         const other = side.other(k);
-        for (let y = tops[side.own(k)]; y >= WORLD_MIN_Y; y--) {
+        for (let y = startY(side.own(k)); y >= WORLD_MIN_Y; y--) {
           this.visits++;
           const i = indexOf(other, y);
-          const level = skyAt(neighbor, i);
+          const level = levelAt(neighbor, i, channel);
           if (level > 1) this.push(neighbor, i, level);
         }
       }
     }
-    this.spread();
   }
 
   /**
-   * 区块刚从已加载的集合里拿掉、光照数组还在：撤掉邻居里可能来自它的光，再补光。
+   * 区块刚从已加载的集合里拿掉、光照数组还在：两种光各自撤掉邻居里可能来自它的光，再补光。
    *
-   * 邻居边界上比隔壁那格暗的格子都可能是从这个区块传过去的，先当作撤光的起点；更远处依赖它们的
-   * 格子由撤光一路撤掉，再由补光恢复。两列都在天光开始变弱的高度以上时都是 15，不必看。
+   * 天光只看两列中天光开始变弱的较高那个高度以下：两列都在它以上时都是 15，不会是从这边传过去的。
+   * 方块光没有这样的高度可以跳过，整列都看；区块里从没有过方块光（`mayHaveBlockLight`）就整个跳过。
    */
   chunkUnloaded(chunk: Chunk): void {
     const tops = chunk.skyTops!;
+    this.darkenFromUnloaded(chunk, SKY_CHANNEL, (own, other, neighbor) =>
+      Math.max(tops[own], neighbor.skyTops![other]),
+    );
+    if (chunk.mayHaveBlockLight) this.darkenFromUnloaded(chunk, BLOCK_CHANNEL, () => WORLD_MAX_Y);
+  }
+
+  /**
+   * 卸载的一半：邻居边界上比隔壁那格（卸载的区块里）暗的格子都可能是从卸载的区块传过去的，先当作
+   * 撤光的起点；更远处依赖它们的格子由撤光一路撤掉，再由补光恢复。每一对相邻的列从
+   * `startY(这一侧的列, 邻居那一侧的列, 邻居)` 往下看。
+   */
+  private darkenFromUnloaded(
+    chunk: Chunk,
+    channel: Channel,
+    startY: (own: number, other: number, neighbor: Chunk) => number,
+  ): void {
     this.touched = new Map();
     for (const side of SIDES) {
       const neighbor = this.world.chunkAt(chunk.cx + side.dx, chunk.cz + side.dz);
@@ -204,25 +271,31 @@ export class Lighting {
       for (let k = 0; k < CHUNK_SIZE; k++) {
         const own = side.own(k);
         const other = side.other(k);
-        const start = Math.max(tops[own], neighbor.skyTops![other]);
-        for (let y = start; y >= WORLD_MIN_Y; y--) {
+        for (let y = startY(own, other, neighbor); y >= WORLD_MIN_Y; y--) {
           this.visits++;
           const i = indexOf(other, y);
-          const level = skyAt(neighbor, i);
-          if (level > 0 && level < skyAt(chunk, indexOf(own, y))) this.darken(neighbor, i, -1);
+          const level = levelAt(neighbor, i, channel);
+          if (level > 0 && level < levelAt(chunk, indexOf(own, y), channel)) this.darken(neighbor, i, channel, -1);
         }
       }
     }
-    this.relight();
+    this.relight(channel);
   }
 
   /**
-   * (lx, y, lz) 从 previous 换成 block 之后更新天光。由 `World.setBlock` 在写入方块之后调用。
-   *
-   * 透光方式没变（石头换泥土、熔炉点火）就什么都不做。变了：这一格与它下面竖直部分变了的那一段
-   * 是撤光的起点，撤完按新的方块补光。
+   * (lx, y, lz) 从 previous 换成 block 之后更新两种光。由 `World.setBlock` 在写入方块之后调用。
    */
   blockChanged(chunk: Chunk, lx: number, y: number, lz: number, previous: BlockType, block: BlockType): void {
+    const i = indexOf(lz * CHUNK_SIZE + lx, y);
+    this.skyChanged(chunk, lx, y, lz, previous, block);
+    this.blockLightChanged(chunk, i, previous, block);
+  }
+
+  /**
+   * 换方块之后的天光。透光方式没变（石头换泥土、熔炉点火）就什么都不做。变了：这一格与它下面
+   * 竖直部分变了的那一段是撤光的起点，撤完按新的方块补光。
+   */
+  private skyChanged(chunk: Chunk, lx: number, y: number, lz: number, previous: BlockType, block: BlockType): void {
     const before = PASSAGE[previous];
     const after = PASSAGE[block];
     if (before === after) return;
@@ -245,15 +318,53 @@ export class Lighting {
       oldLevel = passDown(oldLevel, i === changed ? before : passage);
       newLevel = passDown(newLevel, passage);
       if (i !== changed && oldLevel === newLevel) break;
-      this.darken(chunk, i, newLevel);
+      this.darken(chunk, i, SKY_CHANNEL, newLevel);
     }
-    this.relight();
+    this.relight(SKY_CHANNEL);
   }
 
-  /** 把 (chunk, i) 撤成 0，作为撤光的起点；level 是它的竖直部分，−1 表示撤光后再算。 */
-  private darken(chunk: Chunk, i: number, level: number): void {
-    const old = skyAt(chunk, i);
-    if (old > 0) this.setSky(chunk, i, 0);
+  /**
+   * 换方块之后的方块光。发光等级与挡不挡光都没变（石头换泥土、树叶换空气）就什么都不做。
+   *
+   * 新的发光等级不低于这一格原来的方块光时只增不减：这一格往邻格传的不会变暗，没有谁需要撤光，
+   * 直接把它写成发光等级往外传；它从不透明变成不挡光时，邻格的光也要能传进来，邻格一并当光源。
+   * 否则（挖掉光源、放下挡光的方块、点着的熔炉熄火）按撤光再补光，这一格是撤光的起点。
+   */
+  private blockLightChanged(chunk: Chunk, i: number, previous: BlockType, block: BlockType): void {
+    const emission = EMISSION[block];
+    const blockedBefore = PASSAGE[previous] === OPAQUE;
+    const blockedAfter = PASSAGE[block] === OPAQUE;
+    if (EMISSION[previous] === emission && blockedBefore === blockedAfter) return;
+
+    this.touched = new Map();
+    const old = levelAt(chunk, i, BLOCK_CHANNEL);
+    if (emission >= old) {
+      this.visits++;
+      if (emission > old) {
+        this.setLevel(chunk, i, BLOCK_CHANNEL, emission);
+        this.push(chunk, i, emission);
+      }
+      if (blockedBefore && !blockedAfter) {
+        for (let direction = 0; direction < DIRECTIONS; direction++) {
+          const next = this.step(chunk, i, direction);
+          if (!next) continue;
+          const level = levelAt(next, this.stepIndex, BLOCK_CHANNEL);
+          if (level > 1) this.push(next, this.stepIndex, level);
+        }
+      }
+    } else {
+      this.darken(chunk, i, BLOCK_CHANNEL, -1);
+    }
+    this.relight(BLOCK_CHANNEL);
+  }
+
+  /**
+   * 把 (chunk, i) 的 channel 那种光撤成 0，作为撤光的起点；level 是它自己的来源（天光的竖直部分），
+   * −1 表示撤光后再算（`ownLevel`）。
+   */
+  private darken(chunk: Chunk, i: number, channel: Channel, level: number): void {
+    const old = levelAt(chunk, i, channel);
+    if (old > 0) this.setLevel(chunk, i, channel, 0);
     this.darkChunks.push(chunk);
     this.darkIndices.push(i);
     this.darkLevels.push(old);
@@ -263,12 +374,13 @@ export class Lighting {
   }
 
   /**
-   * 撤光再补光的后两步。
+   * channel 那种光撤光再补光的后两步。
    *
    * 撤光：从起点往外，比撤掉的那格暗的邻格可能是从它传过去的，一并撤成 0；不比它暗的邻格
-   * 有别的来源，记作补光的起点。补光：撤掉的格子先恢复各自的竖直部分，再连同那些起点一起传播。
+   * 有别的来源，记作补光的起点。补光：撤掉的格子先恢复各自的来源（竖直部分或发光等级），
+   * 再连同那些起点一起传播。
    */
-  private relight(): void {
+  private relight(channel: Channel): void {
     for (let head = 0; head < this.darkChunks.length; head++) {
       const chunk = this.darkChunks[head];
       const i = this.darkIndices[head];
@@ -278,9 +390,9 @@ export class Lighting {
         const next = this.step(chunk, i, direction);
         if (!next) continue;
         const j = this.stepIndex;
-        const nextLevel = skyAt(next, j);
+        const nextLevel = levelAt(next, j, channel);
         if (nextLevel === 0) continue;
-        if (nextLevel < level) this.darken(next, j, -1);
+        if (nextLevel < level) this.darken(next, j, channel, -1);
         else this.push(next, j, nextLevel);
       }
     }
@@ -292,28 +404,35 @@ export class Lighting {
       const chunk = this.reseedChunks[k];
       const i = this.reseedIndices[k];
       const known = this.reseedLevels[k];
-      const level = known >= 0 ? known : this.verticalAt(chunk, i & (CHUNK_AREA - 1), yOf(i));
-      if (level > skyAt(chunk, i)) {
-        this.setSky(chunk, i, level);
+      const level = known >= 0 ? known : this.ownLevel(chunk, i, channel);
+      if (level > levelAt(chunk, i, channel)) {
+        this.setLevel(chunk, i, channel, level);
         this.push(chunk, i, level);
       }
     }
     this.reseedChunks.length = 0;
     this.reseedIndices.length = 0;
     this.reseedLevels.length = 0;
-    this.spread();
+    this.spread(channel);
 
     const touched = this.touched!;
     this.touched = undefined;
     for (const [chunk, cells] of touched) {
+      const light = chunk.light!;
       for (const [i, original] of cells) {
-        if (skyAt(chunk, i) !== original) this.changed(chunk, i);
+        if (light[i] !== original) this.changed(chunk, i);
       }
     }
   }
 
-  /** 补光：从等级 15 的桶往下，每一格往六个邻格传「自己减 1」，不透明方块不收。 */
-  private spread(): void {
+  /** (chunk, i) 那一格不靠邻格时自己的 channel 那种光：天光是竖直部分，方块光是发光等级。 */
+  private ownLevel(chunk: Chunk, i: number, channel: Channel): number {
+    if (channel === BLOCK_CHANNEL) return EMISSION[chunk.blocks[i]];
+    return this.verticalAt(chunk, i & (CHUNK_AREA - 1), yOf(i));
+  }
+
+  /** channel 那种光的补光：从等级 15 的桶往下，每一格往六个邻格传「自己减 1」，不透明方块不收。 */
+  private spread(channel: Channel): void {
     for (let level = MAX_LIGHT_LEVEL; level > 1; level--) {
       const chunks = this.bucketChunks[level];
       const indices = this.bucketIndices[level];
@@ -322,14 +441,14 @@ export class Lighting {
         const chunk = chunks.pop()!;
         const i = indices.pop()!;
         // 放进桶之后又被撤掉或改亮过的，这一条作废。
-        if (skyAt(chunk, i) !== level) continue;
+        if (levelAt(chunk, i, channel) !== level) continue;
         this.visits++;
         for (let direction = 0; direction < DIRECTIONS; direction++) {
           const next = this.step(chunk, i, direction);
           if (!next) continue;
           const j = this.stepIndex;
-          if (PASSAGE[next.blocks[j]] === OPAQUE || skyAt(next, j) >= nextLevel) continue;
-          this.setSky(next, j, nextLevel);
+          if (PASSAGE[next.blocks[j]] === OPAQUE || levelAt(next, j, channel) >= nextLevel) continue;
+          this.setLevel(next, j, channel, nextLevel);
           this.push(next, j, nextLevel);
         }
       }
@@ -348,19 +467,20 @@ export class Lighting {
   }
 
   /**
-   * 写一格的天光，方块光那几位不动，并记下哪些区块因此过期（`changed`）；撤光再补光期间先记下
-   * 原值，结束后再比（见 `touched`）。
+   * 写一格的 channel 那种光，另一种光那几位不动，并记下哪些区块因此过期（`changed`）；撤光再补光
+   * 期间先记下原值，结束后再比（见 `touched`）。写进不为 0 的方块光时给区块置上 `mayHaveBlockLight`。
    */
-  private setSky(chunk: Chunk, i: number, level: number): void {
+  private setLevel(chunk: Chunk, i: number, channel: Channel, level: number): void {
     const light = chunk.light!;
     if (this.touched) {
       let cells = this.touched.get(chunk);
       if (!cells) this.touched.set(chunk, (cells = new Map()));
-      if (!cells.has(i)) cells.set(i, light[i] >> SKY_LIGHT_SHIFT);
+      if (!cells.has(i)) cells.set(i, light[i]);
     } else {
       this.changed(chunk, i);
     }
-    light[i] = (level << SKY_LIGHT_SHIFT) | (light[i] & BLOCK_LIGHT_MASK);
+    light[i] = (light[i] & ~(MAX_LIGHT_LEVEL << channel)) | (level << channel);
+    if (channel === BLOCK_CHANNEL && level > 0) chunk.mayHaveBlockLight = true;
   }
 
   /**

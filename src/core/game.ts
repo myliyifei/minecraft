@@ -523,7 +523,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     return this.world.skyLightAt(x, y, z);
   }
 
-  /** (x, y, z) 那一格的方块光等级（见 CONTEXT.md 的「方块光」）。#54 之前恒为 0，见 `World.blockLightAt`。 */
+  /** (x, y, z) 那一格的方块光等级（见 CONTEXT.md 的「方块光」），没加载的格子读作 0。见 `World.blockLightAt`。 */
   blockLightAt(x: number, y: number, z: number): number {
     return this.world.blockLightAt(x, y, z);
   }

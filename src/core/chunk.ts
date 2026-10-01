@@ -7,6 +7,9 @@ export const SKY_LIGHT_SHIFT = 4;
 /** 光照数组里一格的方块光：与这个掩码按位与。 */
 export const BLOCK_LIGHT_MASK = 0x0f;
 
+/** 方块光在低 4 位，不必移位。与 `SKY_LIGHT_SHIFT` 成对，`light.ts` 按它区分在算哪一种光。 */
+export const BLOCK_LIGHT_SHIFT = 0;
+
 /** 一个区块的方块数据长度。 */
 export const CHUNK_BLOCK_COUNT = CHUNK_AREA * WORLD_HEIGHT;
 
@@ -59,6 +62,13 @@ export class Chunk implements ChunkView {
    * 与光照数组一起建、一起丢，由 `light.ts` 维护。
    */
   skyTops: Int16Array | undefined;
+  /**
+   * 光照数组里可能有不为 0 的方块光：写进过一格方块光就置上，光撤掉了也不清，建新光照数组时才清。
+   *
+   * 加载与卸载时要扫邻居边界上的方块光，没有发光方块的区块（新生成的地形全是）靠它跳过这一步。
+   * 由 `light.ts` 维护。
+   */
+  mayHaveBlockLight = false;
 
   /**
    * `blocks` 可以传一段现成的方块数据：Worker 生成的区块把 ArrayBuffer 转移到主线程，
@@ -101,12 +111,14 @@ export class Chunk implements ChunkView {
   resetLight(): void {
     this.light = new Uint8Array(CHUNK_BLOCK_COUNT);
     this.skyTops = new Int16Array(CHUNK_AREA);
+    this.mayHaveBlockLight = false;
   }
 
   /** 丢掉光照数组。区块卸载时调用（ADR-0017：卸载即丢）。 */
   discardLight(): void {
     this.light = undefined;
     this.skyTops = undefined;
+    this.mayHaveBlockLight = false;
   }
 
   /** 把一整层填成同一种方块。整层同高的东西（基岩层、测试用的平地）用它。 */

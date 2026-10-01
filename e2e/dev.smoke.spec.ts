@@ -3382,6 +3382,52 @@ test('白天用石头把玩家四面与头顶都封起来：正前方那块石�
   expect(errors).toEqual([]);
 });
 
+test('午夜在脚边放一座熔炉，放进煤炭与粗铁点火：低头看脚下的地面比点火前亮', async ({ page }) => {
+  // 整段跑在一次同步的 evaluate 里，游戏循环插不进来。夜里露天的折算天光只有 4，脚下那块地面
+  // 的亮度来自熔炉的方块光：熔炉在旁边一格，点着之后脚下那格方块光 12。点火走熔炼状态机——
+  // 放进原料与燃料、推进一 tick——不直接写燃烧中的编号。
+  const seen = await page.evaluate(
+    ({ furnace, rawIron, coal, maxPitch }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const centerRgb = window.__CENTER_RGB__!;
+      core.setTimeOfDay(18000);
+      core.turn(0, -maxPitch - core.player.pitch);
+      const px = Math.floor(core.player.position.x);
+      const py = Math.floor(core.player.position.y);
+      const pz = Math.floor(core.player.position.z);
+      core.setBlock(px + 1, py, pz, furnace);
+      core.tick();
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      const off = { rgb: centerRgb(), blockLight: core.blockLightAt(px, py, pz) };
+
+      const state = core.blockStateAt(px + 1, py, pz)!;
+      state.input = { item: rawIron, count: 1 };
+      state.fuel = { item: coal, count: 1 };
+      core.tick();
+      renderer.syncChunkMeshes();
+      renderer.render(1);
+      return {
+        off,
+        lit: { rgb: centerRgb(), blockLight: core.blockLightAt(px, py, pz) },
+        block: core.getBlock(px + 1, py, pz),
+        below: core.getBlock(px, py - 1, pz),
+      };
+    },
+    { furnace: BlockType.Furnace, rawIron: ItemType.RawIron, coal: ItemType.Coal, maxPitch: MAX_PITCH },
+  );
+  const brightness = ([r, g, b]: readonly number[]) => r! + g! + b!;
+
+  // 脚下是实心的地面，画面正中读到的就是它的顶面
+  expect(seen.below).not.toBe(BlockType.Air);
+  expect(seen.block).toBe(BlockType.LitFurnace);
+  expect(seen.off.blockLight).toBe(0);
+  expect(seen.lit.blockLight).toBe(12);
+  // 折算天光 4 对方块光 12：亮度差得很多，不是一两个色阶的抖动
+  expect(brightness(seen.lit.rgb)).toBeGreaterThan(brightness(seen.off.rgb) * 1.5);
+  expect(errors).toEqual([]);
+});
+
 test('午夜低头看露天的地面：画面不是一片黑，仍数得出许多种颜色', async ({ page }) => {
   // 夜晚露天的折算天光是 4：比白天暗，但方块的轮廓与贴图的纹理都还在。
   const center = await page.evaluate(

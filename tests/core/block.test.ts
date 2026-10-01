@@ -518,15 +518,15 @@ describe('方块表的「方块状态」一列（issue #30）', () => {
     }
   });
 
-  it('燃烧中的熔炉与熄火的熔炉除贴图外是同一行数据：硬度、合格工具、掉落、状态都相同', () => {
-    expect(BLOCKS[BlockType.LitFurnace]).toEqual(BLOCKS[BlockType.Furnace]);
+  it('燃烧中的熔炉与熄火的熔炉除贴图与发光等级外是同一行数据：硬度、合格工具、掉落、状态都相同', () => {
+    expect({ ...BLOCKS[BlockType.LitFurnace], lightEmission: 0 }).toEqual(BLOCKS[BlockType.Furnace]);
   });
 });
 
 describe('方块表的发光等级与透光方式两列（issue #51）', () => {
-  it('现有方块都不发光：燃烧中的熔炉也先填 0，熔炉发光由 #54 填', () => {
+  it('燃烧中的熔炉发光 13（#54），其余现有方块都不发光，熄火的熔炉也不发光', () => {
     for (const block of Object.values(BlockType)) {
-      expect(BLOCKS[block].lightEmission, `方块 ${block}`).toBe(0);
+      expect(BLOCKS[block].lightEmission, `方块 ${block}`).toBe(block === BlockType.LitFurnace ? 13 : 0);
     }
   });
 

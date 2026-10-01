@@ -318,8 +318,11 @@ describe('世界里的熔炉每 tick 推进，只推进已加载区块里的（i
     runWorld(world, 1);
     expect(world.getBlock(...SPOT)).toBe(BlockType.LitFurnace);
     expect(world.blockStateAt(...SPOT)).toBe(state);
-    // 走正常的写方块路径：网格重建靠「哪些区块的网格过期了」这份记录
-    expect(world.takeStaleChunks()).toEqual([{ cx: 0, cz: 0 }]);
+    // 走正常的写方块路径：网格重建靠「哪些区块的网格过期了」这份记录。点着的熔炉发光，光照到区块
+    // 边上的格子时，挨着那一格的区块（没加载的也算，含对角）一起记进去：熔炉在 (3, 5)，光照得到
+    // x = 0、z = 0、x = 15、z = 15 四条边与 (0, 0) 那个角，(15, 0) 这些角离得太远照不到
+    const stale = world.takeStaleChunks().map(({ cx, cz }) => `${cx},${cz}`).sort();
+    expect(stale).toEqual(['-1,-1', '-1,0', '0,-1', '0,0', '0,1', '1,0']);
 
     runWorld(world, COAL_TICKS - 2);
     expect(world.getBlock(...SPOT)).toBe(BlockType.LitFurnace);

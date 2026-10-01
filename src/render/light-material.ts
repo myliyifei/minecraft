@@ -94,18 +94,14 @@ void main() {
 #endif
   float held = max(0.0, heldLight - distance(vWorldPosition, cameraPosition));
   float level = max(max(vLight.x - skyDarkening, 0.0), max(vLight.y, held) + flicker);
-  // 曲线与系数给的是画面上的亮度（乘在 sRGB 颜色上）；贴图采样出来已经是线性的，换算一次再乘。
-  float shade = pow(brightness(level) * vShade, DISPLAY_GAMMA);
-  gl_FragColor = vec4(texel.rgb * tint * shade, 1.0);
+  // 曲线与系数给的是画面上的亮度（乘在 sRGB 颜色上），贴图采样出来却是线性的：按 sRGB 的传递函数换回
+  // 画面上的值，乘完再换回线性。不能用 2.2 次方近似成线性空间里的一个乘数：sRGB 在接近黑的那一段是线性的，
+  // 近似会把暗处的贴图再压暗一截，0 级看不出轮廓。
+  vec3 display = sRGBTransferOETF(vec4(texel.rgb, 1.0)).rgb * (brightness(level) * vShade);
+  gl_FragColor = vec4(sRGBTransferEOTF(vec4(display, 1.0)).rgb * tint, 1.0);
   #include <colorspace_fragment>
 }
 `;
-
-/**
- * 画面亮度换成线性空间乘数的指数：曲线与系数是按 sRGB 画面给的，贴图采样出来是线性的。
- * 用 2.2 近似 sRGB 的传递函数，乘数不必分段算。
- */
-const DISPLAY_GAMMA = 2.2;
 
 /** 树叶、平面图标的镂空：透明度低于它的像素丢掉，不做半透明排序。 */
 const ALPHA_TEST = 0.5;
@@ -121,7 +117,6 @@ function lightMaterial(
     TOP_SHADE: glslFloat(FACE_SHADE.top),
     SIDE_SHADE: glslFloat(FACE_SHADE.side),
     BOTTOM_SHADE: glslFloat(FACE_SHADE.bottom),
-    DISPLAY_GAMMA: glslFloat(DISPLAY_GAMMA),
   };
   if (vertexLight) defines.VERTEX_LIGHT = '';
   return new THREE.ShaderMaterial({

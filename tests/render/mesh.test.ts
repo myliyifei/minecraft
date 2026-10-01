@@ -444,3 +444,117 @@ describe('顶点光照：每个角取这一面外侧挨着它的 4 格的平均�
     expect(cornerLight(mesh, UP, [9, G + 1, 9])).toEqual([[3.75, 0]]);
   });
 });
+
+describe('顶点光照的取样：六个面、区块边角，每格的等级各不相同', () => {
+  const y = FLAT_GROUND_Y + 4;
+
+  /** 每一格一个不同的 [天光, 方块光]，由世界坐标决定；方块本身那一格不管。 */
+  function levelsAt(x: number, yy: number, z: number): [number, number] {
+    const h = Math.imul(x * 73856093 ^ yy * 19349663 ^ z * 83492791, 0x9e3779b1) >>> 0;
+    return [h % 16, (h >>> 8) % 16];
+  }
+
+  /**
+   * 方块 (bx, by, bz) 周围摆几块不透明的石头：只摆在棱上与角上的那些格，不挡它的六个面，
+   * 好让某些角的 4 格里有不透明的格子，验分母仍是 4。
+   */
+  function opaqueAround(bx: number, by: number, bz: number): Set<string> {
+    return new Set([
+      `${bx + 1},${by + 1},${bz}`,
+      `${bx - 1},${by},${bz - 1}`,
+      `${bx + 1},${by - 1},${bz + 1}`,
+    ]);
+  }
+
+  /**
+   * 区块 (cx, cz) 里只有一块石头在 (bx, by, bz)（世界坐标），周围摆几块不透明的格子；区块里外每一格的光照都取
+   * `levelsAt`。区块外的格子走视图读，所以石头贴着区块边时，角上的取样要读到隔壁区块。
+   */
+  function scene(cx: number, cz: number, [bx, by, bz]: readonly [number, number, number]) {
+    const opaque = opaqueAround(bx, by, bz);
+    const isStone = (x: number, yy: number, z: number) =>
+      (x === bx && yy === by && z === bz) || opaque.has(`${x},${yy},${z}`);
+    const chunk = new Chunk(cx, cz);
+    chunk.resetLight();
+    for (let ly = WORLD_MIN_Y; ly <= WORLD_MAX_Y; ly++) {
+      for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+          const x = cx * CHUNK_SIZE + lx;
+          const z = cz * CHUNK_SIZE + lz;
+          if (isStone(x, ly, z)) chunk.set(lx, ly, lz, BlockType.Stone);
+          const [sky, block] = levelsAt(x, ly, z);
+          chunk.light![(ly - WORLD_MIN_Y) * CHUNK_SIZE * CHUNK_SIZE + lz * CHUNK_SIZE + lx] = (sky << 4) | block;
+        }
+      }
+    }
+    const view: MeshView = {
+      getBlock: (x, yy, z) => (isStone(x, yy, z) ? BlockType.Stone : BlockType.Air),
+      skyLightAt: (x, yy, z) => levelsAt(x, yy, z)[0],
+      blockLightAt: (x, yy, z) => levelsAt(x, yy, z)[1],
+    };
+    return { mesh: buildChunkMesh(chunk, view), isStone };
+  }
+
+  /**
+   * 按定义独立算一个角的期望值：这一面外侧那一层里，单位立方体包住这个角的那 4 格，两个等级各自平均，
+   * 不透明的按 0。不经过网格构建里那张偏移表。
+   */
+  function expectedCorner(
+    corner: readonly [number, number, number],
+    normal: readonly [number, number, number],
+    block: readonly [number, number, number],
+    isStone: (x: number, y: number, z: number) => boolean,
+  ): [number, number] {
+    const choices = [0, 1, 2].map((axis) =>
+      normal[axis] !== 0 ? [block[axis]! + normal[axis]!] : [corner[axis]! - 1, corner[axis]!],
+    );
+    let sky = 0;
+    let light = 0;
+    for (const x of choices[0]!) {
+      for (const yy of choices[1]!) {
+        for (const z of choices[2]!) {
+          if (isStone(x, yy, z)) continue;
+          const [s, b] = levelsAt(x, yy, z);
+          sky += s;
+          light += b;
+        }
+      }
+    }
+    return [sky / 4, light / 4];
+  }
+
+  const cases: Array<[string, number, number, readonly [number, number, number]]> = [
+    ['区块中间', 2, -3, [2 * CHUNK_SIZE + 8, y, -3 * CHUNK_SIZE + 8]],
+    ['+X+Z 角上', 2, -3, [2 * CHUNK_SIZE + 15, y, -3 * CHUNK_SIZE + 15]],
+    ['−X−Z 角上', 2, -3, [2 * CHUNK_SIZE, y, -3 * CHUNK_SIZE]],
+  ];
+
+  for (const [where, cx, cz, block] of cases) {
+    it(`石头在${where}：六个面每个角都等于外侧 4 格的平均`, () => {
+      const { mesh, isStone } = scene(cx, cz, block);
+      const at = block.map((v, axis) => v - (axis === 0 ? cx * CHUNK_SIZE : axis === 2 ? cz * CHUNK_SIZE : 0));
+      const normals = new Set<string>();
+      let checked = 0;
+      for (let v = 0; v < mesh.positions.length / 3; v++) {
+        const local = [mesh.positions[v * 3]!, mesh.positions[v * 3 + 1]!, mesh.positions[v * 3 + 2]!];
+        const normal = [mesh.normals[v * 3]!, mesh.normals[v * 3 + 1]!, mesh.normals[v * 3 + 2]!] as const;
+        // 只看这块石头自己的面：别的石头只是取样里的不透明格。面中心往里退半格，落在哪一格就是哪一格的面。
+        const face = Math.floor(v / 4);
+        const owner = [0, 1, 2].map((axis) => {
+          let sum = 0;
+          for (let k = 0; k < 4; k++) sum += mesh.positions[(face * 4 + k) * 3 + axis]!;
+          return Math.floor(sum / 4 - normal[axis]! / 2);
+        });
+        if (owner.some((p, axis) => p !== at[axis])) continue;
+        const corner = [local[0]! + cx * CHUNK_SIZE, local[1]!, local[2]! + cz * CHUNK_SIZE] as const;
+        expect([mesh.light[v * 2], mesh.light[v * 2 + 1]], `法线 ${normal} 的角 ${corner}`).toEqual(
+          expectedCorner(corner, normal, block, isStone),
+        );
+        normals.add(normal.join(','));
+        checked++;
+      }
+      expect(normals.size).toBe(6);
+      expect(checked).toBe(24);
+    });
+  }
+});

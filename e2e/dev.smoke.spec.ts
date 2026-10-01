@@ -53,6 +53,7 @@ import {
 import { recipesFor, type GridSize } from '../src/core/recipe';
 import { HURT_FLASH_TICKS } from '../src/ui/hurt-flash';
 import { ZOMBIE_HURT_TINT_TICKS } from '../src/render/zombie-model';
+import { BRIGHTNESS_FLOOR } from '../src/render/shading';
 import { ATTACK_COOLDOWN_TICKS, ATTACK_RANGE } from '../src/core/attack';
 import { XP_ATTRACT_RANGE } from '../src/core/xp-orb';
 import { NIGHT_START } from '../src/core/time-of-day';
@@ -3373,9 +3374,11 @@ test('白天用石头把玩家四面与头顶都封起来：正前方那块石�
   expect(seen.insideSkyLight).toBe(0);
   // 露天那一面是看得清的石头灰
   expect(brightness(seen.open)).toBeGreaterThan(3 * 80);
-  // 封起来之后明显更暗，但不是纯黑：等级 0 也看得出轮廓
-  expect(brightness(seen.covered)).toBeLessThan(brightness(seen.open) / 3);
-  expect(brightness(seen.covered)).toBeGreaterThan(0);
+  // 封起来之后明显更暗，但不是纯黑：画面上是露天那时的「等级 0 的亮度」倍（露天那一面接近 15，亮度接近 1）。
+  // 曲线是按画面给的，暗处也按这个倍数，不会因为换算到线性空间再被压暗一截。
+  const ratio = brightness(seen.covered) / brightness(seen.open);
+  expect(ratio).toBeGreaterThan(BRIGHTNESS_FLOOR * 0.8);
+  expect(ratio).toBeLessThan(BRIGHTNESS_FLOOR * 1.35);
   expect(errors).toEqual([]);
 });
 

@@ -330,14 +330,23 @@ describe('GameCore 的方块写入', () => {
   });
 });
 
-describe('GameCore 的光照查询（issue #51 的占位，由 #52、#54 替换）', () => {
-  // 核心透出世界上的同名查询。接口位置先定下来，#52、#54 填真正的实现，调用方不改
-  it('天光恒为 15，方块光恒为 0', () => {
+describe('GameCore 的光照查询', () => {
+  // 核心透出世界上的同名查询：天光按方块算（ADR-0017），方块光由 #54 填，本切片之前恒为 0
+  it('地表之上天光 15、地表之下 0，方块光都是 0', () => {
     const core = coreOnFlatGround();
+    expect(core.skyLightAt(3, FLAT_GROUND_Y + 1, 4)).toBe(15);
+    expect(core.skyLightAt(3, FLAT_GROUND_Y - 3, 4)).toBe(0);
     for (const y of [FLAT_GROUND_Y + 1, FLAT_GROUND_Y - 3]) {
-      expect(core.skyLightAt(3, y, 4)).toBe(15);
       expect(core.blockLightAt(3, y, 4)).toBe(0);
     }
+  });
+
+  it('setBlock 之后同一 tick 里就读到新值', () => {
+    const core = coreOnFlatGround();
+    core.setBlock(3, FLAT_GROUND_Y, 4, BlockType.Air);
+    expect(core.skyLightAt(3, FLAT_GROUND_Y, 4)).toBe(15);
+    core.setBlock(3, FLAT_GROUND_Y + 2, 4, BlockType.Stone);
+    expect(core.skyLightAt(3, FLAT_GROUND_Y, 4)).toBe(13);
   });
 });
 
@@ -473,11 +482,13 @@ describe('GameCore 的空手挖掘', () => {
     const core = lookingDown();
     core.setMining(true);
     core.tick(GRASS_TICKS);
-    // 脚下 (0, 0) 坐在原点区块的 −X 与 −Z 两条边上
+    // 脚下 (0, 0) 坐在原点区块的 −X 与 −Z 两条边上：方块变了，自己与两个侧向邻居过期；
+    // 挖开之后那一格的天光也变了，它在区块角上，斜对角那个区块也过期
     expect(core.takeStaleChunks()).toEqual([
       { cx: 0, cz: 0 },
       { cx: -1, cz: 0 },
       { cx: 0, cz: -1 },
+      { cx: -1, cz: -1 },
     ]);
     expect(core.takeStaleChunks()).toEqual([]);
   });
@@ -576,8 +587,8 @@ describe('GameCore 的空手挖掘', () => {
       core.setMining(true);
       core.tick(GRASS_TICKS);
       core.setMining(false);
-      // 挖掉那一格是方块变更：脚下 (0, 0) 坐在两条区块边上，过期的是自己与两个侧向邻居
-      expect(core.takeStaleChunks()).toHaveLength(3);
+      // 挖掉那一格是方块变更：脚下 (0, 0) 在区块角上，过期的是自己、两个侧向邻居与光照变过的斜对角
+      expect(core.takeStaleChunks()).toHaveLength(4);
 
       // 掉落物在这几十 tick 里下落、被吸走，一次都不该让网格重建
       core.tick(PICKUP_DELAY_TICKS + TICK_RATE);
@@ -680,7 +691,7 @@ describe('GameCore 的空手挖掘', () => {
       core.setMining(true);
       core.tick(GRASS_TICKS);
       core.setMining(false);
-      expect(core.takeStaleChunks()).toHaveLength(3);
+      expect(core.takeStaleChunks()).toHaveLength(4);
 
       // 经验球在这几十 tick 里飞过来、被吸收，一次都不该让网格重建
       core.tick(ABSORB_TICKS);
@@ -780,14 +791,16 @@ describe('GameCore 的连锁挖掘', () => {
     core.tick(LOG_TICKS);
     expect(remaining(core, cells)).toEqual([]);
 
-    // 整根树干在 (0, 0) 那一列，坐在原点区块的 −X 与 −Z 两条边上：五格只让这三个区块过期
+    // 整根树干在 (0, 0) 那一列，在原点区块的角上：五格只让这四个区块过期——自己、两个侧向邻居，
+    // 以及挖开之后天光变了的斜对角
     const stale = core.takeStaleChunks();
-    expect(stale).toHaveLength(3);
+    expect(stale).toHaveLength(4);
     expect(stale).toEqual(
       expect.arrayContaining([
         { cx: 0, cz: 0 },
         { cx: -1, cz: 0 },
         { cx: 0, cz: -1 },
+        { cx: -1, cz: -1 },
       ]),
     );
     expect(core.takeStaleChunks()).toEqual([]);

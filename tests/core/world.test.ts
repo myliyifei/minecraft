@@ -382,17 +382,17 @@ describe('World 记下网格过期的区块', () => {
     }
   });
 
-  it('区块角上的一格让两个侧向邻居过期，斜对角不过期', () => {
-    // 网格只问六个轴向的邻居，斜对角那一格与谁的面都无关
+  it('区块角上的一格只换了方块、光照没变：两个侧向邻居过期，斜对角不过期', () => {
+    // 地下的石头换成泥土，两者都不透明，天光不变。网格只问六个轴向的邻居，斜对角那一格与谁的面都无关
     const world = loadedWorld();
-    world.setBlock(0, FLAT_GROUND_Y, 0, BlockType.Air);
+    world.setBlock(0, FLAT_GROUND_Y - 5, 0, BlockType.Dirt);
     expect(keysOf(world.takeStaleChunks())).toEqual(['0,0', '-1,0', '0,-1']);
   });
 
   it('负坐标归到正确的区块', () => {
     const world = new World(flatTestTerrain);
     world.loadChunk(-1, -2);
-    world.setBlock(-1, FLAT_GROUND_Y, -17, BlockType.Air);
+    world.setBlock(-1, FLAT_GROUND_Y - 5, -17, BlockType.Dirt);
     expect(keysOf(world.takeStaleChunks())).toEqual(['-1,-2', '0,-2', '-1,-1']);
   });
 
@@ -438,26 +438,6 @@ describe('World 记下网格过期的区块', () => {
     // y 越界
     world.setBlock(3, WORLD_MAX_Y + 1, 4, BlockType.Stone);
     expect(world.takeStaleChunks()).toEqual([]);
-  });
-});
-
-describe('光照查询的占位（issue #51，由 #52、#54 替换）', () => {
-  /**
-   * 接口位置先定下来：调用方从现在起就按这两个方法读光照，#52、#54 填真正的实现，调用方不改。
-   * 那时这一组整体换成真正的天光与方块光测试。
-   */
-  it('天光恒为 15', () => {
-    const world = new World(flatTestTerrain);
-    world.loadChunk(0, 0);
-    expect(world.skyLightAt(3, FLAT_GROUND_Y + 1, 4)).toBe(15);
-    expect(world.skyLightAt(3, FLAT_GROUND_Y - 5, 4)).toBe(15);
-  });
-
-  it('方块光恒为 0', () => {
-    const world = new World(flatTestTerrain);
-    world.loadChunk(0, 0);
-    expect(world.blockLightAt(3, FLAT_GROUND_Y + 1, 4)).toBe(0);
-    expect(world.blockLightAt(3, FLAT_GROUND_Y - 5, 4)).toBe(0);
   });
 });
 

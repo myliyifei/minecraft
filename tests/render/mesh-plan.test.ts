@@ -89,6 +89,74 @@ describe('该给哪些区块建网格', () => {
   });
 });
 
+describe('过期的网格怎么处理', () => {
+  it('有网格、8 个邻居都在的过期区块重建，不占建网格预算', () => {
+    const plan = planChunkMeshes({
+      world: worldWith(square(2)),
+      meshed: square(1),
+      stale: [{ cx: 0, cz: 0 }, { cx: 1, cz: 1 }],
+      center: CENTER,
+      radius: 2,
+      budget: 0,
+    });
+    expect(keysOf(plan.rebuild)).toEqual(['0,0', '1,1']);
+    expect(plan.drop).toEqual([]);
+  });
+
+  it('过期区块缺了邻居：丢掉旧网格，不重建——缺的邻居会被当成空气，边界上多出整片面', () => {
+    // 视距最外一圈的网格因为卸载留了滞后还在，它外侧的邻居已经卸载；卸载时撤光让它过期
+    const loaded = square(2).filter(({ cx }) => cx !== 2);
+    const plan = planChunkMeshes({
+      world: worldWith(loaded),
+      meshed: square(1),
+      stale: [{ cx: 1, cz: 0 }],
+      center: CENTER,
+      radius: 2,
+      budget: Infinity,
+    });
+    expect(plan.rebuild).toEqual([]);
+    expect(keysOf(plan.drop)).toEqual(['1,0']);
+    expect(keysOf(plan.build)).not.toContain('1,0');
+  });
+
+  it('丢掉之后邻居回来了，按普通的建网格规则重新建', () => {
+    const plan = planChunkMeshes({
+      world: worldWith(square(2)),
+      meshed: square(1).filter(({ cx, cz }) => !(cx === 1 && cz === 0)),
+      center: CENTER,
+      radius: 2,
+      budget: Infinity,
+    });
+    expect(keysOf(plan.build)).toEqual(['1,0']);
+  });
+
+  it('没有网格的过期区块什么都不做：它等 8 个邻居齐全后按普通规则建', () => {
+    const plan = planChunkMeshes({
+      world: worldWith(square(2)),
+      meshed: [],
+      stale: [{ cx: 0, cz: 0 }, { cx: 9, cz: 9 }],
+      center: CENTER,
+      radius: 2,
+      budget: 0,
+    });
+    expect(plan.rebuild).toEqual([]);
+    expect(plan.drop).toEqual([]);
+  });
+
+  it('已经卸载的过期区块只丢一次', () => {
+    const plan = planChunkMeshes({
+      world: worldWith(square(1)),
+      meshed: [{ cx: 5, cz: 5 }],
+      stale: [{ cx: 5, cz: 5 }],
+      center: CENTER,
+      radius: 1,
+      budget: 0,
+    });
+    expect(keysOf(plan.drop)).toEqual(['5,5']);
+    expect(plan.rebuild).toEqual([]);
+  });
+});
+
 describe('每帧的建网格预算', () => {
   it('一次最多建 budget 个，其余留到下次', () => {
     const plan = planChunkMeshes({

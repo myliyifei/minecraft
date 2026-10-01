@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import { BlockType } from '../../src/core/block';
 import { GameCore } from '../../src/core/game';
 import {
   DAY_LENGTH_TICKS,
   NIGHT_END,
   NIGHT_START,
   isNightAt,
+  skyDarkeningAt,
   timeOfDayAt,
 } from '../../src/core/time-of-day';
 import { IDLE_INTENT, MAX_PITCH } from '../../src/core/player';
-import { flatTestTerrain } from '../helpers/flat-terrain';
+import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 
 /**
  * 平地上、视距 1 的核心：世界时刻的断言要推进上万 tick，区块少一点跑得快，地形与它无关。
@@ -111,5 +113,59 @@ describe('核心的世界时刻', () => {
     expect(shifted.player.position).toEqual(plain.player.position);
     expect(shifted.drops.all()).toEqual(plain.drops.all());
     expect(slots(shifted)).toEqual(slots(plain));
+  });
+});
+
+describe('天光减量与折算天光（见 CONTEXT.md 的「折算天光」）', () => {
+  it('减量白天 0、夜晚 11，黄昏与黎明各 1000 tick 线性过渡，不取整', () => {
+    expect(skyDarkeningAt(0)).toBe(0);
+    expect(skyDarkeningAt(6000)).toBe(0);
+    expect(skyDarkeningAt(12000)).toBe(0);
+    expect(skyDarkeningAt(12500)).toBeCloseTo(5.5, 10);
+    expect(skyDarkeningAt(12750)).toBeCloseTo(8.25, 10);
+    expect(skyDarkeningAt(13000)).toBe(11);
+    expect(skyDarkeningAt(18000)).toBe(11);
+    expect(skyDarkeningAt(22999)).toBe(11);
+    expect(skyDarkeningAt(23500)).toBeCloseTo(5.5, 10);
+    expect(skyDarkeningAt(23999.5)).toBeCloseTo(0.0055, 10);
+  });
+
+  it('核心透出的减量取整到最近的整数', () => {
+    const game = core();
+    for (const [t, expected] of [[6000, 0], [12000, 0], [12500, 6], [12700, 8], [13000, 11], [18000, 11], [23500, 6], [23960, 0]] as const) {
+      game.setTimeOfDay(t);
+      expect(game.skyDarkening, `时刻 ${t}`).toBe(expected);
+    }
+  });
+
+  it('露天格子的折算天光：6000 是 15，18000 是 4，12000 是 15，13000 是 4，12500 与 23500 是取整后的 9', () => {
+    const game = core();
+    const open = [3, FLAT_GROUND_Y + 1, 4] as const;
+    for (const [t, expected] of [[6000, 15], [18000, 4], [12000, 15], [13000, 4], [12500, 9], [23500, 9]] as const) {
+      game.setTimeOfDay(t);
+      expect(game.effectiveSkyLightAt(...open), `时刻 ${t}`).toBe(expected);
+    }
+  });
+
+  it('折算天光不低于 0：天光不超过 11 的格子夜里是 0，地下的格子什么时候都是 0', () => {
+    const game = core();
+    // 头顶隔一格盖住：那格天光 14（旁边露天横着传进来），夜里 14 − 11 = 3
+    game.setBlock(3, FLAT_GROUND_Y + 3, 4, BlockType.Stone);
+    expect(game.skyLightAt(3, FLAT_GROUND_Y + 1, 4)).toBe(14);
+    game.setTimeOfDay(18000);
+    expect(game.effectiveSkyLightAt(3, FLAT_GROUND_Y + 1, 4)).toBe(3);
+    // 地面挖一个三格深的竖井，井口上方隔一格盖住：光从旁边绕进井口那格是 14，往下每格减 1，
+    // 井底 11，夜里折算天光正好是 0
+    game.setBlock(8, FLAT_GROUND_Y, 8, BlockType.Air);
+    game.setBlock(8, FLAT_GROUND_Y - 1, 8, BlockType.Air);
+    game.setBlock(8, FLAT_GROUND_Y - 2, 8, BlockType.Air);
+    game.setBlock(8, FLAT_GROUND_Y + 2, 8, BlockType.Stone);
+    expect(game.skyLightAt(8, FLAT_GROUND_Y - 2, 8)).toBe(11);
+    expect(game.effectiveSkyLightAt(8, FLAT_GROUND_Y - 1, 8)).toBe(1);
+    expect(game.effectiveSkyLightAt(8, FLAT_GROUND_Y - 2, 8)).toBe(0);
+    expect(game.effectiveSkyLightAt(3, FLAT_GROUND_Y - 1, 4)).toBe(0);
+    game.setTimeOfDay(6000);
+    expect(game.effectiveSkyLightAt(8, FLAT_GROUND_Y - 2, 8)).toBe(11);
+    expect(game.effectiveSkyLightAt(3, FLAT_GROUND_Y - 1, 4)).toBe(0);
   });
 });

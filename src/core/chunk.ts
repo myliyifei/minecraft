@@ -1,6 +1,12 @@
 import { BlockType } from './block';
 import { CHUNK_AREA, CHUNK_SIZE, WORLD_HEIGHT, WORLD_MAX_Y, WORLD_MIN_Y } from './constants';
 
+/** 光照数组里一格的天光在高 4 位：右移这么多位读出天光。方块光在低 4 位，见 `BLOCK_LIGHT_MASK`。 */
+export const SKY_LIGHT_SHIFT = 4;
+
+/** 光照数组里一格的方块光：与这个掩码按位与。 */
+export const BLOCK_LIGHT_MASK = 0x0f;
+
 /** 一个区块的方块数据长度。 */
 export const CHUNK_BLOCK_COUNT = CHUNK_AREA * WORLD_HEIGHT;
 
@@ -35,6 +41,22 @@ export class Chunk implements ChunkView {
   readonly cx: number;
   readonly cz: number;
   readonly blocks: ChunkBlocks;
+  /**
+   * 光照数组（ADR-0017）：与 `blocks` 同样长，每格 1 字节，天光占高 4 位、方块光占低 4 位。
+   *
+   * 只在区块已加载期间有：世界加载区块时 `resetLight` 建一份全 0 的，交给 `light.ts` 算；
+   * 卸载时 `discardLight` 丢掉，已改区块也一样，玩家走回来时按方块重算。没有光照数组时两个等级读作 0。
+   * 写它的只有 `light.ts`：它在这块内存上直接做下标算术，理由与 `blocks` 直接暴露相同。
+   */
+  light: Uint8Array | undefined;
+  /**
+   * 每一列天光开始变弱的高度（ADR-0017）：最高的一个不是「不衰减」的方块（不透明或树叶）的 y，
+   * 整列都不衰减时是 WORLD_MIN_Y − 1。下标是 `lz * CHUNK_SIZE + lx`。
+   *
+   * 它以上整段天光都是 15。传播只需要从它往下找光源，平地区块因此只做竖直填充。
+   * 与光照数组一起建、一起丢，由 `light.ts` 维护。
+   */
+  skyTops: Int16Array | undefined;
 
   /**
    * `blocks` 可以传一段现成的方块数据：Worker 生成的区块把 ArrayBuffer 转移到主线程，
@@ -59,6 +81,30 @@ export class Chunk implements ChunkView {
   set(lx: number, y: number, lz: number, block: BlockType): void {
     if (!inside(lx, y, lz)) return;
     this.blocks[blockIndex(lx, y, lz)] = block;
+  }
+
+  /** (lx, y, lz) 的天光等级。越界或没有光照数组时读作 0。 */
+  skyLight(lx: number, y: number, lz: number): number {
+    if (!this.light || !inside(lx, y, lz)) return 0;
+    return this.light[blockIndex(lx, y, lz)] >> SKY_LIGHT_SHIFT;
+  }
+
+  /** (lx, y, lz) 的方块光等级。越界或没有光照数组时读作 0。 */
+  blockLight(lx: number, y: number, lz: number): number {
+    if (!this.light || !inside(lx, y, lz)) return 0;
+    return this.light[blockIndex(lx, y, lz)] & BLOCK_LIGHT_MASK;
+  }
+
+  /** 建一份全 0 的光照数组，旧的（如果有）丢掉。区块加载时调用，随后由 `light.ts` 填。 */
+  resetLight(): void {
+    this.light = new Uint8Array(CHUNK_BLOCK_COUNT);
+    this.skyTops = new Int16Array(CHUNK_AREA);
+  }
+
+  /** 丢掉光照数组。区块卸载时调用（ADR-0017：卸载即丢）。 */
+  discardLight(): void {
+    this.light = undefined;
+    this.skyTops = undefined;
   }
 
   /** 把一整层填成同一种方块。整层同高的东西（基岩层、测试用的平地）用它。 */

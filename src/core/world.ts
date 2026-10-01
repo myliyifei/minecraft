@@ -7,6 +7,7 @@ import {
 } from './block-state';
 import { Chunk } from './chunk';
 import { CHUNK_SHIFT, CHUNK_SIZE, MAX_LIGHT_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from './constants';
+import { Lighting } from './light';
 
 export interface ChunkCoord {
   readonly cx: number;
@@ -56,8 +57,11 @@ export class World implements BlockEdit, BlockStateView {
    *
    * 由 `setBlock` 记：方块自己的区块一定过期；它坐在区块边界上时，那一侧的邻居也过期——边界上的
    * 面生不生成取决于隔壁那一格是什么，只重建自己就会在挖开的地方留下一个看穿到虚空的洞，或者留下
-   * 一堵本该消失的墙。只记四个侧向的邻居，不记斜角：网格只问六个轴向的邻居。有了光照数组之后
-   * （#52、ADR-0017），光照变过的区块也记进这里，渲染层不必知道是哪一种原因。
+   * 一堵本该消失的墙。方块变了只记四个侧向的邻居，不记斜角：面的剔除只问六个轴向的邻居。
+   *
+   * 光照变过的格子也记（`Lighting` 经 `markStale` 记，ADR-0017）：那一格的区块过期，它在区块边缘
+   * 1 格内时含对角在内挨着它的区块也过期——平滑光照读对角格。`setBlock` 带来的光照变化、新区块
+   * 加载时传进邻居的光、区块卸载时从邻居撤掉的光都走这条路。渲染层不必知道是哪一种原因。
    *
    * 没加载的邻居也记：要不要重建网格由渲染层判断。没人来取时记录会一直累积——浏览器里渲染层
    * 每帧取一次（见 `WorldRenderer.syncChunkMeshes`），核心层测试里世界是一次性的。
@@ -76,9 +80,20 @@ export class World implements BlockEdit, BlockStateView {
    */
   private readonly blockStates = new Map<string, BlockStateEntry>();
   private readonly source: ChunkSource;
+  /** 光照的计算（ADR-0017）。光照数组本身在各区块上，这里只有算法与它的工作量计数。 */
+  private readonly lighting: Lighting;
 
   constructor(source: ChunkSource) {
     this.source = source;
+    this.lighting = new Lighting({
+      chunkAt: (cx, cz) => this.chunks.get(chunkKey(cx, cz)),
+      markStale: (cx, cz) => this.markChunkStale(cx, cz),
+    });
+  }
+
+  /** 光照传播访问过的格子数，只增不减（见 `Lighting.visits`）。工作量测试用它。 */
+  get lightVisits(): number {
+    return this.lighting.visits;
   }
 
   get loadedChunkCount(): number {
@@ -120,24 +135,26 @@ export class World implements BlockEdit, BlockStateView {
     const key = chunkKey(cx, cz);
     const loaded = this.chunks.get(key);
     if (loaded) return loaded;
-    const edited = this.editedChunks.get(key);
-    if (edited) {
-      this.chunks.set(key, edited);
-      return edited;
-    }
-    const chunk = this.source(cx, cz);
+    const chunk = this.editedChunks.get(key) ?? this.source(cx, cz);
     if (!chunk) return undefined;
     this.chunks.set(key, chunk);
+    this.lighting.chunkLoaded(chunk);
     return chunk;
   }
 
   /**
    * 卸载区块。
    * 改过的区块只是不再算「已加载」，数据仍留在 `editedChunks` 里；没改过的到这里就
-   * 没人引用了，交给垃圾回收。
+   * 没人引用了，交给垃圾回收。两者的光照数组都丢掉（ADR-0017），它传给邻居的光也撤掉：
+   * 没加载的格子不贡献光。
    */
   unloadChunk(cx: number, cz: number): void {
-    this.chunks.delete(chunkKey(cx, cz));
+    const key = chunkKey(cx, cz);
+    const chunk = this.chunks.get(key);
+    if (!chunk) return;
+    this.chunks.delete(key);
+    this.lighting.chunkUnloaded(chunk);
+    chunk.discardLight();
   }
 
   getBlock(x: number, y: number, z: number): BlockType {
@@ -181,6 +198,8 @@ export class World implements BlockEdit, BlockStateView {
     // 这一下让它成了已改区块，卸载后不再丢弃。
     this.editedChunks.set(key, chunk);
     this.markStale(bx, bz);
+    // 同步更新光照，不等下一 tick：同一 tick 之后的步骤读到的就是新值（ADR-0017）。
+    this.lighting.blockChanged(chunk, lx, by, lz, previous, block);
     return true;
   }
 
@@ -251,21 +270,31 @@ export class World implements BlockEdit, BlockStateView {
   }
 
   /**
-   * (x, y, z) 那一格的天光等级（见 CONTEXT.md 的「天光」）。
+   * (x, y, z) 那一格的天光等级（见 CONTEXT.md 的「天光」），坐标按 floor 取整。
    *
-   * 占位：恒为 15。#52 换成光照数组里的值（ADR-0017），调用方不改。
+   * 没加载的格子读作 0。世界最高一层之上是天空，已加载的那一列在那里读作 15。
    */
-  skyLightAt(_x: number, _y: number, _z: number): number {
-    return MAX_LIGHT_LEVEL;
+  skyLightAt(x: number, y: number, z: number): number {
+    const bx = Math.floor(x);
+    const by = Math.floor(y);
+    const bz = Math.floor(z);
+    const chunk = this.chunks.get(chunkKey(chunkOf(bx), chunkOf(bz)));
+    if (!chunk) return 0;
+    if (by > WORLD_MAX_Y) return MAX_LIGHT_LEVEL;
+    return chunk.skyLight(localOf(bx), by, localOf(bz));
   }
 
   /**
-   * (x, y, z) 那一格的方块光等级（见 CONTEXT.md 的「方块光」）。
+   * (x, y, z) 那一格的方块光等级（见 CONTEXT.md 的「方块光」），坐标按 floor 取整，没加载的格子读作 0。
    *
-   * 占位：恒为 0。#54 换成光照数组里的值（ADR-0017），调用方不改。
+   * 读的是光照数组的方块光那几位。方块光的传播由 #54 加入，在那之前这几位一直是 0。
    */
-  blockLightAt(_x: number, _y: number, _z: number): number {
-    return 0;
+  blockLightAt(x: number, y: number, z: number): number {
+    const bx = Math.floor(x);
+    const bz = Math.floor(z);
+    const chunk = this.chunks.get(chunkKey(chunkOf(bx), chunkOf(bz)));
+    if (!chunk) return 0;
+    return chunk.blockLight(localOf(bx), Math.floor(y), localOf(bz));
   }
 }
 

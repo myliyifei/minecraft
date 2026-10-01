@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { DAY_LENGTH_TICKS, NIGHT_END, NIGHT_START } from '../../src/core/time-of-day';
+import { DAY_LENGTH_TICKS, NIGHT_END, NIGHT_START, TWILIGHT_TICKS } from '../../src/core/time-of-day';
 import {
   DAY_LIGHTING,
   MIN_AMBIENT,
   NIGHT_LIGHTING,
-  TWILIGHT_TICKS,
   celestialAngle,
   celestialVisible,
   dayFactor,

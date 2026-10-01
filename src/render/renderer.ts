@@ -567,21 +567,19 @@ export class WorldRenderer {
    * 首帧之前用它把出生点那一带一次铺好。
    */
   syncChunkMeshes(budget = MESH_BUDGET_PER_FRAME): void {
-    // 挖掉的方块必须当帧就从画面上消失，所以重建不占这一帧的建网格预算——一次改动最多
-    // 牵动三个区块（自己加两个侧向邻居），远小于铺开视距时的积压。还没建过网格的区块跳过：
-    // 它得等 8 个邻居齐全（见 planChunkMeshes），在这里建会绕过那条规则。
-    for (const { cx, cz } of this.core.takeStaleChunks()) {
-      if (this.hasChunkMesh(cx, cz)) this.rebuildChunk(cx, cz);
-    }
-
+    // 过期的网格当帧重建、不占预算；缺邻居的丢掉等邻居回来。两者都由 planChunkMeshes 定，
+    // 首次建与重建因此走同一条「8 个邻居都在」的规则。一次改动最多牵动四个区块（自己、两个侧向
+    // 邻居与光照变过的斜对角），远小于铺开视距时的积压。
     const plan = planChunkMeshes({
       world: this.core,
       meshed: this.meshes.values(),
+      stale: this.core.takeStaleChunks(),
       center: this.core.playerChunk,
       radius: this.core.viewRadius,
       budget,
     });
     for (const { cx, cz } of plan.drop) this.dropChunkMesh(cx, cz);
+    for (const { cx, cz } of plan.rebuild) this.rebuildChunk(cx, cz);
     for (const { cx, cz } of plan.build) this.buildChunk(cx, cz);
   }
 

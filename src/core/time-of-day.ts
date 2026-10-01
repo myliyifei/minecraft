@@ -14,6 +14,19 @@ export const NIGHT_START = 13000;
 /** 夜晚到这一刻结束（不含）。这之后到下一天的 `NIGHT_START` 之前都是白天。 */
 export const NIGHT_END = 23000;
 
+/**
+ * 黄昏与黎明各持续多少 tick。
+ *
+ * 黄昏排在夜晚开始之前、黎明排在夜晚结束之后：核心判定为夜晚的整段时间里画面都是全暗的，
+ * 天色开始变暗就说明夜晚快到了。两段都落在太阳处于地平线以下的时候——黄昏从日落（12000）
+ * 开始，黎明到日出（24000，即 0）结束，天色与太阳的位置对得上。天空色（`dayFactor`）与
+ * 天光减量（`skyDarkeningAt`）按同样的两段过渡。
+ */
+export const TWILIGHT_TICKS = 1000;
+
+/** 夜晚的天光减量（见 CONTEXT.md 的「折算天光」）：露天格子天光 15，夜里折算天光为 4。 */
+export const NIGHT_SKY_DARKENING = 11;
+
 /** tick 计数与偏移对应的时刻，落在 [0, `DAY_LENGTH_TICKS`)。偏移可以是负数。 */
 export function timeOfDayAt(ticks: number, offset: number): number {
   return wrapTimeOfDay(ticks + offset);
@@ -27,4 +40,19 @@ export function wrapTimeOfDay(t: number): number {
 /** 这一刻是不是夜晚。白天与夜晚的分界只写在这里。 */
 export function isNightAt(timeOfDay: number): boolean {
   return timeOfDay >= NIGHT_START && timeOfDay < NIGHT_END;
+}
+
+/**
+ * 这一刻的天光减量（见 CONTEXT.md 的「折算天光」）：白天 0，夜晚 `NIGHT_SKY_DARKENING`，
+ * 黄昏从 0 线性增上去，黎明线性减回 0。
+ *
+ * 不取整：时刻可以带小数（渲染层传插值后的时刻），着色器拿这个浮点值，画面因此是连续的。
+ * 规则用的是取整之后的值，见 `GameCore.skyDarkening`。
+ */
+export function skyDarkeningAt(timeOfDay: number): number {
+  const duskStart = NIGHT_START - TWILIGHT_TICKS;
+  if (timeOfDay < duskStart) return 0;
+  if (timeOfDay < NIGHT_START) return (NIGHT_SKY_DARKENING * (timeOfDay - duskStart)) / TWILIGHT_TICKS;
+  if (timeOfDay < NIGHT_END) return NIGHT_SKY_DARKENING;
+  return Math.max(0, (NIGHT_SKY_DARKENING * (DAY_LENGTH_TICKS - timeOfDay)) / TWILIGHT_TICKS);
 }

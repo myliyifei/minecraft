@@ -12,10 +12,12 @@ import { byDistanceTo, chunkKey, chunksAround, type ChunkCoord } from '../core/w
  */
 export const MESH_BUDGET_PER_FRAME = 2;
 
-/** 这一帧要建哪些区块的网格、要丢哪些。 */
+/** 这一帧要建哪些区块的网格、要重建哪些、要丢哪些。 */
 export interface MeshPlan {
   /** 要建网格的区块，按到玩家的距离由近到远，长度不超过预算。 */
   readonly build: readonly ChunkCoord[];
+  /** 已有网格、过期了、8 个邻居都在的区块：当帧重建，不占预算。 */
+  readonly rebuild: readonly ChunkCoord[];
   /** 要从场景里移除网格的区块。 */
   readonly drop: readonly ChunkCoord[];
 }
@@ -29,6 +31,8 @@ export interface MeshPlanOptions {
   readonly world: LoadedChunkView;
   /** 已经有网格的区块。 */
   readonly meshed: Iterable<ChunkCoord>;
+  /** 核心报告网格过期了的区块（`GameCore.takeStaleChunks`），可以含没有网格、没加载的。 */
+  readonly stale?: Iterable<ChunkCoord>;
   /** 玩家所在的区块。 */
   readonly center: ChunkCoord;
   /** 视距（区块数）。 */
@@ -49,12 +53,18 @@ export interface MeshPlanOptions {
  * 2. **一帧只建预算内的几个，先建离玩家近的。** 建一个区块的网格实测 1.3–1.6ms，
  *    跨过区块边界时一次要补一整列区块，全挤在一帧里就是一次可见的卡顿。
  *
- * 丢网格的条件只有「区块已经不在世界里了」。区块的卸载留了滞后（见 UNLOAD_MARGIN），
+ * 丢网格的条件是「区块已经不在世界里了」。区块的卸载留了滞后（见 UNLOAD_MARGIN），
  * 所以在区块边界上来回走不会让边上那一圈网格反复拆建。
+ *
+ * 过期的网格（方块或光照变了）当帧重建，不占预算：挖掉的方块必须当帧就从画面上消失。但重建
+ * 同样要 8 个邻居都在——视距最外一圈的网格因为卸载的滞后还留着，它外侧的邻居却可能已经卸载，
+ * 卸载时撤光又会让它过期。这时不重建，而是丢掉旧网格，等邻居回来再按第 1 条重新建。
+ * 没有网格的过期区块不管，它按第 1 条等着。
  */
 export function planChunkMeshes({
   world,
   meshed,
+  stale = [],
   center,
   radius,
   budget,
@@ -67,11 +77,23 @@ export function planChunkMeshes({
     if (!world.isChunkLoaded(cx, cz)) drop.push({ cx, cz });
   }
 
+  const rebuild: ChunkCoord[] = [];
+  for (const { cx, cz } of stale) {
+    const key = chunkKey(cx, cz);
+    if (!meshedKeys.has(key) || !world.isChunkLoaded(cx, cz)) continue;
+    if (isMeshable(world, cx, cz)) {
+      rebuild.push({ cx, cz });
+    } else {
+      drop.push({ cx, cz });
+      meshedKeys.delete(key);
+    }
+  }
+
   const buildable = chunksAround(center, radius).filter(
     ({ cx, cz }) => !meshedKeys.has(chunkKey(cx, cz)) && isMeshable(world, cx, cz),
   );
   if (buildable.length > 1) buildable.sort(byDistanceTo(center));
-  return { build: buildable.slice(0, Math.max(budget, 0)), drop };
+  return { build: buildable.slice(0, Math.max(budget, 0)), rebuild, drop };
 }
 
 /**

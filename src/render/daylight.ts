@@ -1,5 +1,11 @@
 import { TAU } from '../core/constants';
-import { DAY_LENGTH_TICKS, NIGHT_END, NIGHT_START, wrapTimeOfDay } from '../core/time-of-day';
+import {
+  DAY_LENGTH_TICKS,
+  NIGHT_END,
+  NIGHT_START,
+  TWILIGHT_TICKS,
+  wrapTimeOfDay,
+} from '../core/time-of-day';
 
 /**
  * 昼夜在画面上的样子：亮度、天空色、太阳与月亮的方向，全由世界时刻算出来。
@@ -38,15 +44,6 @@ export const NIGHT_LIGHTING: LightIntensity = { ambient: 0.34, directional: 0.3 
  * 再暗下去，背光的那几个面与夜空分不开，看不出方块的轮廓。
  */
 export const MIN_AMBIENT = 0.3;
-
-/**
- * 黄昏与黎明各持续多少 tick。
- *
- * 黄昏排在夜晚开始之前、黎明排在夜晚结束之后：核心判定为夜晚的整段时间里画面都是全暗的，
- * 天色开始变暗就说明夜晚快到了。两段都落在太阳处于地平线以下的时候——黄昏从日落（12000）
- * 开始，黎明到日出（24000，即 0）结束，天色与太阳的位置对得上。
- */
-export const TWILIGHT_TICKS = 1000;
 
 /** 黄昏从这一刻开始。 */
 const DUSK_START = NIGHT_START - TWILIGHT_TICKS;

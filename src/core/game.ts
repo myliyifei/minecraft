@@ -17,7 +17,7 @@ import { placeBlock } from './placement';
 import { IDLE_INTENT, Player, type MoveIntent, type PlayerView } from './player';
 import { streamChunks } from './streaming';
 import { plainsTerrain } from './terrain';
-import { isNightAt, timeOfDayAt, wrapTimeOfDay } from './time-of-day';
+import { isNightAt, skyDarkeningAt, timeOfDayAt, wrapTimeOfDay } from './time-of-day';
 import type { Vec3 } from './vec3';
 import { XpOrbs, type XpOrbsView } from './xp-orb';
 import { Zombies, type ZombiesView } from './zombie';
@@ -518,14 +518,27 @@ export class GameCore implements BlockEdit, BlockStateView {
     return this.world.takeStaleChunks();
   }
 
-  /** (x, y, z) 那一格的天光等级（见 CONTEXT.md 的「天光」）。占位：恒为 15，见 `World.skyLightAt`。 */
+  /** (x, y, z) 那一格的天光等级（见 CONTEXT.md 的「天光」），没加载的格子读作 0。见 `World.skyLightAt`。 */
   skyLightAt(x: number, y: number, z: number): number {
     return this.world.skyLightAt(x, y, z);
   }
 
-  /** (x, y, z) 那一格的方块光等级（见 CONTEXT.md 的「方块光」）。占位：恒为 0，见 `World.blockLightAt`。 */
+  /** (x, y, z) 那一格的方块光等级（见 CONTEXT.md 的「方块光」）。#54 之前恒为 0，见 `World.blockLightAt`。 */
   blockLightAt(x: number, y: number, z: number): number {
     return this.world.blockLightAt(x, y, z);
+  }
+
+  /**
+   * 此刻的天光减量（见 CONTEXT.md 的「折算天光」），取整到最近的整数：规则按等级判断，
+   * 所以是逐级的。渲染层要连续的画面，自己按插值后的时刻算浮点值（`skyDarkeningAt`）。
+   */
+  get skyDarkening(): number {
+    return Math.round(skyDarkeningAt(this.timeOfDay));
+  }
+
+  /** (x, y, z) 那一格的折算天光：天光减去此刻的减量，不低于 0。 */
+  effectiveSkyLightAt(x: number, y: number, z: number): number {
+    return Math.max(0, this.skyLightAt(x, y, z) - this.skyDarkening);
   }
 
   /**
@@ -533,7 +546,7 @@ export class GameCore implements BlockEdit, BlockStateView {
    *
    * 注意它不是「地表高度」：地表高度是地形生成给出的地面，不随挖掘与放置变化，
    * 由 `plainsSurfaceHeight` 那类函数回答。这里问的是那一列现在实际堆到了多高，
-   * 出生点与将来的天光要的是这个。
+   * 出生点与僵尸要的是这个。
    */
   highestBlockY(x: number, z: number): number {
     return this.world.highestBlockY(x, z);

@@ -20,7 +20,7 @@ import {
   type ZombieTarget,
   type ZombieView,
 } from '../../src/core/zombie';
-import { FLAT_STAND_Y, flatTestTerrain, flatTestWorld } from '../helpers/flat-terrain';
+import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTestTerrain, flatTestWorld } from '../helpers/flat-terrain';
 
 const SEED = 1234;
 
@@ -529,6 +529,34 @@ describe('白天露天燃烧（#44）', () => {
     expect(zombies.all()[0]).toMatchObject({ health: 18, burning: true });
   });
 
+  it('树叶底下不烧：头顶一层树叶，脚底那格天光 14，400 tick 后还是满血', () => {
+    const { world, zombies, advance } = burningOnPlayer();
+    world.setBlock(0, FLAT_STAND_Y + 2, 0, BlockType.OakLeaves);
+    expect(world.skyLightAt(0, FLAT_STAND_Y, 0)).toBe(14);
+    advance(400);
+    expect(zombies.all()[0]).toMatchObject({ health: ZOMBIE_MAX_HEALTH, burning: false });
+  });
+
+  it('屋顶底下不烧：头顶 5×5 的屋顶，脚底那格天光低于 15', () => {
+    const { world, zombies, advance } = burningOnPlayer();
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) world.setBlock(dx, FLAT_STAND_Y + 3, dz, BlockType.Stone);
+    }
+    expect(world.skyLightAt(0, FLAT_STAND_Y, 0)).toBeLessThan(15);
+    advance(400);
+    expect(zombies.all()[0]).toMatchObject({ health: ZOMBIE_MAX_HEALTH, burning: false });
+  });
+
+  it('坑底是露天：挖一个上面没盖东西的 1 格深的坑，站在坑底照样烧', () => {
+    const ground = zombiesOnFlatGround();
+    ground.world.setBlock(0, FLAT_GROUND_Y, 0, BlockType.Air);
+    ground.zombies.spawnAt({ ...PLAYER, y: FLAT_GROUND_Y });
+    ground.setNight(false);
+    expect(ground.world.skyLightAt(0, FLAT_GROUND_Y, 0)).toBe(15);
+    ground.advance(20);
+    expect(ground.zombies.all()[0]).toMatchObject({ health: 19, burning: true });
+  });
+
   it('夜晚不烧：400 tick 后还是满血，燃烧标记为假', () => {
     const { zombies, advance, setNight } = burningOnPlayer();
     setNight(true);
@@ -573,6 +601,19 @@ describe('白天露天燃烧（#44）', () => {
     night.spawnZombieAt(x, y, z);
     night.tick(20);
     expect(night.zombies.all()[0]).toMatchObject({ health: ZOMBIE_MAX_HEALTH, burning: false });
+  });
+
+  it('白天按世界时刻：12999 露天烧，13000 不烧', () => {
+    const game = core();
+    const { x, y, z } = game.player.position;
+    game.spawnZombieAt(x, y, z);
+    game.setTimeOfDay(NIGHT_START - 2);
+    game.tick();
+    expect(game.timeOfDay).toBe(NIGHT_START - 1);
+    expect(game.zombies.all()[0]!.burning).toBe(true);
+    game.tick();
+    expect(game.timeOfDay).toBe(NIGHT_START);
+    expect(game.zombies.all()[0]!.burning).toBe(false);
   });
 });
 

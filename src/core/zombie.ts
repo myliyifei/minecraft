@@ -1,5 +1,5 @@
 import { isSolid, type BlockView } from './block';
-import { TAU, TICK_RATE } from './constants';
+import { MAX_LIGHT_LEVEL, TAU, TICK_RATE, WORLD_MAX_Y } from './constants';
 import type { DropSink } from './drop';
 import { isBoxInLoadedChunks, isInLoadedChunk, stepEntities, type LoadedChunks } from './entity';
 import { fallDamage, Health } from './health';
@@ -21,6 +21,7 @@ import {
 } from './physics';
 import { JUMP_VELOCITY } from './player';
 import { raycastBox, type EntityHit, type EntityRaycast } from './raycast';
+import { effectiveSkyLight } from './time-of-day';
 import type { Vec3 } from './vec3';
 import type { XpOrbSink } from './xp-orb';
 
@@ -81,6 +82,9 @@ export const ZOMBIE_SPAWN_MIN_DISTANCE = 24;
 /** 自然生成时离玩家的水平距离至多这么多格（含）：还在追击范围附近，走得过来。 */
 export const ZOMBIE_SPAWN_MAX_DISTANCE = 48;
 
+/** 自然生成的那一格折算天光至多这么多（含）。夜晚露天是 4，白天露天是 15。 */
+export const ZOMBIE_SPAWN_MAX_SKY_LIGHT = 7;
+
 /**
  * 游走时选中「停下」的比例。哈希摊成 [0, 1) 之后落在这一段之下就停下，其余的均匀映射成一个方向。
  */
@@ -110,7 +114,7 @@ export interface ZombieView {
   readonly health: number;
   /** 上一次受伤（真的扣了血）是第几个 tick，还没受过伤是 undefined。渲染层据此叠红。 */
   readonly lastHurtTick: number | undefined;
-  /** 是否在燃烧：上一次推进时是白天、它又在露天。渲染层据此叠橙。 */
+  /** 是否在燃烧：上一次推进时是白天、它又在露天（脚底那格天光 15）。渲染层据此叠橙。 */
   readonly burning: boolean;
 }
 
@@ -137,15 +141,26 @@ export interface ZombiesView {
 /**
  * 某一列此刻最高的非空气方块的 y。`World` 满足它。
  *
- * 「露天」按它判定：列顶低于僵尸就是露天，自然生成也站在列顶之上。用的是这一列实际堆到的高度，
- * 不是地表高度：地表高度是地形生成给出的地面，不随挖掘与放置变化。
+ * 自然生成站在列顶之上。用的是这一列实际堆到的高度，不是地表高度：地表高度是地形生成给出的地面，
+ * 不随挖掘与放置变化。
  */
 export interface ColumnTops {
   highestBlockY(x: number, z: number): number;
 }
 
 /**
- * 世界里的全部僵尸：夜晚在露天地表生成、朝玩家走或游走、跳上 1 格、够得着就打玩家、被玩家打、白天
+ * 某一格的天光与方块光等级，没加载的格子读作 0。`World` 满足它。
+ *
+ * 燃烧看天光是不是 15（「露天」），生成看方块光与折算天光。折算要用的天光减量随世界时刻变，
+ * 世界不知道时刻，由核心每 tick 交给 `spawnNaturally`。
+ */
+export interface LightLevels {
+  skyLightAt(x: number, y: number, z: number): number;
+  blockLightAt(x: number, y: number, z: number): number;
+}
+
+/**
+ * 世界里的全部僵尸：在暗处的列顶生成、朝玩家走或游走、跳上 1 格、够得着就打玩家、被玩家打、白天
  * 露天燃烧、摔落受伤、离得太远或所在区块没加载就消失、生命归零就死。
  *
  * 与掉落物、经验球同一套样式（ADR-0007）：持列表、编号自增不复用、`step` 走 `stepEntities`；
@@ -166,7 +181,7 @@ export interface ColumnTops {
  * 还掉一个经验球，交给 `DropSink` 与 `XpOrbSink`；之后怎么落、怎么飞是它们的事。
  */
 export class Zombies implements ZombiesView, EntityRaycast {
-  private readonly blocks: BlockView & LoadedChunks & ColumnTops;
+  private readonly blocks: BlockView & LoadedChunks & ColumnTops & LightLevels;
   private readonly seed: number;
   private readonly drops: DropSink;
   private readonly experience: XpOrbSink;
@@ -175,7 +190,7 @@ export class Zombies implements ZombiesView, EntityRaycast {
   private nextId = 1;
 
   constructor(
-    blocks: BlockView & LoadedChunks & ColumnTops,
+    blocks: BlockView & LoadedChunks & ColumnTops & LightLevels,
     seed: number,
     drops: DropSink,
     experience: XpOrbSink,
@@ -194,24 +209,29 @@ export class Zombies implements ZombiesView, EntityRaycast {
     return this.list;
   }
 
-  /** 在 position（碰撞箱底面中心）无条件生成一只。不看那里是不是实心、是不是夜晚。 */
+  /** 在 position（碰撞箱底面中心）无条件生成一只。不看那里是不是实心，也不看光照。 */
   spawnAt(position: Vec3): void {
     this.list.push(new Zombie(this.nextId++, position));
   }
 
   /**
-   * 第 tick 个 tick 的自然生成，player 是玩家碰撞箱底面中心。每 tick 调一次，至多生成一只。
+   * 第 tick 个 tick 的自然生成，player 是玩家碰撞箱底面中心，skyDarkening 是这一 tick 取整之后的天光
+   * 减量（`GameCore.skyDarkening`）。每 tick 调一次，至多生成一只。
    *
-   * 夜晚、现有不到 `ZOMBIE_MAX_COUNT` 只、tick 能被 `ZOMBIE_SPAWN_INTERVAL` 整除时试一次：由种子与 tick
+   * 现有不到 `ZOMBIE_MAX_COUNT` 只、tick 能被 `ZOMBIE_SPAWN_INTERVAL` 整除时试一次：由种子与 tick
    * 哈希出一个角度与一个 24 到 48 格的距离，从玩家的水平位置量过去落在哪一列，那一列就是候选列。
-   * 候选列所在区块已加载、列顶方块实心，就在列顶之上、列的中心生成一只；列顶之上本来就是空气，身位
+   * 候选列所在区块已加载、列顶方块实心、列顶上面那一格够暗（方块光 0、折算天光不超过
+   * `ZOMBIE_SPAWN_MAX_SKY_LIGHT`），就在那一格、列的中心生成一只；列顶之上本来就是空气，身位
    * 两格因此都空着。列的中心离玩家的水平距离也要在 24 到 48 格之间：取整到列上会偏出去不到一格。
+   * 列顶在世界最高一层时不生成：上面那一格在光照数组之外，方块光读作 0，炉顶照不亮。
    * 哪一条不满足，这一次就放弃，不另选一列重试。
    *
-   * 看的是候选列，不是玩家脚下那一列：玩家头顶盖着东西不影响生成。
+   * 不看是不是夜晚：白天露天折算天光 15，不生成；黄昏减量取整到 8 时露天折算天光降到 7，从这时起
+   * 生成。看的是候选列，不是玩家脚下那一列：玩家头顶盖着东西不影响生成。候选列也只看列顶：白天屋顶
+   * 底下折算天光是 0，但列顶是屋顶，屋顶上面那格折算天光 15，不生成。
    */
-  spawnNaturally(tick: number, player: Vec3, night: boolean): void {
-    if (!night || this.list.length >= ZOMBIE_MAX_COUNT || tick % ZOMBIE_SPAWN_INTERVAL !== 0) return;
+  spawnNaturally(tick: number, player: Vec3, skyDarkening: number): void {
+    if (this.list.length >= ZOMBIE_MAX_COUNT || tick % ZOMBIE_SPAWN_INTERVAL !== 0) return;
     const angle = this.roll(SPAWN_SALT, tick, 0) * TAU;
     const reach =
       ZOMBIE_SPAWN_MIN_DISTANCE +
@@ -224,7 +244,15 @@ export class Zombies implements ZombiesView, EntityRaycast {
     if (away < ZOMBIE_SPAWN_MIN_DISTANCE || away > ZOMBIE_SPAWN_MAX_DISTANCE) return;
     const top = this.blocks.highestBlockY(bx, bz);
     if (!isSolid(this.blocks.getBlock(bx, top, bz))) return;
+    if (top + 1 > WORLD_MAX_Y) return;
+    if (!this.isDarkEnough(bx, top + 1, bz, skyDarkening)) return;
     this.spawnAt({ ...at, y: top + 1 });
+  }
+
+  /** (x, y, z) 那一格暗得足以生成吗：方块光 0，按 skyDarkening 折算的天光不超过 `ZOMBIE_SPAWN_MAX_SKY_LIGHT`。 */
+  private isDarkEnough(x: number, y: number, z: number, skyDarkening: number): boolean {
+    if (this.blocks.blockLightAt(x, y, z) > 0) return false;
+    return effectiveSkyLight(this.blocks.skyLightAt(x, y, z), skyDarkening) <= ZOMBIE_SPAWN_MAX_SKY_LIGHT;
   }
 
   /**
@@ -258,7 +286,7 @@ export class Zombies implements ZombiesView, EntityRaycast {
   /**
    * 推进一个 tick。`tick` 是核心的 tick 计数，游走与掉落的哈希、出手的间隔、燃烧的节奏要用它；
    * `player` 是玩家，追击与消失按它的位置算，走完这一步够得着就打它；`night` 是此刻是不是夜晚，
-   * 白天露天才燃烧。
+   * 白天露天（脚底那格天光 15）才燃烧。
    *
    * 已经死了的（被玩家打死的）最先结算：在它此刻所在的那一格掉落，然后移除，不再走这一步。再判消失，
    * 然后走：走这一步之前离玩家正好 64 格的不消失，哪怕这一步会让它远出去一点。原地等区块排在选方向
@@ -286,9 +314,9 @@ export class Zombies implements ZombiesView, EntityRaycast {
     });
   }
 
-  /** position 在露天吗：它所在那一列的最高方块低于它的脚底。 */
+  /** position 在露天吗：它所在那一格的天光是 15（见 CONTEXT.md 的「露天」）。 */
   private isOpenSky({ x, y, z }: Vec3): boolean {
-    return this.blocks.highestBlockY(Math.floor(x), Math.floor(z)) < y;
+    return this.blocks.skyLightAt(x, y, z) === MAX_LIGHT_LEVEL;
   }
 
   /**

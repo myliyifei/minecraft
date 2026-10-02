@@ -56,3 +56,8 @@ export function skyDarkeningAt(timeOfDay: number): number {
   if (timeOfDay < NIGHT_END) return NIGHT_SKY_DARKENING;
   return Math.max(0, (NIGHT_SKY_DARKENING * (DAY_LENGTH_TICKS - timeOfDay)) / TWILIGHT_TICKS);
 }
+
+/** 天光 skyLight 按减量 darkening 折算之后的等级（见 CONTEXT.md 的「折算天光」），不低于 0。 */
+export function effectiveSkyLight(skyLight: number, darkening: number): number {
+  return Math.max(0, skyLight - darkening);
+}

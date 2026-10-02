@@ -17,7 +17,7 @@ import { placeBlock } from './placement';
 import { IDLE_INTENT, Player, type MoveIntent, type PlayerView } from './player';
 import { streamChunks } from './streaming';
 import { plainsTerrain } from './terrain';
-import { isNightAt, skyDarkeningAt, timeOfDayAt, wrapTimeOfDay } from './time-of-day';
+import { effectiveSkyLight, isNightAt, skyDarkeningAt, timeOfDayAt, wrapTimeOfDay } from './time-of-day';
 import type { Vec3 } from './vec3';
 import { XpOrbs, type XpOrbsView } from './xp-orb';
 import { Zombies, type ZombiesView } from './zombie';
@@ -538,7 +538,7 @@ export class GameCore implements BlockEdit, BlockStateView {
 
   /** (x, y, z) 那一格的折算天光：天光减去此刻的减量，不低于 0。 */
   effectiveSkyLightAt(x: number, y: number, z: number): number {
-    return Math.max(0, this.skyLightAt(x, y, z) - this.skyDarkening);
+    return effectiveSkyLight(this.skyLightAt(x, y, z), this.skyDarkening);
   }
 
   /**
@@ -546,7 +546,7 @@ export class GameCore implements BlockEdit, BlockStateView {
    *
    * 注意它不是「地表高度」：地表高度是地形生成给出的地面，不随挖掘与放置变化，
    * 由 `plainsSurfaceHeight` 那类函数回答。这里问的是那一列现在实际堆到了多高，
-   * 出生点与僵尸要的是这个。
+   * 出生点与僵尸的生成要的是这个。
    */
   highestBlockY(x: number, z: number): number {
     return this.world.highestBlockY(x, z);
@@ -644,8 +644,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     // 僵尸排在熔炉之后、掉落物之前（#36 定的每 tick 顺序），追的、打的是玩家这一 tick 走完之后的位置。
     // 死亡画面期间照常推进：世界不停，死了的玩家停在原地，僵尸照样朝那里走，只是他不再受伤。
     // 界面开着照样挨打：挡的是玩家的输入，不是世界。生成排在现有的那些走完之后：这一 tick 生成的
-    // 下一 tick 才开始动。
-    const night = this.isNight;
+    // 下一 tick 才开始动。燃烧看是不是白天，生成看折算天光，两者都按这一 tick 的世界时刻。
     this.zombiesState.step(
       this.ticks,
       {
@@ -653,9 +652,9 @@ export class GameCore implements BlockEdit, BlockStateView {
         hitbox: this.playerState.hitbox,
         hitByZombie: (amount, attacker, now) => this.hitByZombie(amount, attacker, now),
       },
-      night,
+      this.isNight,
     );
-    this.zombiesState.spawnNaturally(this.ticks, this.playerState.position, night);
+    this.zombiesState.spawnNaturally(this.ticks, this.playerState.position, this.skyDarkening);
     // 掉落物与经验球都排在挖掘之后：这一 tick 刚挖出来的东西同一 tick 就开始动，而
     // 掉落物的拾取延迟（PICKUP_DELAY_TICKS）也从这里起算。拾取与吸收判的都是玩家走完
     // 之后的碰撞箱。两者互不影响，谁先谁后都一样。死了的玩家什么都不拾取、不吸收，这一 tick 摔死的、

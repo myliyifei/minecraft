@@ -66,6 +66,18 @@ export interface MiningView {
    * 不在连锁挖掘中时是空数组。渲染层读它画那圈高亮轮廓。
    */
   readonly chainPreview: readonly Vec3[];
+  /**
+   * 上一 tick 碎掉的目标方块：坐标与种类，那一 tick 没挖穿时 undefined。下一 tick 一开始就清空。
+   *
+   * 只报目标方块：连锁挖掘里一起碎掉的其余方块不报（见 CONTEXT.md 的「碎屑」）。渲染层每推进一个 tick
+   * 读一次，据此在那一格爆一团碎屑。
+   */
+  readonly broken: BrokenBlock | undefined;
+}
+
+/** 碎掉的那一格与它碎掉之前是哪种方块。 */
+export interface BrokenBlock extends Vec3 {
+  readonly block: BlockType;
 }
 
 /** 不在连锁中时报出去的空集合。共用一份，免得渲染层每帧读一次就分配一个数组。 */
@@ -117,6 +129,7 @@ export class Mining implements MiningView {
    * 必然是同一批，中途世界被别处改动（区块卸载、别处放了一块）也不会让两者分叉。
    */
   private chain: readonly Vec3[] | undefined;
+  private lastBroken: BrokenBlock | undefined;
 
   constructor(
     blocks: BlockEdit & BlockStateView,
@@ -159,12 +172,17 @@ export class Mining implements MiningView {
     return this.chain ?? NO_CHAIN;
   }
 
+  get broken(): BrokenBlock | undefined {
+    return this.lastBroken;
+  }
+
   /**
    * 推进一个 tick。
    *
    * 排在玩家移动之后调：目标按这一 tick 走完之后的眼睛位置算，选框因此不会落后玩家一步。
    */
   step({ held, chain }: MiningInput): void {
+    this.lastBroken = undefined;
     const previous = this.hit;
     this.hit = this.aimedBlock();
     if (!held || !isSameBlock(previous, this.hit)) this.restart();
@@ -191,6 +209,8 @@ export class Mining implements MiningView {
 
     // 连锁集合里含目标本身，所以两条路都是「挖掉一批格子」，只是批的大小不同。
     // 掉落与耐久都按挖穿这一 tick 手上的工具算，整批用同一件。
+    const { x, y, z } = this.hit;
+    this.lastBroken = { x, y, z, block };
     let worn = 0;
     for (const cell of this.chain ?? [this.hit]) {
       const brokenBlock = this.breakBlock(cell.x, cell.y, cell.z, tool);

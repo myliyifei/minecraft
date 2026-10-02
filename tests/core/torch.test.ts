@@ -400,6 +400,19 @@ describe('火把与出生点、点按（#56 审查补充）', () => {
     expect(game.inventory.hotbar()[0]).toEqual({ item: ItemType.StonePickaxe, count: 1 });
   });
 
+  it('按下即碎的火把也报告为碎掉的方块（#60），下一 tick 清空', () => {
+    const game = core();
+    game.setBlock(0, S, -1, BlockType.Torch);
+    lookAt(game, { x: 0.5, y: S + 0.3, z: -0.5 });
+    expect(game.mining.target).toMatchObject({ x: 0, y: S, z: -1 });
+    game.setMining(true);
+    game.setMining(false);
+    game.tick();
+    expect(game.mining.broken).toEqual({ x: 0, y: S, z: -1, block: BlockType.Torch });
+    game.tick();
+    expect(game.mining.broken).toBeUndefined();
+  });
+
   it('点按挖不动硬度大于 0 的方块：下一 tick 进度归零，石头还在', () => {
     const game = core();
     game.setBlock(0, S, -1, BlockType.Stone);

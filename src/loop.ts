@@ -8,9 +8,14 @@ const MAX_CATCHUP_TICKS = 5;
  * 固定步长的游戏循环：核心按 20 tick/s 推进，渲染每帧一次。
  *
  * `render` 收到的 alpha 是这一帧落在两个 tick 之间的比例（0..1），渲染层用它插值
- * 连续量（ADR-0002）。返回停止循环的函数。
+ * 连续量（ADR-0002）。`afterTick` 在每个 tick 推进之后各调一次：只在一 tick 里有值的东西（碎掉的方块）
+ * 要在这里读，一帧补几个 tick 时等到 `render` 再读就只剩最后一个 tick 的了。返回停止循环的函数。
  */
-export function startGameLoop(core: GameCore, render: (alpha: number) => void): () => void {
+export function startGameLoop(
+  core: GameCore,
+  render: (alpha: number) => void,
+  afterTick: () => void,
+): () => void {
   let last = performance.now();
   let accumulator = 0;
   let handle = 0;
@@ -24,6 +29,7 @@ export function startGameLoop(core: GameCore, render: (alpha: number) => void): 
     let steps = 0;
     while (accumulator >= TICK_MS && steps < MAX_CATCHUP_TICKS) {
       core.tick();
+      afterTick();
       accumulator -= TICK_MS;
       steps++;
     }

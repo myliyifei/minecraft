@@ -2,6 +2,7 @@ import { BlockType } from '../core/block';
 import { isTorch, torchStickBox, torchSupportCell, WALL_TORCH_TILT } from '../core/torch';
 import type { Hitbox } from '../core/physics';
 import type { Vec3 } from '../core/vec3';
+import type { UvRect } from './atlas';
 import { CUBE_FACES, type FaceSpec, type Point3, type Uv } from './cube-faces';
 
 /**
@@ -14,6 +15,16 @@ import { CUBE_FACES, type FaceSpec, type Point3, type Uv } from './cube-faces';
  * 贴图约定：细杆在图集那一格里居中、立在格底，侧面取这一竖条，顶面取这一竖条最上面那一小方块——
  * 生成脚本（`tools/gen-atlas.mjs`）按同样的位置画火焰与木杆。
  */
+
+/**
+ * 火把贴图里画着细杆的那一竖条，以一格贴图为单位（0 到 1，v 向上）：居中、立在格底，宽与高同细杆。
+ * 细杆的侧面取这一竖条，碎屑也只从这里取小块——竖条之外是透明的。
+ */
+export const TORCH_STICK_UV: UvRect = (() => {
+  const { min, max } = torchStickBox(BlockType.Torch, 0, 0, 0)!;
+  const width = max.x - min.x;
+  return Object.freeze({ u0: 0.5 - width / 2, v0: 0, u1: 0.5 + width / 2, v1: max.y - min.y });
+})();
 
 /** 整格立方体的面里细杆用得上的五个：底面贴着地面或埋在墙脚，看不见。 */
 const STICK_FACES = CUBE_FACES.filter((spec) => spec.normal[1] !== -1);
@@ -67,11 +78,9 @@ function stickModel(block: BlockType): readonly FaceSpec[] {
     const corners = map4(spec.corners, ([cx, cy, cz]): Point3 =>
       place([min.x + cx * width, min.y + cy * height, min.z + cz * width]),
     );
-    // 侧面取居中那一竖条，从格底到细杆高度；顶面取竖条最上面那一块 width 见方
-    const uv = map4(spec.uv, ([u, v]): Uv => [
-      0.5 - width / 2 + u * width,
-      top ? height - width + v * width : v * height,
-    ]);
+    // 侧面取居中那一竖条（`TORCH_STICK_UV`），从格底到细杆高度；顶面取竖条最上面那一块 width 见方
+    const { u0, v1 } = TORCH_STICK_UV;
+    const uv = map4(spec.uv, ([u, v]): Uv => [u0 + u * width, top ? v1 - width + v * width : v * v1]);
     return { normal: turn(spec.normal), corners, uv, face: spec.face };
   });
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BlockType } from '../../src/core/block';
+import { BlockType, isSolid } from '../../src/core/block';
+import type { BrokenBlock } from '../../src/core/mining';
 import { MAX_LIGHT_LEVEL } from '../../src/core/constants';
 import type { Vec3 } from '../../src/core/vec3';
 import type { GlowingBlock } from '../../src/render/mesh';
@@ -10,17 +11,27 @@ import {
   ParticlePool,
   ParticleSystem,
   TORCH_EMIT_LIFT,
-  type ParticleLightView,
+  type DiggingView,
   type ParticleSpawn,
+  type ParticleWorldView,
 } from '../../src/render/particles';
+import { TILE, tileUvRect, type UvRect } from '../../src/render/atlas';
+import { TORCH_STICK_UV } from '../../src/render/torch-model';
 import { SELF_LIT_BLOCK_LIGHT } from '../../src/render/shading';
 import { torchTip } from '../../src/render/torch-model';
 
 /** 60 帧/秒的一帧（秒）。 */
 const FRAME = 1 / 60;
 
-/** 处处天光 15、方块光 0 的光照视图：露天的白天。 */
-const OPEN_AIR: ParticleLightView = { skyLightAt: () => MAX_LIGHT_LEVEL, blockLightAt: () => 0 };
+/** 处处是空气、天光 15、方块光 0：露天的白天。 */
+const OPEN_AIR: ParticleWorldView = {
+  skyLightAt: () => MAX_LIGHT_LEVEL,
+  blockLightAt: () => 0,
+  getBlock: () => BlockType.Air,
+};
+
+/** 没在挖掘。 */
+const NOT_DIGGING: DiggingView = { target: undefined, digging: false, progress: 0 };
 
 /** 固定种子的伪随机数（mulberry32）：发射按概率走，测试要每次相同。 */
 function seeded(seed: number): () => number {
@@ -35,14 +46,14 @@ function seeded(seed: number): () => number {
 }
 
 function spawnOf(kind: ParticleKind, life = 1): ParticleSpawn {
-  return { kind, x: 0.5, y: 0.5, z: 0.5, vx: 0, vy: 0, vz: 0, life, size: 0.1 };
+  return { kind, x: 0.5, y: 0.5, z: 0.5, vx: 0, vy: 0, vz: 0, life, size: 0.1, uv: tileUvRect(TILE.smoke) };
 }
 
 /** 推进 `frames` 帧，每帧之后记一次各种类的数量。 */
 function run(system: ParticleSystem, frames: number, eye: Vec3, sources: readonly GlowingBlock[]) {
   const seen = { flame: 0, smoke: 0 };
   for (let i = 0; i < frames; i++) {
-    system.update(FRAME, eye, sources, OPEN_AIR);
+    system.update(FRAME, eye, sources, OPEN_AIR, NOT_DIGGING);
     const counts = system.pool.counts();
     seen.flame = Math.max(seen.flame, counts.flame);
     seen.smoke = Math.max(seen.smoke, counts.smoke);
@@ -56,7 +67,7 @@ describe('粒子池', () => {
     for (let i = 0; i < 3; i++) expect(pool.spawn(spawnOf(ParticleKind.Smoke))).toBe(true);
     expect(pool.spawn(spawnOf(ParticleKind.Flame))).toBe(false);
     expect(pool.count).toBe(3);
-    expect(pool.counts()).toEqual({ flame: 0, smoke: 3, total: 3 });
+    expect(pool.counts()).toEqual({ flame: 0, smoke: 3, debris: 0, total: 3 });
   });
 
   it('到期的粒子回收，回收之后又能生成；没到期的照常留着', () => {
@@ -66,9 +77,9 @@ describe('粒子池', () => {
     expect(pool.spawn(spawnOf(ParticleKind.Smoke))).toBe(false);
 
     for (let t = 0; t < 0.3; t += FRAME) pool.step(FRAME, OPEN_AIR);
-    expect(pool.counts()).toEqual({ flame: 0, smoke: 1, total: 1 });
+    expect(pool.counts()).toEqual({ flame: 0, smoke: 1, debris: 0, total: 1 });
     expect(pool.spawn(spawnOf(ParticleKind.Flame))).toBe(true);
-    expect(pool.counts()).toEqual({ flame: 1, smoke: 1, total: 2 });
+    expect(pool.counts()).toEqual({ flame: 1, smoke: 1, debris: 0, total: 2 });
   });
 
   it('默认上限是 PARTICLE_LIMIT', () => {
@@ -88,7 +99,7 @@ describe('粒子池', () => {
 
     // 5 格外那个火焰光点存活 0.3 秒，到期之后剩下的两个仍各是原来的位置
     pool.step(0.35, OPEN_AIR);
-    expect(pool.counts()).toEqual({ flame: 0, smoke: 2, total: 2 });
+    expect(pool.counts()).toEqual({ flame: 0, smoke: 2, debris: 0, total: 2 });
     expect(xs().sort()).toEqual([1, 3]);
     pool.step(2, OPEN_AIR);
     expect(xs()).toEqual([3]);
@@ -118,7 +129,8 @@ describe('粒子池', () => {
   });
 
   it('烟按所在格的天光与方块光画；火焰光点带自发光的标记，不读光照', () => {
-    const light: ParticleLightView = {
+    const light: ParticleWorldView = {
+      ...OPEN_AIR,
       skyLightAt: (_x, y) => (y >= 10 ? 15 : 3),
       blockLightAt: (x) => (x >= 0 ? 9 : 0),
     };
@@ -164,7 +176,7 @@ describe('火把与燃烧中的熔炉冒粒子', () => {
       const system = new ParticleSystem(PARTICLE_LIMIT, seeded(3));
       const source = { block, x: 4, y: 70, z: 0 };
       const tip = torchTip(block)!;
-      for (let i = 0; i < 600 && system.pool.count === 0; i++) system.update(FRAME, eye, [source], OPEN_AIR);
+      for (let i = 0; i < 600 && system.pool.count === 0; i++) system.update(FRAME, eye, [source], OPEN_AIR, NOT_DIGGING);
       expect(system.pool.count).toBeGreaterThan(0);
       // 刚冒出来的那一个离冒出的位置不到一帧的位移
       const [x, y, z] = system.pool.positions.subarray(0, 3);
@@ -183,7 +195,7 @@ describe('火把与燃烧中的熔炉冒粒子', () => {
   it('熔炉的粒子从正面（−X 或 −Z）前方冒出', () => {
     const system = new ParticleSystem(PARTICLE_LIMIT, seeded(4));
     const source = { block: BlockType.LitFurnace, x: 4, y: 70, z: 0 };
-    for (let i = 0; i < 1200; i++) system.update(FRAME, eye, [source], OPEN_AIR);
+    for (let i = 0; i < 1200; i++) system.update(FRAME, eye, [source], OPEN_AIR, NOT_DIGGING);
     const { positions, count } = system.pool;
     expect(count).toBeGreaterThan(0);
     for (let i = 0; i < count; i++) {
@@ -199,7 +211,7 @@ describe('火把与燃烧中的熔炉冒粒子', () => {
   it('烟往上升', () => {
     const system = new ParticleSystem(PARTICLE_LIMIT, seeded(5));
     const source = at(BlockType.Torch, 2);
-    for (let i = 0; i < 600; i++) system.update(FRAME, eye, [source], OPEN_AIR);
+    for (let i = 0; i < 600; i++) system.update(FRAME, eye, [source], OPEN_AIR, NOT_DIGGING);
     const { positions, count, kinds } = system.pool;
     let risen = 0;
     for (let i = 0; i < count; i++) {
@@ -213,7 +225,7 @@ describe('火把与燃烧中的熔炉冒粒子', () => {
     const system = new ParticleSystem(50, seeded(6));
     let most = 0;
     for (let i = 0; i < 600; i++) {
-      system.update(FRAME, eye, sources, OPEN_AIR);
+      system.update(FRAME, eye, sources, OPEN_AIR, NOT_DIGGING);
       most = Math.max(most, system.pool.count);
     }
     expect(most).toBe(50);
@@ -221,7 +233,208 @@ describe('火把与燃烧中的熔炉冒粒子', () => {
 
   it('两帧之间隔了很久（切回标签页），这一帧也只按 0.1 秒冒粒子', () => {
     const system = new ParticleSystem(PARTICLE_LIMIT, seeded(7));
-    system.update(30, eye, [at(BlockType.Torch, 2)], OPEN_AIR);
+    system.update(30, eye, [at(BlockType.Torch, 2)], OPEN_AIR, NOT_DIGGING);
     expect(system.pool.count).toBeLessThanOrEqual(2);
+  });
+});
+
+/** y 低于 `floor` 的格都是石头，其余是空气；光照处处是 `light`。 */
+function groundAt(floor: number, light = MAX_LIGHT_LEVEL): ParticleWorldView {
+  return {
+    skyLightAt: () => light,
+    blockLightAt: () => 0,
+    getBlock: (_x, y) => (y < floor ? BlockType.Stone : BlockType.Air),
+  };
+}
+
+/** 第 i 个粒子的 uv 矩形。 */
+function uvOf(pool: ParticlePool, i: number): UvRect {
+  const [u0, v0, u1, v1] = pool.uvRects.subarray(i * 4, i * 4 + 4);
+  return { u0: u0!, v0: v0!, u1: u1!, v1: v1! };
+}
+
+/** 一格贴图里的一小块落在 `tile` 那一格的 `region`（一格里的归一化 uv）之内，而且比整格小。 */
+function expectInside(rect: UvRect, tile: number, region: UvRect = { u0: 0, v0: 0, u1: 1, v1: 1 }): void {
+  const cell = tileUvRect(tile);
+  const width = cell.u1 - cell.u0;
+  const height = cell.v1 - cell.v0;
+  const eps = 1e-6;
+  expect(rect.u0).toBeGreaterThanOrEqual(cell.u0 + region.u0 * width - eps);
+  expect(rect.u1).toBeLessThanOrEqual(cell.u0 + region.u1 * width + eps);
+  expect(rect.v0).toBeGreaterThanOrEqual(cell.v0 + region.v0 * height - eps);
+  expect(rect.v1).toBeLessThanOrEqual(cell.v0 + region.v1 * height + eps);
+  expect(rect.u1 - rect.u0).toBeLessThan(width / 2);
+  expect(rect.u1).toBeGreaterThan(rect.u0);
+  expect(rect.v1).toBeGreaterThan(rect.v0);
+}
+
+function debrisOf(kind: BlockType, x: number, y: number, z: number): BrokenBlock {
+  return { x, y, z, block: kind };
+}
+
+describe('碎屑的运动（#60）', () => {
+  const debris = (at: Partial<ParticleSpawn>): ParticleSpawn => ({
+    ...spawnOf(ParticleKind.Debris, 10),
+    uv: tileUvRect(TILE.stone),
+    ...at,
+  });
+
+  it('受重力下落，停在实心方块上方，不穿进去', () => {
+    const pool = new ParticlePool(1);
+    pool.spawn(debris({ x: 0.5, y: 12.5, z: 0.5, vx: 0.3, vy: 2 }));
+    const world = groundAt(10);
+    let highest = 12.5;
+    for (let i = 0; i < 300; i++) {
+      pool.step(FRAME, world);
+      highest = Math.max(highest, pool.positions[1]!);
+    }
+    // 先往上抛起来，再落下来
+    expect(highest).toBeGreaterThan(12.6);
+    // 底边贴在地面上
+    const y = pool.positions[1]!;
+    const size = pool.sizes[0]!;
+    expect(y - size / 2).toBeCloseTo(10, 6);
+    // 停住之后不再滑动
+    const x = pool.positions[0]!;
+    for (let i = 0; i < 60; i++) pool.step(FRAME, world);
+    expect(pool.positions[0]).toBe(x);
+    expect(pool.positions[1]).toBe(y);
+  });
+
+  it('一帧 0.1 秒（低帧率）从高处落下：不穿过只有一层的平台，底边贴在它的顶面上', () => {
+    const pool = new ParticlePool(1);
+    pool.spawn(debris({ x: 0.5, y: 7.125, z: 0.5, vy: -0.5, size: 0.15 }));
+    // 只有 y = 0 那一层是实心的
+    const world: ParticleWorldView = { ...groundAt(0), getBlock: (_x, y) => (y === 0 ? BlockType.Stone : BlockType.Air) };
+    for (let i = 0; i < 30; i++) pool.step(0.1, world);
+    expect(pool.positions[1]! - pool.sizes[0]! / 2).toBeCloseTo(1, 6);
+  });
+
+  it('往上抛的碎屑碰到头顶的方块就停住，不钻进去', () => {
+    const pool = new ParticlePool(1);
+    pool.spawn(debris({ x: 0.5, y: 9.5, z: 0.5, vy: 6 }));
+    // y = 10 那一层是天花板
+    const world: ParticleWorldView = { ...groundAt(0), getBlock: (_x, y) => (y === 10 ? BlockType.Stone : BlockType.Air) };
+    for (let i = 0; i < 30; i++) {
+      pool.step(FRAME, world);
+      expect(pool.positions[1]! + pool.sizes[0]! / 2).toBeLessThan(10);
+    }
+  });
+
+  it('横着飞向一堵墙：停在墙前，之后沿墙落到地上', () => {
+    const pool = new ParticlePool(1);
+    pool.spawn(debris({ x: 0.5, y: 11.5, z: 0.5, vx: 6 }));
+    // x ≥ 2 是一堵墙，y < 10 是地面
+    const world: ParticleWorldView = {
+      ...groundAt(10),
+      getBlock: (x, y) => (x >= 2 || y < 10 ? BlockType.Stone : BlockType.Air),
+    };
+    for (let i = 0; i < 300; i++) {
+      pool.step(FRAME, world);
+      expect(isSolid(world.getBlock(Math.floor(pool.positions[0]!), Math.floor(pool.positions[1]!), 0))).toBe(false);
+    }
+    expect(pool.positions[0]).toBeLessThan(2);
+    expect(pool.positions[0]).toBeGreaterThan(1.5);
+    expect(pool.positions[1]).toBeLessThan(10.2);
+  });
+
+  it('存活时间到了消失', () => {
+    const pool = new ParticlePool(1);
+    pool.spawn(debris({ life: 0.5 }));
+    for (let t = 0; t < 0.6; t += FRAME) pool.step(FRAME, groundAt(0));
+    expect(pool.count).toBe(0);
+  });
+
+  it('按所在格亮度画：洞里的碎屑是暗的', () => {
+    const pool = new ParticlePool(1);
+    pool.spawn(debris({ x: 0.5, y: 20.5, z: 0.5 }));
+    pool.step(FRAME, groundAt(10, 0));
+    expect([...pool.lights.subarray(0, 2)]).toEqual([0, 0]);
+  });
+});
+
+describe('挖掘溅出碎屑、碎掉爆一团（#60）', () => {
+  const eye = { x: 0.5, y: 72.5, z: 0.5 };
+  /** 脚下那块草方块，对着它的顶面挖。 */
+  const grass = { x: 0, y: 70, z: 0 };
+  const world: ParticleWorldView = {
+    ...OPEN_AIR,
+    getBlock: (x, y, z) => (x === grass.x && y === grass.y && z === grass.z ? BlockType.Grass : BlockType.Air),
+  };
+  const digging = (progress: number): DiggingView => ({
+    target: { ...grass, normal: { x: 0, y: 1, z: 0 }, distance: 1.5 },
+    digging: true,
+    progress,
+  });
+
+  it('挖掘中从被瞄准的那一面溅出，贴图是那一面贴图里的一小块', () => {
+    const system = new ParticleSystem(PARTICLE_LIMIT, seeded(11));
+    for (let i = 0; i < 30; i++) system.update(FRAME, eye, [], world, digging(0.5));
+    const { pool } = system;
+    expect(pool.counts().debris).toBeGreaterThan(0);
+    for (let i = 0; i < pool.count; i++) {
+      // 在草方块顶面之上，没有掉进方块里
+      expect(pool.positions[i * 3 + 1]).toBeGreaterThan(71);
+      expectInside(uvOf(pool, i), TILE.grassTop);
+    }
+  });
+
+  it('挖方块的底面：碎屑往下溅，不钻进被挖的方块', () => {
+    const stoneAbove: ParticleWorldView = {
+      ...OPEN_AIR,
+      getBlock: (x, y, z) => (x === 0 && y === 75 && z === 0 ? BlockType.Stone : BlockType.Air),
+    };
+    const mining: DiggingView = {
+      target: { x: 0, y: 75, z: 0, normal: { x: 0, y: -1, z: 0 }, distance: 1.5 },
+      digging: true,
+      progress: 0.5,
+    };
+    const system = new ParticleSystem(PARTICLE_LIMIT, seeded(16));
+    let highest = -Infinity;
+    for (let i = 0; i < 60; i++) {
+      system.update(FRAME, eye, [], stoneAbove, mining);
+      for (let k = 0; k < system.pool.count; k++) {
+        highest = Math.max(highest, system.pool.positions[k * 3 + 1]! + system.pool.sizes[k]! / 2);
+      }
+    }
+    expect(system.pool.counts().debris).toBeGreaterThan(0);
+    expect(highest).toBeLessThan(75);
+  });
+
+  it('进度为 0、或没在挖掘时不溅', () => {
+    const system = new ParticleSystem(PARTICLE_LIMIT, seeded(12));
+    for (let i = 0; i < 120; i++) system.update(FRAME, eye, [], world, digging(0));
+    for (let i = 0; i < 120; i++) system.update(FRAME, eye, [], world, { ...digging(0.5), digging: false });
+    expect(system.pool.count).toBe(0);
+  });
+
+  it('碎掉的方块那一格爆出一团，贴图取自那种方块', () => {
+    const system = new ParticleSystem(PARTICLE_LIMIT, seeded(13));
+    system.burst(debrisOf(BlockType.Stone, 3, 70, 3));
+    system.update(FRAME, eye, [], groundAt(70), NOT_DIGGING);
+    const burst = system.pool.counts().debris;
+    expect(burst).toBeGreaterThanOrEqual(32);
+    for (let i = 0; i < system.pool.count; i++) {
+      const [x, y, z] = system.pool.positions.subarray(i * 3, i * 3 + 3);
+      expect(Math.floor(x!)).toBe(3);
+      expect(Math.floor(y!)).toBe(70);
+      expect(Math.floor(z!)).toBe(3);
+      expectInside(uvOf(system.pool, i), TILE.stone);
+    }
+  });
+
+  it('碎掉的是火把：碎屑取细杆那一竖条里的小块，比整格方块少', () => {
+    const system = new ParticleSystem(PARTICLE_LIMIT, seeded(14));
+    system.burst(debrisOf(BlockType.Torch, 3, 70, 3));
+    const { pool } = system;
+    expect(pool.count).toBeGreaterThan(0);
+    expect(pool.count).toBeLessThan(32);
+    for (let i = 0; i < pool.count; i++) expectInside(uvOf(pool, i), TILE.torch, TORCH_STICK_UV);
+  });
+
+  it('池子快满时爆一团只补到上限', () => {
+    const system = new ParticleSystem(10, seeded(15));
+    system.burst(debrisOf(BlockType.Stone, 3, 70, 3));
+    expect(system.pool.count).toBe(10);
   });
 });

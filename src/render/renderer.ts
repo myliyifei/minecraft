@@ -667,6 +667,17 @@ export class WorldRenderer {
   }
 
   /**
+   * 每推进一个 tick 之后调一次（游戏循环）：这一 tick 碎掉了方块（`MiningView.broken`）就在那一格爆一团碎屑（#60）。
+   *
+   * 不放进 `render`：碎掉的方块只在一 tick 里有值，一帧可能补几个 tick，等到画这一帧时可能已经清空了。
+   * 端到端测试在一次 evaluate 里直接调 `core.tick()` 时不经过游戏循环，也就不爆碎屑。
+   */
+  afterTick(): void {
+    const { broken } = this.core.mining;
+    if (broken) this.particleSystem.burst(broken);
+  }
+
+  /**
    * 画一帧。
    * `alpha` 是当前帧落在上一个 tick 与下一个 tick 之间的比例（0..1），相机位置按它插值。
    */
@@ -721,7 +732,8 @@ export class WorldRenderer {
 
   /**
    * 推进粒子一帧（#59）：已建网格的区块里、离眼睛 16 格内的发光方块按概率冒火焰光点与烟，池子推进、到期的回收、
-   * 由远到近重排，再把存活的个数交给实例化几何体。
+   * 由远到近重排，再把存活的个数交给实例化几何体。挖掘中从目标方块被瞄准的那一面溅碎屑（#60）；碎掉时爆的那一团
+   * 在 `afterTick` 里生成。
    *
    * 按真实时间推进，与闪烁一样：打开界面、世界不推进时火照样冒烟。发光方块的列表跟着网格走，
    * 熔炉熄火、火把挖掉之后区块重建，下一帧就不冒了；还没建网格的区块看不见，也不冒。
@@ -730,7 +742,7 @@ export class WorldRenderer {
     const now = performance.now();
     const seconds = this.lastFrameMs === undefined ? 0 : (now - this.lastFrameMs) / 1000;
     this.lastFrameMs = now;
-    this.particleSystem.update(seconds, this.camera.position, this.glowingBlocks(), this.core);
+    this.particleSystem.update(seconds, this.camera.position, this.glowingBlocks(), this.core, this.core.mining);
 
     const { count } = this.particleSystem.pool;
     const geometry = this.particleGeometry;

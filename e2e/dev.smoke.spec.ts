@@ -3679,7 +3679,9 @@ test('连续多帧读送进着色器的闪烁量：不全相同，每一帧都�
 });
 
 /** 渲染层这一帧画了多少粒子（`WorldRenderer.particles`）。 */
-async function readParticles(page: Page): Promise<{ flame: number; smoke: number; total: number; limit: number }> {
+async function readParticles(
+  page: Page,
+): Promise<{ flame: number; smoke: number; debris: number; total: number; limit: number }> {
   return page.evaluate(() => window.__VOXEL__!.renderer.particles);
 }
 
@@ -3775,7 +3777,115 @@ test('身旁的熔炉点着火：几帧后粒子读回里火焰光点与烟都�
   expect(errors).toEqual([]);
 });
 
-test('玩家周围插 50 支火把：粒子一直在冒，总数始终不超过上限', async ({ page }) => {
+/** 头顶挖的结果：碎掉之前那一帧与之后几帧的碎屑数，挖掘中出现过的碎屑最多几个，挖了几帧。 */
+interface OverheadDig {
+  readonly whileDigging: number;
+  readonly beforeBreak: number;
+  readonly afterBreak: number;
+  readonly frames: number;
+}
+
+/**
+ * 在玩家头顶上一格起往上砌 `height` 格 `block`，手上拿 `tool`，抬头按住挖掘键挖最下面那一块（`chain` 时同时按住
+ * 连锁键），逐帧读粒子读回，直到它碎掉之后再过 `AFTER_BREAK_FRAMES` 帧。砌在头顶上而不是脚下：连锁挖掉一整柱
+ * 时玩家不会掉下去。
+ *
+ * 粒子按真实时间推进，所以交给游戏循环跑、逐帧读，不在一次 evaluate 里同步推进 tick。按键走 `setMining`，
+ * 与输入层是同一条路；这里测的是粒子，不是鼠标事件的接线。
+ */
+async function digOverhead(
+  page: Page,
+  { block, height, chain, tool }: { block: BlockType; height: number; chain: boolean; tool: ItemType },
+): Promise<OverheadDig> {
+  return page.evaluate(
+    async ({ block, height, chain, tool, pitch, afterFrames }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      if (!core.inventory.held) core.giveItem(tool, 1);
+      if (core.inventory.held?.item !== tool) throw new Error('选中格里应该是要用的那件工具');
+      const x = Math.floor(core.player.position.x);
+      const y = Math.floor(core.player.position.y) + 2;
+      const z = Math.floor(core.player.position.z);
+      for (let i = 0; i < height; i++) core.setBlock(x, y + i, z, block);
+      renderer.syncChunkMeshes();
+      core.turn(0, pitch - core.player.pitch);
+      core.tick();
+      const target = core.mining.target;
+      if (!target || target.x !== x || target.y !== y || target.z !== z) throw new Error('抬头应该对准头顶那一块');
+
+      core.setChainMining(chain);
+      core.setMining(true);
+      let whileDigging = 0;
+      let beforeBreak = 0;
+      let afterBreak = 0;
+      let frames = 0;
+      let since: number | undefined;
+      const end = performance.now() + 20_000;
+      while (since === undefined || since < afterFrames) {
+        if (performance.now() > end) throw new Error('20 秒内没挖穿头顶那一块');
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        frames++;
+        const { debris } = renderer.particles;
+        if (since === undefined && core.getBlock(x, y, z) !== block) since = 0;
+        if (since === undefined) {
+          whileDigging = Math.max(whileDigging, debris);
+          beforeBreak = debris;
+        } else {
+          afterBreak = Math.max(afterBreak, debris);
+          since++;
+        }
+      }
+      core.setMining(false);
+      core.setChainMining(false);
+      return { whileDigging, beforeBreak, afterBreak, frames };
+    },
+    { block, height, chain, tool, pitch: MAX_PITCH, afterFrames: AFTER_BREAK_FRAMES },
+  );
+}
+
+/** 碎掉之后再看几帧：游戏循环先推进 tick 还是先画这一帧与读回的先后无关，几帧之内总能读到爆出的那一团。 */
+const AFTER_BREAK_FRAMES = 5;
+
+/** 一格方块碎掉时至少爆出多少碎屑：原版按 4×4×4 爆 64 个，这里只要求明显多于挖掘中溅出的。 */
+const MIN_BURST = 32;
+
+test('持木镐挖头顶的石头：挖掘中粒子读回里碎屑大于 0，碎掉那一帧之后数量跃升', async ({ page }) => {
+  await waitForFullViewDistance(page);
+  const dug = await digOverhead(page, {
+    block: BlockType.Stone,
+    height: 1,
+    chain: false,
+    tool: ItemType.WoodenPickaxe,
+  });
+  expect(dug.whileDigging).toBeGreaterThan(0);
+  expect(dug.afterBreak - dug.beforeBreak).toBeGreaterThanOrEqual(MIN_BURST);
+  expect(errors).toEqual([]);
+});
+
+test('连锁挖头顶 20 块原木与挖单块原木：碎掉之后的碎屑数同量级，只有目标那一块爆', async ({ page }) => {
+  await waitForFullViewDistance(page);
+  const options = { block: BlockType.OakLog, tool: ItemType.StoneAxe };
+  const single = await digOverhead(page, { ...options, height: 1, chain: false });
+  // 等上一次的碎屑都消失，免得算进下一次
+  await expect.poll(async () => (await readParticles(page)).debris, { timeout: 10_000 }).toBe(0);
+  const chained = await digOverhead(page, { ...options, height: 20, chain: true });
+  const column = await page.evaluate(() => {
+    const { core } = window.__VOXEL__!;
+    const x = Math.floor(core.player.position.x);
+    const y = Math.floor(core.player.position.y) + 2;
+    const z = Math.floor(core.player.position.z);
+    return Array.from({ length: 20 }, (_, i) => core.getBlock(x, y + i, z));
+  });
+  // 20 块确实都碎了
+  expect(column.every((block) => block === BlockType.Air)).toBe(true);
+
+  expect(single.afterBreak).toBeGreaterThanOrEqual(MIN_BURST);
+  expect(chained.afterBreak).toBeGreaterThanOrEqual(MIN_BURST);
+  // 20 块都爆的话是单块的 20 倍；同量级：不到两倍
+  expect(chained.afterBreak).toBeLessThan(2 * single.afterBreak);
+  expect(errors).toEqual([]);
+});
+
+test('玩家周围插 50 支火把并连续挖掘：粒子一直在冒，总数始终不超过上限', async ({ page }) => {
   await waitForFullViewDistance(page);
   // 10×5 的一片，间隔 2 格，全在 16 格内。每支放在那一列最高的方块之上
   const placed = await page.evaluate(
@@ -3799,18 +3909,31 @@ test('玩家周围插 50 支火把：粒子一直在冒，总数始终不超过�
   );
   expect(placed).toBe(50);
 
+  // 持石铲抬头挖头顶那一格泥土，按住不放；每次读之前把挖掉的那一格补回去，一直挖同一格，每 0.2 秒碎一块。
   // 三秒里每 100ms 读一次：烟的存活时间在 2.2 秒以内，三秒后数量已经稳定
-  const samples = await page.evaluate(async () => {
-    const { renderer } = window.__VOXEL__!;
-    const out: { total: number; limit: number }[] = [];
-    for (let i = 0; i < 30; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      out.push(renderer.particles);
-    }
-    return out;
-  });
+  const samples = await page.evaluate(
+    async ({ dirt, shovel, pitch }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      core.giveItem(shovel, 1);
+      const x = Math.floor(core.player.position.x);
+      const y = Math.floor(core.player.position.y) + 2;
+      const z = Math.floor(core.player.position.z);
+      core.turn(0, pitch - core.player.pitch);
+      core.setMining(true);
+      const out: { total: number; debris: number; limit: number }[] = [];
+      for (let i = 0; i < 30; i++) {
+        core.setBlock(x, y, z, dirt);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        out.push(renderer.particles);
+      }
+      core.setMining(false);
+      return out;
+    },
+    { dirt: BlockType.Dirt, shovel: ItemType.StoneShovel, pitch: MAX_PITCH },
+  );
   const most = Math.max(...samples.map((s) => s.total));
   expect(most).toBeGreaterThan(50);
+  expect(Math.max(...samples.map((s) => s.debris))).toBeGreaterThan(0);
   for (const { total, limit } of samples) expect(total).toBeLessThanOrEqual(limit);
   expect(errors).toEqual([]);
 });

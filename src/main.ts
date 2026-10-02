@@ -50,12 +50,16 @@ async function main(): Promise<void> {
   const hud = installHud(document.body, core, () => controls.grabPointer());
   hud.update();
   installDebugHandle({ core, renderer, hud, chunks });
-  startGameLoop(core, (alpha) => {
-    renderer.syncChunkMeshes();
-    renderer.render(alpha);
-    hud.update();
-    controls.sync();
-  });
+  startGameLoop(
+    core,
+    (alpha) => {
+      renderer.syncChunkMeshes();
+      renderer.render(alpha);
+      hud.update();
+      controls.sync();
+    },
+    () => renderer.afterTick(),
+  );
 }
 
 void main();

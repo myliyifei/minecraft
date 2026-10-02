@@ -496,6 +496,41 @@ describe('挖掘的目标查询', () => {
   });
 });
 
+describe('挖掘视图报告碎掉的方块（#60）', () => {
+  it('挖穿那一 tick 报告目标的坐标与种类，下一 tick 清空', () => {
+    const { mining } = miningTowards(BlockType.Dirt);
+    hold(mining, 14);
+    expect(mining.broken).toBeUndefined();
+
+    hold(mining, 1);
+    expect(mining.broken).toEqual({ x: 3, y: LAYER_Y, z: 0, block: BlockType.Dirt });
+
+    hold(mining, 1);
+    expect(mining.broken).toBeUndefined();
+  });
+
+  it('松开挖掘键的下一 tick 同样清空', () => {
+    const { mining } = miningTowards(BlockType.OakLeaves);
+    hold(mining, 6);
+    expect(mining.broken).toMatchObject({ block: BlockType.OakLeaves });
+    mining.step(RELEASED);
+    expect(mining.broken).toBeUndefined();
+  });
+
+  it('连锁挖 10 块：10 块都碎了，只报目标那一块', () => {
+    const { world, cells, mining } = miningTrunk(10);
+    hold(mining, LOG_TICKS, CHAINED);
+    expect(remaining(world, cells)).toEqual([]);
+    expect(mining.broken).toEqual({ x: TARGET[0], y: TARGET[1], z: TARGET[2], block: BlockType.OakLog });
+  });
+
+  it('挖不动的基岩按住多久都不报', () => {
+    const { mining } = miningTowards(BlockType.Bedrock);
+    hold(mining, 200);
+    expect(mining.broken).toBeUndefined();
+  });
+});
+
 /** 一格的三元坐标换成 Vec3，好跟预览报出来的坐标对照。 */
 function toVec([x, y, z]: BlockCoord): Vec3 {
   return { x, y, z };

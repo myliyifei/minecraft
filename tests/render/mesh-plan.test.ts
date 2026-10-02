@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BlockType } from '../../src/core/block';
 import { DEFAULT_VIEW_RADIUS } from '../../src/core/constants';
 import { GameCore } from '../../src/core/game';
 import { IDLE_INTENT } from '../../src/core/player';
@@ -89,27 +90,28 @@ describe('该给哪些区块建网格', () => {
   });
 });
 
-describe('过期的网格怎么处理', () => {
-  it('有网格、8 个邻居都在的过期区块重建，不占建网格预算', () => {
+describe('方块变了的区块', () => {
+  it('有网格、8 个邻居都在的当帧重建，不论预算', () => {
     const plan = planChunkMeshes({
       world: worldWith(square(2)),
       meshed: square(1),
-      stale: [{ cx: 0, cz: 0 }, { cx: 1, cz: 1 }],
+      staleBlocks: [{ cx: 0, cz: 0 }, { cx: 1, cz: 1 }],
       center: CENTER,
       radius: 2,
       budget: 0,
     });
     expect(keysOf(plan.rebuild)).toEqual(['0,0', '1,1']);
     expect(plan.drop).toEqual([]);
+    expect(plan.deferred).toEqual([]);
   });
 
-  it('过期区块缺了邻居：丢掉旧网格，不重建——缺的邻居会被当成空气，边界上多出整片面', () => {
-    // 视距最外一圈的网格因为卸载留了滞后还在，它外侧的邻居已经卸载；卸载时撤光让它过期
+  it('缺了邻居：丢掉旧网格，不重建——缺的邻居会被当成空气，边界上多出整片面', () => {
+    // 视距最外一圈的网格因为卸载留了滞后还在，它外侧的邻居已经卸载
     const loaded = square(2).filter(({ cx }) => cx !== 2);
     const plan = planChunkMeshes({
       world: worldWith(loaded),
       meshed: square(1),
-      stale: [{ cx: 1, cz: 0 }],
+      staleBlocks: [{ cx: 1, cz: 0 }],
       center: CENTER,
       radius: 2,
       budget: Infinity,
@@ -130,11 +132,11 @@ describe('过期的网格怎么处理', () => {
     expect(keysOf(plan.build)).toEqual(['1,0']);
   });
 
-  it('没有网格的过期区块什么都不做：它等 8 个邻居齐全后按普通规则建', () => {
+  it('没有网格的什么都不做：它等 8 个邻居齐全后按普通规则建', () => {
     const plan = planChunkMeshes({
       world: worldWith(square(2)),
       meshed: [],
-      stale: [{ cx: 0, cz: 0 }, { cx: 9, cz: 9 }],
+      staleBlocks: [{ cx: 0, cz: 0 }, { cx: 9, cz: 9 }],
       center: CENTER,
       radius: 2,
       budget: 0,
@@ -143,17 +145,183 @@ describe('过期的网格怎么处理', () => {
     expect(plan.drop).toEqual([]);
   });
 
-  it('已经卸载的过期区块只丢一次', () => {
+  it('已经卸载的只丢一次', () => {
     const plan = planChunkMeshes({
       world: worldWith(square(1)),
       meshed: [{ cx: 5, cz: 5 }],
-      stale: [{ cx: 5, cz: 5 }],
+      staleBlocks: [{ cx: 5, cz: 5 }],
       center: CENTER,
       radius: 1,
       budget: 0,
     });
     expect(keysOf(plan.drop)).toEqual(['5,5']);
     expect(plan.rebuild).toEqual([]);
+  });
+});
+
+describe('只有光照变了的区块', () => {
+  /** 已加载 7×7、中间 5×5 都有网格的世界：光照过期的区块都有网格、邻居齐全，没有新区块要建。 */
+  const meshedWorld = { world: worldWith(square(3)), meshed: square(2), center: CENTER, radius: 2 };
+
+  it('按预算重建，先重建离玩家近的，其余推迟', () => {
+    const plan = planChunkMeshes({
+      ...meshedWorld,
+      staleLight: [{ cx: 2, cz: 2 }, { cx: 1, cz: 0 }, { cx: -2, cz: 0 }, { cx: 0, cz: 0 }, { cx: 0, cz: -1 }],
+      budget: 2,
+    });
+    expect(keysOf(plan.rebuild)).toEqual(['0,0', '1,0']);
+    expect(keysOf(plan.deferred)).toEqual(['0,-1', '-2,0', '2,2']);
+    expect(plan.build).toEqual([]);
+  });
+
+  it('方块变了的先用掉这一帧的预算，剩下的才轮到光照', () => {
+    const plan = planChunkMeshes({
+      ...meshedWorld,
+      staleBlocks: [{ cx: 2, cz: 2 }],
+      staleLight: [{ cx: 0, cz: 0 }, { cx: 1, cz: 0 }, { cx: 0, cz: 1 }],
+      budget: 2,
+    });
+    expect(keysOf(plan.rebuild)).toEqual(['2,2', '0,0']);
+    expect(keysOf(plan.deferred)).toEqual(['1,0', '0,1']);
+  });
+
+  it('方块变了的超出预算时照样全部重建，光照的一个都不重建', () => {
+    const plan = planChunkMeshes({
+      ...meshedWorld,
+      staleBlocks: [{ cx: 0, cz: 0 }, { cx: 1, cz: 0 }, { cx: 0, cz: 1 }],
+      staleLight: [{ cx: -1, cz: 0 }],
+      budget: 2,
+    });
+    expect(keysOf(plan.rebuild)).toEqual(['0,0', '1,0', '0,1']);
+    expect(keysOf(plan.deferred)).toEqual(['-1,0']);
+  });
+
+  it('同一个区块方块与光照都变了，只重建一次，不再推迟', () => {
+    const plan = planChunkMeshes({
+      ...meshedWorld,
+      staleBlocks: [{ cx: 1, cz: 0 }],
+      staleLight: [{ cx: 1, cz: 0 }],
+      budget: 0,
+    });
+    expect(keysOf(plan.rebuild)).toEqual(['1,0']);
+    expect(plan.deferred).toEqual([]);
+  });
+
+  it('推迟下来的与这一帧新报的有重复时只算一次', () => {
+    const plan = planChunkMeshes({
+      ...meshedWorld,
+      staleLight: [{ cx: 1, cz: 0 }, { cx: 0, cz: 1 }, { cx: 1, cz: 0 }],
+      budget: 1,
+    });
+    expect(keysOf(plan.rebuild)).toEqual(['1,0']);
+    expect(keysOf(plan.deferred)).toEqual(['0,1']);
+  });
+
+  it('与新区块按离玩家的远近排在一起分预算', () => {
+    // 中间 3×3 有网格，外面一圈没有：光照过期的 (1, 1) 比没有网格的 (2, 0) 近，先轮到它
+    const plan = planChunkMeshes({
+      world: worldWith(square(3)),
+      meshed: square(1),
+      staleLight: [{ cx: 1, cz: 1 }, { cx: -1, cz: 0 }],
+      center: CENTER,
+      radius: 2,
+      budget: 3,
+    });
+    expect(keysOf(plan.rebuild)).toEqual(['-1,0', '1,1']);
+    expect(plan.build).toHaveLength(1);
+    expect(plan.deferred).toEqual([]);
+  });
+
+  it('预算是 Infinity 时全部重建，一个都不推迟', () => {
+    const plan = planChunkMeshes({ ...meshedWorld, staleLight: square(2), budget: Infinity });
+    expect(plan.rebuild).toHaveLength(25);
+    expect(plan.deferred).toEqual([]);
+  });
+
+  it('缺了邻居：同样丢掉旧网格，不推迟', () => {
+    const loaded = square(2).filter(({ cx }) => cx !== 2);
+    const plan = planChunkMeshes({
+      world: worldWith(loaded),
+      meshed: square(1),
+      staleLight: [{ cx: 1, cz: 0 }],
+      center: CENTER,
+      radius: 2,
+      budget: 0,
+    });
+    expect(keysOf(plan.drop)).toEqual(['1,0']);
+    expect(plan.rebuild).toEqual([]);
+    expect(plan.deferred).toEqual([]);
+  });
+
+  it('没有网格的、已经卸载的不推迟：前者按普通规则建，后者的网格只丢一次', () => {
+    const plan = planChunkMeshes({
+      world: worldWith(square(2)),
+      meshed: [{ cx: 5, cz: 5 }],
+      staleLight: [{ cx: 0, cz: 0 }, { cx: 5, cz: 5 }],
+      center: CENTER,
+      radius: 1,
+      budget: 0,
+    });
+    expect(keysOf(plan.drop)).toEqual(['5,5']);
+    expect(plan.rebuild).toEqual([]);
+    expect(plan.deferred).toEqual([]);
+  });
+});
+
+describe('放挖火把之后几帧内重建完', () => {
+  /**
+   * 世界铺满网格之后在 (x, y, z) 放一支火把再挖掉，按每帧的预算排网格计划（推迟的交给下一帧），返回两次各自
+   * 每帧重建了几个区块，直到没有推迟的为止。
+   */
+  function placeAndBreak(x: number, z: number): { place: number[]; dig: number[] } {
+    const core = new GameCore();
+    const meshed = new Map<number, ChunkCoord>();
+    const request = { world: core, center: core.playerChunk, radius: core.viewRadius };
+    const initial = planChunkMeshes({ ...request, meshed: [], budget: Infinity });
+    for (const coord of initial.build) meshed.set(chunkKey(coord.cx, coord.cz), coord);
+    core.takeStaleChunks();
+
+    const framesAfter = (): number[] => {
+      const frames: number[] = [];
+      let deferred: readonly ChunkCoord[] = [];
+      do {
+        const stale = core.takeStaleChunks();
+        const plan = planChunkMeshes({
+          ...request,
+          meshed: meshed.values(),
+          staleBlocks: stale.blocks,
+          staleLight: [...deferred, ...stale.light],
+          budget: MESH_BUDGET_PER_FRAME,
+        });
+        expect(plan.build).toEqual([]);
+        frames.push(plan.rebuild.length);
+        deferred = plan.deferred;
+      } while (deferred.length > 0);
+      return frames;
+    };
+
+    const y = core.highestBlockY(x, z) + 1;
+    core.setBlock(x, y, z, BlockType.Torch);
+    const place = framesAfter();
+    core.setBlock(x, y, z, BlockType.Air);
+    return { place, dig: framesAfter() };
+  }
+
+  it('区块中间：光照变了的 4 个邻居两帧多一点重建完，每帧不超过预算', () => {
+    const { place, dig } = placeAndBreak(8, 8);
+    for (const frames of [place, dig]) {
+      // 第一帧是火把所在的区块加一个邻居，之后每帧两个
+      expect(frames).toEqual([2, 2, 1]);
+    }
+  });
+
+  it('区块角上：含对角在内 3×3 个区块，不超过 5 帧重建完，每帧不超过预算', () => {
+    const { place, dig } = placeAndBreak(0, 0);
+    for (const frames of [place, dig]) {
+      expect(frames.length).toBeLessThanOrEqual(5);
+      expect(Math.max(...frames)).toBeLessThanOrEqual(MESH_BUDGET_PER_FRAME);
+      expect(frames.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(9);
+    }
   });
 });
 

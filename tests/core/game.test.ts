@@ -33,6 +33,7 @@ import type { Vec3 } from '../../src/core/vec3';
 import { ABOVE_SURFACE } from '../helpers/above-surface';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 import { STONE_LAYER } from '../helpers/stone-layer';
+import { allStale } from '../helpers/stale-chunks';
 
 /**
  * 采样用的视距（区块数）。
@@ -486,14 +487,16 @@ describe('GameCore 的空手挖掘', () => {
     core.setMining(true);
     core.tick(GRASS_TICKS);
     // 脚下 (0, 0) 坐在原点区块的 −X 与 −Z 两条边上：方块变了，自己与两个侧向邻居过期；
-    // 挖开之后那一格的天光也变了，它在区块角上，斜对角那个区块也过期
-    expect(core.takeStaleChunks()).toEqual([
-      { cx: 0, cz: 0 },
-      { cx: -1, cz: 0 },
-      { cx: 0, cz: -1 },
-      { cx: -1, cz: -1 },
-    ]);
-    expect(core.takeStaleChunks()).toEqual([]);
+    // 挖开之后那一格的天光也变了，它在区块角上，斜对角那个区块只有光照变了
+    expect(core.takeStaleChunks()).toEqual({
+      blocks: [
+        { cx: 0, cz: 0 },
+        { cx: -1, cz: 0 },
+        { cx: 0, cz: -1 },
+      ],
+      light: [{ cx: -1, cz: -1 }],
+    });
+    expect(allStale(core.takeStaleChunks())).toEqual([]);
   });
 
   it('挖穿脚下之后玩家掉进坑里', () => {
@@ -591,12 +594,12 @@ describe('GameCore 的空手挖掘', () => {
       core.tick(GRASS_TICKS);
       core.setMining(false);
       // 挖掉那一格是方块变更：脚下 (0, 0) 在区块角上，过期的是自己、两个侧向邻居与光照变过的斜对角
-      expect(core.takeStaleChunks()).toHaveLength(4);
+      expect(allStale(core.takeStaleChunks())).toHaveLength(4);
 
       // 掉落物在这几十 tick 里下落、被吸走，一次都不该让网格重建
       core.tick(PICKUP_DELAY_TICKS + TICK_RATE);
       expect(core.drops.count).toBe(0);
-      expect(core.takeStaleChunks()).toEqual([]);
+      expect(allStale(core.takeStaleChunks())).toEqual([]);
     });
   });
 
@@ -694,12 +697,12 @@ describe('GameCore 的空手挖掘', () => {
       core.setMining(true);
       core.tick(GRASS_TICKS);
       core.setMining(false);
-      expect(core.takeStaleChunks()).toHaveLength(4);
+      expect(allStale(core.takeStaleChunks())).toHaveLength(4);
 
       // 经验球在这几十 tick 里飞过来、被吸收，一次都不该让网格重建
       core.tick(ABSORB_TICKS);
       expect(core.xpOrbs.count).toBe(0);
-      expect(core.takeStaleChunks()).toEqual([]);
+      expect(allStale(core.takeStaleChunks())).toEqual([]);
     });
   });
 });
@@ -796,7 +799,7 @@ describe('GameCore 的连锁挖掘', () => {
 
     // 整根树干在 (0, 0) 那一列，在原点区块的角上：五格只让这四个区块过期——自己、两个侧向邻居，
     // 以及挖开之后天光变了的斜对角
-    const stale = core.takeStaleChunks();
+    const stale = allStale(core.takeStaleChunks());
     expect(stale).toHaveLength(4);
     expect(stale).toEqual(
       expect.arrayContaining([
@@ -806,7 +809,7 @@ describe('GameCore 的连锁挖掘', () => {
         { cx: -1, cz: -1 },
       ]),
     );
-    expect(core.takeStaleChunks()).toEqual([]);
+    expect(allStale(core.takeStaleChunks())).toEqual([]);
   });
 });
 
@@ -963,7 +966,7 @@ describe('GameCore 的放置方块', () => {
 
     placeOnce(core);
     expect(core.getBlock(target!.x, target!.y + 1, target!.z)).toBe(BlockType.Air);
-    expect(core.takeStaleChunks()).toEqual([]);
+    expect(allStale(core.takeStaleChunks())).toEqual([]);
   });
 
   it('切换选中格后放置的是新格里的方块', () => {
@@ -997,11 +1000,14 @@ describe('GameCore 的放置方块', () => {
 
     placeOnce(core);
     // ABOVE_ASIDE 在 z = 0 上，坐在原点区块的 −Z 边上
-    expect(core.takeStaleChunks()).toEqual([
-      { cx: 0, cz: 0 },
-      { cx: 0, cz: -1 },
-    ]);
-    expect(core.takeStaleChunks()).toEqual([]);
+    expect(core.takeStaleChunks()).toEqual({
+      blocks: [
+        { cx: 0, cz: 0 },
+        { cx: 0, cz: -1 },
+      ],
+      light: [],
+    });
+    expect(allStale(core.takeStaleChunks())).toEqual([]);
   });
 
   it('同一个 tick 里按两次使用键只放一块', () => {
@@ -1106,7 +1112,7 @@ describe('GameCore 的背包界面', () => {
     core.use();
     core.tick();
     expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
-    expect(core.takeStaleChunks()).toEqual([]);
+    expect(allStale(core.takeStaleChunks())).toEqual([]);
   });
 
   it('界面模式只挡输入，世界照样在跑：掉落物仍被吸进背包', () => {
@@ -1599,7 +1605,7 @@ describe('GameCore 的工作台', () => {
     useOnce(core);
     expect(core.craftingTableScreen.open).toBe(true);
     expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
-    expect(core.takeStaleChunks()).toEqual([]);
+    expect(allStale(core.takeStaleChunks())).toEqual([]);
   });
 
   it('对着泥土或草按使用键仍是放置', () => {
@@ -1845,7 +1851,7 @@ describe('GameCore 的熔炉界面（issue #33）', () => {
     useOnce(core);
     expect(core.furnaceScreen.open).toBe(true);
     expect(core.inventory.held).toEqual({ item: ItemType.Dirt, count: 1 });
-    expect(core.takeStaleChunks()).toEqual([]);
+    expect(allStale(core.takeStaleChunks())).toEqual([]);
   });
 
   it('熔炉超出触及距离时按使用键什么都不改变', () => {
@@ -1855,7 +1861,7 @@ describe('GameCore 的熔炉界面（issue #33）', () => {
     useOnce(core);
     expect(core.furnaceScreen.open).toBe(false);
     expect(core.uiMode).toBe(false);
-    expect(core.takeStaleChunks()).toEqual([]);
+    expect(allStale(core.takeStaleChunks())).toEqual([]);
     expect(core.blockStateAt(...FAR_AHEAD)).toEqual(newFurnaceState());
   });
 
@@ -2044,7 +2050,7 @@ describe('GameCore 的熔炼（issue #34）', () => {
     expect(state.fuel).toBeUndefined();
     expect(core.getBlock(...AHEAD)).toBe(BlockType.LitFurnace);
     // 换编号走正常的写方块路径：渲染层据此重建那个区块的网格
-    expect(core.takeStaleChunks()).toContainEqual({ cx: 0, cz: -1 });
+    expect(core.takeStaleChunks().blocks).toContainEqual({ cx: 0, cz: -1 });
     // 换编号不换状态
     expect(core.blockStateAt(...AHEAD)).toBe(state);
 
@@ -2318,7 +2324,7 @@ describe('GameCore 的木石两档工具', () => {
     core.tick();
     expect(core.getBlock(...ABOVE_ASIDE)).toBe(BlockType.Air);
     expect(core.inventory.held).toEqual(PICKAXE);
-    expect(core.takeStaleChunks()).toEqual([]);
+    expect(allStale(core.takeStaleChunks())).toEqual([]);
     expect(core.uiMode).toBe(false);
   });
 

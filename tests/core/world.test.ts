@@ -355,20 +355,26 @@ describe('World 记下网格过期的区块', () => {
     return coords.map(({ cx, cz }) => `${cx},${cz}`);
   }
 
+  /** 取走记录，两组各自的区块键。 */
+  function take(world: World): { blocks: string[]; light: string[] } {
+    const { blocks, light } = world.takeStaleChunks();
+    return { blocks: keysOf(blocks), light: keysOf(light) };
+  }
+
   /** 区块内部、四条边都不挨着的一格。 */
   const INSIDE = [5, FLAT_GROUND_Y, 7] as const;
 
   it('新建的世界没有过期的区块', () => {
-    expect(loadedWorld().takeStaleChunks()).toEqual([]);
+    expect(take(loadedWorld())).toEqual({ blocks: [], light: [] });
   });
 
   it('区块内部的一格只让自己那个区块过期', () => {
     const world = loadedWorld();
     world.setBlock(...INSIDE, BlockType.Air);
-    expect(keysOf(world.takeStaleChunks())).toEqual(['0,0']);
+    expect(take(world)).toEqual({ blocks: ['0,0'], light: [] });
   });
 
-  it('区块边界上的一格连那一侧的邻居一起过期', () => {
+  it('区块边界上的一格从不透明换成空气：那一侧的邻居露出了面，也算方块变了', () => {
     const cases: Array<[string, number, number, string[]]> = [
       ['−X 边', 0, 7, ['0,0', '-1,0']],
       ['+X 边', CHUNK_SIZE - 1, 7, ['0,0', '1,0']],
@@ -378,28 +384,68 @@ describe('World 记下网格过期的区块', () => {
     for (const [name, x, z, expected] of cases) {
       const world = loadedWorld();
       world.setBlock(x, FLAT_GROUND_Y, z, BlockType.Air);
-      expect(keysOf(world.takeStaleChunks()), name).toEqual(expected);
+      expect(take(world).blocks, name).toEqual(expected);
     }
   });
 
-  it('区块角上的一格只换了方块、光照没变：两个侧向邻居过期，斜对角不过期', () => {
-    // 地下的石头换成泥土，两者都不透明，天光不变。网格只问六个轴向的邻居，斜对角那一格与谁的面都无关
+  it('区块边上的一格从空气换成不透明方块：邻居的面被挡住，也算方块变了', () => {
+    const world = loadedWorld();
+    world.setBlock(0, FLAT_GROUND_Y + 1, 7, BlockType.Stone);
+    expect(take(world).blocks).toEqual(['0,0', '-1,0']);
+  });
+
+  it('区块边上的一格从一种不透明方块换成另一种：邻居的面不变，邻居不过期', () => {
+    // 地下的石头换成泥土，两者都不透明，天光不变。隔壁的面只看这一格挡不挡
     const world = loadedWorld();
     world.setBlock(0, FLAT_GROUND_Y - 5, 0, BlockType.Dirt);
-    expect(keysOf(world.takeStaleChunks())).toEqual(['0,0', '-1,0', '0,-1']);
+    expect(take(world)).toEqual({ blocks: ['0,0'], light: [] });
+  });
+
+  it('区块边上放一支火把：只有自己那个区块的方块变了，邻居只有光照变了', () => {
+    // 火把与空气一样不挡隔壁的面，隔壁的网格只差在光照上
+    const world = loadedWorld();
+    world.setBlock(0, FLAT_GROUND_Y + 1, 7, BlockType.Torch);
+    const stale = take(world);
+    expect(stale.blocks).toEqual(['0,0']);
+    // 方块光 14 照出 13 格，从 z = 7 照得到前后两条边，所以不止 −X 那一侧的邻居
+    expect(stale.light).toContain('-1,0');
+  });
+
+  it('区块边上挖掉一支火把：同样只有自己那个区块的方块变了', () => {
+    const world = loadedWorld();
+    world.setBlock(0, FLAT_GROUND_Y + 1, 7, BlockType.Torch);
+    world.takeStaleChunks();
+    world.setBlock(0, FLAT_GROUND_Y + 1, 7, BlockType.Air);
+    const stale = take(world);
+    expect(stale.blocks).toEqual(['0,0']);
+    // 同上，光照得到前后两条边
+    expect(stale.light).toContain('-1,0');
+  });
+
+  it('区块边上放一块树叶：隔壁的树叶与它同种，贴着的那两个面不画了，邻居也算方块变了', () => {
+    const world = loadedWorld();
+    world.setBlock(0, FLAT_GROUND_Y + 1, 7, BlockType.OakLeaves);
+    expect(take(world).blocks).toEqual(['0,0', '-1,0']);
+  });
+
+  it('光照变了的区块里方块也变了：只报在方块那一组里', () => {
+    // 角上挖开地面：自己与两个侧向邻居的方块变了，斜对角那个只有光照变了
+    const world = loadedWorld();
+    world.setBlock(0, FLAT_GROUND_Y, 0, BlockType.Air);
+    expect(take(world)).toEqual({ blocks: ['0,0', '-1,0', '0,-1'], light: ['-1,-1'] });
   });
 
   it('负坐标归到正确的区块', () => {
     const world = new World(flatTestTerrain);
     world.loadChunk(-1, -2);
-    world.setBlock(-1, FLAT_GROUND_Y - 5, -17, BlockType.Dirt);
-    expect(keysOf(world.takeStaleChunks())).toEqual(['-1,-2', '0,-2', '-1,-1']);
+    world.setBlock(-1, FLAT_GROUND_Y, -17, BlockType.Air);
+    expect(take(world).blocks).toEqual(['-1,-2', '0,-2', '-1,-1']);
   });
 
   it('小数坐标按 floor 归格', () => {
     const world = loadedWorld();
     world.setBlock(15.9, FLAT_GROUND_Y, 7.2, BlockType.Air);
-    expect(keysOf(world.takeStaleChunks())).toEqual(['0,0', '1,0']);
+    expect(take(world).blocks).toEqual(['0,0', '1,0']);
   });
 
   it('同一个区块里改了几格、同一格改了几次，都只报一次', () => {
@@ -408,27 +454,27 @@ describe('World 记下网格过期的区块', () => {
     world.setBlock(...INSIDE, BlockType.Stone);
     world.setBlock(6, FLAT_GROUND_Y + 1, 7, BlockType.Stone);
     world.setBlock(5, FLAT_GROUND_Y + 2, 8, BlockType.Stone);
-    expect(keysOf(world.takeStaleChunks())).toEqual(['0,0']);
+    expect(take(world).blocks).toEqual(['0,0']);
   });
 
   it('两格的邻居重叠时去重：两格都在 −X 边上，邻居只报一次', () => {
     const world = loadedWorld();
     world.setBlock(0, FLAT_GROUND_Y, 5, BlockType.Air);
     world.setBlock(0, FLAT_GROUND_Y, 9, BlockType.Air);
-    expect(keysOf(world.takeStaleChunks())).toEqual(['0,0', '-1,0']);
+    expect(take(world).blocks).toEqual(['0,0', '-1,0']);
   });
 
   it('取走之后清空，同一次改动不会报两遍', () => {
     const world = loadedWorld();
     world.setBlock(...INSIDE, BlockType.Air);
-    expect(world.takeStaleChunks()).toHaveLength(1);
-    expect(world.takeStaleChunks()).toEqual([]);
+    expect(take(world).blocks).toHaveLength(1);
+    expect(take(world)).toEqual({ blocks: [], light: [] });
   });
 
   it('写成原本就是的方块不让网格过期', () => {
     const world = loadedWorld();
     expect(world.setBlock(...INSIDE, BlockType.Grass)).toBe(true);
-    expect(world.takeStaleChunks()).toEqual([]);
+    expect(take(world)).toEqual({ blocks: [], light: [] });
   });
 
   it('没落到世界里的写入不让网格过期', () => {
@@ -437,7 +483,7 @@ describe('World 记下网格过期的区块', () => {
     world.setBlock(1000, FLAT_GROUND_Y, 0, BlockType.Air);
     // y 越界
     world.setBlock(3, WORLD_MAX_Y + 1, 4, BlockType.Stone);
-    expect(world.takeStaleChunks()).toEqual([]);
+    expect(take(world)).toEqual({ blocks: [], light: [] });
   });
 });
 

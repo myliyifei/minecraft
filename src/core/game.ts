@@ -27,6 +27,7 @@ import {
   World,
   type ChunkCoord,
   type ChunkSourceFactory,
+  type StaleChunks,
 } from './world';
 
 /**
@@ -515,10 +516,10 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
-   * 取走「哪些区块的网格过期了」的记录并清空。渲染层每帧取一次，重建其中已有网格的那些。
-   * 哪些区块算过期由世界在 `setBlock` 时定（见 `World.takeStaleChunks`）。
+   * 取走「哪些区块的网格过期了」的记录并清空，方块变了的与只有光照变了的分两组。渲染层每帧取一次，重建其中
+   * 已有网格的那些。哪些区块算过期由世界在 `setBlock` 与光照传播时定（见 `World.takeStaleChunks`）。
    */
-  takeStaleChunks(): ChunkCoord[] {
+  takeStaleChunks(): StaleChunks {
     return this.world.takeStaleChunks();
   }
 

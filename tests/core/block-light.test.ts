@@ -17,6 +17,7 @@ import {
   worldWith,
   type Cell,
 } from '../helpers/light-scenes';
+import { allStale } from '../helpers/stale-chunks';
 
 const G = FLAT_GROUND_Y;
 
@@ -269,7 +270,7 @@ describe('方块光跨区块', () => {
     const world = flatTestWorld();
     world.takeStaleChunks();
     world.setBlock(CHUNK_SIZE - 4, G + 1, 7, BlockType.LitFurnace);
-    const keys = world.takeStaleChunks().map(({ cx, cz }) => `${cx},${cz}`);
+    const keys = allStale(world.takeStaleChunks()).map(({ cx, cz }) => `${cx},${cz}`);
     expect(keys).toContain('0,0');
     expect(keys).toContain('1,0');
   });

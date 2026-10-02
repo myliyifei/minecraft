@@ -10,6 +10,7 @@ import {
   type MoveAction,
 } from './keybindings';
 import { isPointerSpike } from './pointer-spike';
+import { isPointerWarp } from './pointer-warp';
 
 /**
  * 鼠标灵敏度：鼠标每移动一像素，视角转多少弧度。
@@ -84,9 +85,11 @@ export function installPlayerControls(
   const uiOpen = (): boolean => target.uiMode;
   const sendIntent = (): void => target.setMoveIntent(intentOf(pressed));
 
-  // 锁定生效后浏览器会补投一发 mousemove，带的是光标从点击位置归位到画面中心的位移
-  // ——那不是玩家转头。不丢掉它，一进第一人称视角就会被甩向一边。
+  // 有的浏览器在锁定生效后会补投一发 mousemove，带的是光标从点击位置归位到画面中心的位移
+  // ——那不是玩家转头。不丢掉它，一进第一人称视角就会被甩向一边。抓回锁定之后锁定期间的第一发
+  // 由 isPointerWarp 认是不是它；`lockedAt` 是这次锁定的 pointerlockchange 的时间戳，还没收到时是 undefined。
   let dropWarpMove = false;
+  let lockedAt: number | undefined;
 
   // 上一发 mousemove 的时刻，用来算这一发的隐含指针速度。丢掉的那些也要记，
   // 否则下一发会拿一个过时的时刻算出偏小的速度。
@@ -96,14 +99,15 @@ export function installPlayerControls(
    * 抓回指针锁定：进第一人称，网页鼠标随即消失。
    *
    * 三处入口都走这里——点画布、关掉背包界面、按死亡画面的重生按钮。合成一个函数是因为锁定
-   * 生效后浏览器会补投一发光标归位的 mousemove（见 `dropWarpMove`），漏掉那一发视角就会被甩一下。
+   * 生效后有的浏览器会补投一发光标归位的 mousemove（见 `dropWarpMove`），漏认那一发视角就会被甩一下。
    *
    * 请求可能被浏览器拒：它只在用户手势里放行。拒了就退回「玩家点一下画面」，但那个
    * rejection 必须接住，否则会变成控制台里一条未处理的错误。
    */
   const grabPointer = (): void => {
-    // 标记要在这里而不是在 pointerlockchange 里立：那发归位事件比锁定变更事件先到。
+    // 标记要在这里而不是在 pointerlockchange 里立：那发归位事件可能比锁定变更事件先到。
     dropWarpMove = true;
+    lockedAt = undefined;
     // 老浏览器这个方法返回 void，新的返回 Promise，所以先收成 unknown 再认。
     const request: unknown = canvas.requestPointerLock();
     if (request instanceof Promise) {
@@ -122,8 +126,11 @@ export function installPlayerControls(
     grabPointer();
   };
 
-  const onLockChange = (): void => {
-    if (locked()) return;
+  const onLockChange = (event: Event): void => {
+    if (locked()) {
+      lockedAt = event.timeStamp;
+      return;
+    }
     // 释放锁定时清掉按键状态：Esc 之后玩家不该还朝原方向走下去，也不该还在挖。
     pressed.clear();
     sendIntent();
@@ -171,8 +178,9 @@ export function installPlayerControls(
     const elapsedMs = event.timeStamp - lastMoveAt;
     lastMoveAt = event.timeStamp;
     if (dropWarpMove) {
+      // 只认锁定期间的第一发：不是归位事件的话这个浏览器不补投，后面的都是真实移动。
       dropWarpMove = false;
-      return;
+      if (isPointerWarp(lockedAt, event.timeStamp)) return;
     }
     // 浏览器偶尔会投来手做不到的巨型增量，采了视角就会跳到别处——见 pointer-spike.ts。
     if (isPointerSpike(Math.hypot(event.movementX, event.movementY), elapsedMs)) return;

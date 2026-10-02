@@ -41,7 +41,13 @@ import {
   terrainMaterial,
   type FrameLighting,
 } from './light-material';
-import { buildChunkMesh, meshTiles, type GlowingBlock, type MeshData } from './mesh';
+import {
+  buildChunkMesh,
+  meshTiles,
+  warmUpChunkMeshes,
+  type GlowingBlock,
+  type MeshData,
+} from './mesh';
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes } from './mesh-plan';
 import { ParticleSystem, type ParticleCounts } from './particles';
 import { selectionBounds } from './selection';
@@ -288,6 +294,8 @@ export class WorldRenderer {
   private readonly core: GameCore;
   // 值里带上区块坐标：排网格计划要遍历已有网格是哪些区块，键是打包过的数字，反解麻烦。
   private readonly meshes = new Map<number, ChunkMesh>();
+  /** 只有光照变了、上一帧没轮到重建的区块（`MeshPlan.deferred`），下一帧交回给 `planChunkMeshes`。 */
+  private deferredRelights: readonly ChunkCoord[] = [];
   /** 套在目标方块外的线框。 */
   private readonly selectionBox: THREE.LineSegments;
   private readonly selectionMaterial: THREE.LineBasicMaterial;
@@ -371,6 +379,8 @@ export class WorldRenderer {
 
   constructor({ canvas, core, texture, crackTexture }: WorldRendererOptions) {
     this.core = core;
+    // 在建真正的区块之前让网格构建的每条分支都走一遍，理由见 warmUpChunkMeshes。
+    warmUpChunkMeshes();
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: false,
@@ -603,27 +613,36 @@ export class WorldRenderer {
   }
 
   /**
-   * 让场景里的网格跟上核心的已加载区块：卸载掉的区块移除网格，新到位的区块建网格。
+   * 让场景里的网格与核心的已加载区块一致：卸载掉的区块移除网格，新到位的区块建网格，过期的重建。
    *
-   * 每帧调一次。一帧最多建 `budget` 个区块的网格，剩下的留到下一帧——哪些该建、
-   * 先建哪个由 `planChunkMeshes` 决定。`budget` 给 Infinity 表示「现在全部建完」，
-   * 首帧之前用它把出生点那一带一次铺好。
+   * 每帧调一次。方块变了的区块不论预算都当帧重建；只有光照变了的重建与新区块的首次建网格一帧合起来最多
+   * `budget` 个（方块变了的先占用），剩下的留到下一帧——哪些该建、先建哪个由 `planChunkMeshes` 决定。
+   * `budget` 给 Infinity 表示「现在全部建完」，首帧之前用它把出生点那一带一次铺好。
    */
   syncChunkMeshes(budget = MESH_BUDGET_PER_FRAME): void {
-    // 过期的网格当帧重建、不占预算；缺邻居的丢掉等邻居回来。两者都由 planChunkMeshes 定，
-    // 首次建与重建因此走同一条「8 个邻居都在」的规则。一次改动最多牵动 3×3 个区块（火把的光可能跨到
-    // 两侧的邻区块，边缘格还要让含对角在内的邻区块一起过期，见 ADR-0016），远小于铺开视距时的积压。
+    // 方块变了的网格当帧重建，只有光照变了的与新区块一起按预算由近到远排，没轮到的留到下一帧；缺邻居的丢掉
+    // 等邻居回来。都由 planChunkMeshes 定，首次建与重建因此走同一条「8 个邻居都在」的规则。
+    const stale = this.core.takeStaleChunks();
     const plan = planChunkMeshes({
       world: this.core,
       meshed: this.meshes.values(),
-      stale: this.core.takeStaleChunks(),
+      staleBlocks: stale.blocks,
+      staleLight: [...this.deferredRelights, ...stale.light],
       center: this.core.playerChunk,
       radius: this.core.viewRadius,
       budget,
     });
+    this.deferredRelights = plan.deferred;
     for (const { cx, cz } of plan.drop) this.dropChunkMesh(cx, cz);
     for (const { cx, cz } of plan.rebuild) this.rebuildChunk(cx, cz);
     for (const { cx, cz } of plan.build) this.buildChunk(cx, cz);
+  }
+
+  /**
+   * 只有光照变了、还没轮到重建的区块数（见 `syncChunkMeshes`）。放挖火把之后几帧内回到 0，端到端测试读它。
+   */
+  get deferredRelightCount(): number {
+    return this.deferredRelights.length;
   }
 
   /** 重建一个区块的网格。方块被挖掉或放下之后由 `syncChunkMeshes` 调。 */

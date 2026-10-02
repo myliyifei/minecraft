@@ -26,7 +26,7 @@ import { CHUNK_AREA, CHUNK_SIZE, MAX_LIGHT_LEVEL, WORLD_HEIGHT, WORLD_MAX_Y, WOR
 export interface LightChunks {
   /** 已加载的区块，未加载则 undefined。传播只走已加载的区块。 */
   chunkAt(cx: number, cz: number): Chunk | undefined;
-  /** (cx, cz) 那个区块里有格子的光照变了，或者它读得到的边界格子变了（见 `World.stale`）。 */
+  /** (cx, cz) 那个区块里有格子的光照变了，或者它读得到的边界格子变了（见 `World.staleLight`）。 */
   markStale(cx: number, cz: number): void;
 }
 
@@ -485,7 +485,7 @@ export class Lighting {
 
   /**
    * (chunk, i) 的光照变了：它的区块过期；它在区块边缘 1 格内时，含对角在内挨着它的区块也过期——
-   * 平滑光照读对角格（见 `World.stale`）。
+   * 平滑光照读对角格（见 `World.staleLight`）。
    */
   private changed(chunk: Chunk, i: number): void {
     const lx = i & LAST;

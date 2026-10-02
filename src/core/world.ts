@@ -10,11 +10,24 @@ import { CHUNK_SHIFT, CHUNK_SIZE, MAX_LIGHT_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } fr
 import type { DropSink } from './drop';
 import { BARE_HAND } from './item';
 import { Lighting } from './light';
-import { TORCH_ATTACH_OFFSETS, torchSupportCell } from './torch';
+import { TORCH_ATTACH_OFFSETS, isTorch, torchSupportCell } from './torch';
 
 export interface ChunkCoord {
   readonly cx: number;
   readonly cz: number;
+}
+
+/**
+ * 自上次取走以来网格过期了的区块，按原因分两组（见 `World.takeStaleChunks`）。
+ *
+ * 分开报是因为两者等得起的时间不同：方块变了的区块不当帧重建，放下的方块要晚几帧才出现，挖掉的方块那里会
+ * 透出一个洞；只有光照变了的区块推迟几帧，画面上只是那几帧还是旧的明暗（#62）。
+ */
+export interface StaleChunks {
+  /** 方块变了、网格的面跟着变的区块。 */
+  readonly blocks: readonly ChunkCoord[];
+  /** 只有光照变了的区块，不含 `blocks` 里已有的。 */
+  readonly light: readonly ChunkCoord[];
 }
 
 /**
@@ -56,20 +69,24 @@ export class World implements BlockEdit, BlockStateView {
    */
   private readonly editedChunks = new Map<number, Chunk>();
   /**
-   * 自上次取走以来网格过期了的区块，按区块键去重。
+   * 自上次取走以来方块变了的区块，按区块键去重（见 `StaleChunks.blocks`）。
    *
-   * 由 `setBlock` 记：方块自己的区块一定过期；它坐在区块边界上时，那一侧的邻居也过期——边界上的
-   * 面生不生成取决于隔壁那一格是什么，只重建自己就会在挖开的地方留下一个看穿到虚空的洞，或者留下
-   * 一堵本该消失的墙。方块变了只记四个侧向的邻居，不记斜角：面的剔除只问六个轴向的邻居。
-   *
-   * 光照变过的格子也记（`Lighting` 经 `markStale` 记，ADR-0017）：那一格的区块过期，它在区块边缘
-   * 1 格内时含对角在内挨着它的区块也过期——平滑光照读对角格。`setBlock` 带来的光照变化、新区块
-   * 加载时传进邻居的光、区块卸载时从邻居撤掉的光都走这条路。渲染层不必知道是哪一种原因。
+   * 由 `setBlock` 记：方块自己的区块一定在里面；它坐在区块边界上、而且隔壁的面因它而变（它从挡住隔壁的面
+   * 变成不挡，或者反过来，见 `faceCulling`）时，那一侧的邻居也在里面——只重建自己就会在挖开的地方留下一个
+   * 看穿到虚空的洞，或者留下一堵本该消失的墙。只记四个侧向的邻居，不记斜角：面的剔除只问六个轴向的邻居。
    *
    * 没加载的邻居也记：要不要重建网格由渲染层判断。没人来取时记录会一直累积——浏览器里渲染层
    * 每帧取一次（见 `WorldRenderer.syncChunkMeshes`），核心层测试里世界是一次性的。
    */
-  private readonly stale = new Map<number, ChunkCoord>();
+  private readonly staleBlocks = new Map<number, ChunkCoord>();
+  /**
+   * 自上次取走以来光照变过的区块（见 `StaleChunks.light`），规则同上。
+   *
+   * `Lighting` 经 `markStale` 记（ADR-0017）：光照变了的那一格的区块，它在区块边缘 1 格内时含对角在内挨着它的
+   * 区块——平滑光照读对角格。`setBlock` 带来的光照变化、新区块加载时传进邻居的光、区块卸载时从邻居撤掉的光
+   * 都走这条路。
+   */
+  private readonly staleLight = new Map<number, ChunkCoord>();
   /**
    * 方块状态表（见 CONTEXT.md 的「方块状态」、ADR-0011）：键是世界坐标，值是那一格方块的额外状态。
    *
@@ -96,7 +113,7 @@ export class World implements BlockEdit, BlockStateView {
     this.drops = drops;
     this.lighting = new Lighting({
       chunkAt: (cx, cz) => this.chunks.get(chunkKey(cx, cz)),
-      markStale: (cx, cz) => this.markChunkStale(cx, cz),
+      markStale: (cx, cz) => this.staleLight.set(chunkKey(cx, cz), { cx, cz }),
     });
   }
 
@@ -209,7 +226,7 @@ export class World implements BlockEdit, BlockStateView {
     this.syncBlockState(bx, by, bz, previous, block);
     // 这一下让它成了已改区块，卸载后不再丢弃。
     this.editedChunks.set(key, chunk);
-    this.markStale(bx, bz);
+    this.markStale(bx, bz, previous, block);
     // 同步更新光照，不等下一 tick：同一 tick 之后的步骤读到的就是新值（ADR-0017）。
     this.lighting.blockChanged(chunk, lx, by, lz, previous, block);
     if (isOpaque(previous) && !isOpaque(block)) this.dropDetachedTorches(bx, by, bz);
@@ -276,30 +293,39 @@ export class World implements BlockEdit, BlockStateView {
   }
 
   /**
-   * (bx, bz) 那一列的方块变了：它的区块过期，坐在区块边界上时那一侧的邻居也过期（见 `stale`）。
-   * 要求整数输入。
+   * (bx, bz) 那一列的一格从 `previous` 换成了 `block`：它的区块的方块变了；它坐在区块边界上、隔壁的面又因此而变时，
+   * 那一侧的邻居也算方块变了（见 `staleBlocks`）。要求整数输入。
    */
-  private markStale(bx: number, bz: number): void {
+  private markStale(bx: number, bz: number, previous: BlockType, block: BlockType): void {
     const cx = chunkOf(bx);
     const cz = chunkOf(bz);
-    this.markChunkStale(cx, cz);
+    this.markBlocksStale(cx, cz);
+    if (faceCulling(previous) === faceCulling(block)) return;
     const lx = localOf(bx);
     const lz = localOf(bz);
-    if (lx === 0) this.markChunkStale(cx - 1, cz);
-    if (lx === CHUNK_SIZE - 1) this.markChunkStale(cx + 1, cz);
-    if (lz === 0) this.markChunkStale(cx, cz - 1);
-    if (lz === CHUNK_SIZE - 1) this.markChunkStale(cx, cz + 1);
+    if (lx === 0) this.markBlocksStale(cx - 1, cz);
+    if (lx === CHUNK_SIZE - 1) this.markBlocksStale(cx + 1, cz);
+    if (lz === 0) this.markBlocksStale(cx, cz - 1);
+    if (lz === CHUNK_SIZE - 1) this.markBlocksStale(cx, cz + 1);
   }
 
-  private markChunkStale(cx: number, cz: number): void {
-    this.stale.set(chunkKey(cx, cz), { cx, cz });
+  private markBlocksStale(cx: number, cz: number): void {
+    this.staleBlocks.set(chunkKey(cx, cz), { cx, cz });
   }
 
-  /** 取走「哪些区块的网格过期了」的记录并清空。渲染层每帧取一次，重建其中已有网格的那些。 */
-  takeStaleChunks(): ChunkCoord[] {
-    const chunks = [...this.stale.values()];
-    this.stale.clear();
-    return chunks;
+  /**
+   * 取走「哪些区块的网格过期了」的记录并清空。渲染层每帧取一次，重建其中已有网格的那些：方块变了的当帧重建，
+   * 只有光照变了的可以推迟（见 `planChunkMeshes`）。
+   */
+  takeStaleChunks(): StaleChunks {
+    const blocks = [...this.staleBlocks.values()];
+    const light: ChunkCoord[] = [];
+    for (const [key, coord] of this.staleLight) {
+      if (!this.staleBlocks.has(key)) light.push(coord);
+    }
+    this.staleBlocks.clear();
+    this.staleLight.clear();
+    return { blocks, light };
   }
 
   /**
@@ -333,6 +359,22 @@ export class World implements BlockEdit, BlockStateView {
 
 /** 不接掉落物的世界用的那一份：收到什么都丢掉。 */
 const NO_DROPS: DropSink = Object.freeze({ spawnInBlock: () => {} });
+
+/** `faceCulling` 里不透明方块的那一档：比任何方块编号都小。 */
+const OPAQUE_FACES = -1;
+
+/**
+ * 隔壁区块的网格从这一格读到的东西（见 `buildChunkMesh`）：不透明方块挡住隔壁贴着它的面；不是不透明的方块不挡，
+ * 但与隔壁那一格同种时两个面重合、都不画（树叶），所以按编号区分。空气与火把对隔壁一样——不挡，也不会与隔壁那一格
+ * 同种：火把不走六面剔除，它从不让别的方块少画一个面。
+ *
+ * 这一格换了方块之后，这个值不变的话隔壁的面就一个都不变，隔壁要重建只可能是因为光照变了。
+ */
+function faceCulling(block: BlockType): number {
+  if (isOpaque(block)) return OPAQUE_FACES;
+  if (isTorch(block)) return BlockType.Air;
+  return block;
+}
 
 /** 方块状态表的坐标键。要求整数输入。 */
 function blockKey(x: number, y: number, z: number): string {

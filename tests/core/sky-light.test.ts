@@ -15,6 +15,7 @@ import {
   worldWith,
   type Edit,
 } from '../helpers/light-scenes';
+import { allStale } from '../helpers/stale-chunks';
 
 const G = FLAT_GROUND_Y;
 
@@ -200,7 +201,7 @@ describe('跨区块', () => {
 
 describe('光照变过的区块记进过期列表', () => {
   function keysOf(world: World): string[] {
-    return world.takeStaleChunks().map(({ cx, cz }) => `${cx},${cz}`).sort();
+    return allStale(world.takeStaleChunks()).map(({ cx, cz }) => `${cx},${cz}`).sort();
   }
 
   it('区块内部挡住天光：只有自己那个区块', () => {

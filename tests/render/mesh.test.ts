@@ -12,7 +12,13 @@ import { oakTreesTouching } from '../../src/core/tree';
 import { chunkOf, chunksAround, ORIGIN_CHUNK, World } from '../../src/core/world';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 import { tileUvRect, TILE } from '../../src/render/atlas';
-import { buildChunkMesh, meshTiles, type MeshData, type MeshView } from '../../src/render/mesh';
+import {
+  buildChunkMesh,
+  meshTiles,
+  warmUpChunkMeshes,
+  type MeshData,
+  type MeshView,
+} from '../../src/render/mesh';
 import { torchHitbox } from '../../src/core/torch';
 import { SELF_LIT_BLOCK_LIGHT } from '../../src/render/shading';
 
@@ -27,7 +33,7 @@ interface MeshInput {
 
 /** 只给方块的假视图：区块之外的光照一律读作 0。只看面剔除与贴图的测试用它。 */
 function blocksOnly(getBlock: MeshView['getBlock']): MeshView {
-  return { getBlock, skyLightAt: () => 0, blockLightAt: () => 0 };
+  return { getBlock, skyLightAt: () => 0, blockLightAt: () => 0, chunkAt: () => undefined };
 }
 
 function meshOf({ chunk, view }: MeshInput): MeshData {
@@ -546,6 +552,55 @@ describe('生成地形的网格', () => {
   });
 });
 
+describe('区块边上的格直读隔壁区块的数据（#62）', () => {
+  it('给出隔壁区块的数据与只能逐格问 getBlock，建出的网格完全一样', () => {
+    // 四条区块边上从地表往下挖出竖井、在地下挖出横穿边界的洞，让边上的格既有被挡住的，也有露出来的
+    const world = new World(plainsTerrain(DEFAULT_SEED));
+    for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 2)) world.loadChunk(cx, cz);
+    for (let k = 0; k < CHUNK_SIZE; k += 3) {
+      for (let y = 40; y <= world.highestBlockY(0, k); y++) world.setBlock(0, y, k, BlockType.Air);
+      world.setBlock(-1, 30 + k, k, BlockType.Air);
+      world.setBlock(k, 35, CHUNK_SIZE - 1, BlockType.Air);
+      world.setBlock(k, 36, CHUNK_SIZE, BlockType.Air);
+      world.setBlock(CHUNK_SIZE - 1, 20 + k, k, BlockType.Air);
+      world.setBlock(k, 50, -1, BlockType.Air);
+    }
+    const blind: MeshView = {
+      getBlock: (x, y, z) => world.getBlock(x, y, z),
+      skyLightAt: (x, y, z) => world.skyLightAt(x, y, z),
+      blockLightAt: (x, y, z) => world.blockLightAt(x, y, z),
+      chunkAt: () => undefined,
+    };
+    for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 1)) {
+      const chunk = world.chunkAt(cx, cz)!;
+      expect(buildChunkMesh(chunk, world), `${cx},${cz}`).toEqual(buildChunkMesh(chunk, blind));
+    }
+  });
+});
+
+describe('建网格共用一份缓冲（#62）', () => {
+  it('先建的网格不会被后建的改掉：每份网格的数组都是自己的', () => {
+    const world = new World(flatTestTerrain);
+    world.loadChunk(0, 0);
+    world.setBlock(3, FLAT_GROUND_Y + 1, 3, BlockType.Torch);
+    const first = buildChunkMesh(world.chunkAt(0, 0)!, world);
+    const copy = structuredClone(first);
+    // 第二份比第一份大得多，缓冲要翻倍；第三份又小
+    world.loadChunk(1, 0);
+    buildChunkMesh(world.chunkAt(1, 0)!, world);
+    buildChunkMesh(uniform(BlockType.Air).chunk, blocksOnly(() => BlockType.Air));
+    expect(first).toEqual(copy);
+  });
+
+  it('预热之后建的网格与没预热时一样', () => {
+    const world = new World(flatTestTerrain);
+    world.loadChunk(0, 0);
+    const before = buildChunkMesh(world.chunkAt(0, 0)!, world);
+    warmUpChunkMeshes();
+    expect(buildChunkMesh(world.chunkAt(0, 0)!, world)).toEqual(before);
+  });
+});
+
 describe('区块网格的坐标系', () => {
   it('顶点使用区块局部的 x/z 与世界 y', () => {
     const world = new World(flatTestTerrain);
@@ -689,6 +744,7 @@ describe('顶点光照的取样：六个面、区块边角，每格的等级各�
       getBlock: (x, yy, z) => (isStone(x, yy, z) ? BlockType.Stone : BlockType.Air),
       skyLightAt: (x, yy, z) => levelsAt(x, yy, z)[0],
       blockLightAt: (x, yy, z) => levelsAt(x, yy, z)[1],
+      chunkAt: () => undefined,
     };
     return { mesh: buildChunkMesh(chunk, view), isStone };
   }

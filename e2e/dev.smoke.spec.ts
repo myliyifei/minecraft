@@ -54,6 +54,7 @@ import { recipesFor, type GridSize } from '../src/core/recipe';
 import { HURT_FLASH_TICKS } from '../src/ui/hurt-flash';
 import { ZOMBIE_HURT_TINT_TICKS } from '../src/render/zombie-model';
 import { BRIGHTNESS_FLOOR } from '../src/render/shading';
+import { MESH_BUDGET_PER_FRAME } from '../src/render/mesh-plan';
 import { FLICKER_AMPLITUDE } from '../src/render/torch-light';
 import { ATTACK_COOLDOWN_TICKS, ATTACK_RANGE } from '../src/core/attack';
 import { XP_ATTRACT_RANGE } from '../src/core/xp-orb';
@@ -3593,6 +3594,125 @@ test('调试句柄给 4 支火把：快捷栏画中文名「火把」；午夜�
   await expect(icon).toHaveCSS('--tile-col', String(col));
   await expect(icon).toHaveCSS('--tile-row', String(row));
   expect(errors).toEqual([]);
+});
+
+/** 放挖火把之后，光照变了的区块最多这么多帧重建完（含放挖那一帧）：最多 3×3 个区块，每帧 2 个。 */
+const RELIGHT_FRAME_LIMIT = 5;
+
+test('区块边上放挖方块与火把：下一帧网格就更新，隔壁区块露出、挡住的那一面同一帧变；光照变了的区块几帧内重建完', async ({
+  page,
+}) => {
+  await waitForFullViewDistance(page);
+  // 整段跑在一次同步的 evaluate 里，每调一次 syncChunkMeshes 就是一帧，游戏循环插不进来。
+  //
+  // 放挖石头的那一格 C 在东边区块的 −X 边上（lx = 0），西边区块里贴着它的是一块石头 W：C 挡不挡住 W 的 +X 面，
+  // 看的是西边区块的网格。C 是地下一个四面都是石头的空格，放挖石头时光照一格都不变，西边区块只能因为方块变了而
+  // 当帧重建。放挖火把的那一格 T 在地面上、一个区块的角上：火把的光照进含对角在内的 4 个区块，每帧的预算重建不完
+  const seen = await page.evaluate(
+    ({ stone, air, torch, chunkSize }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const x = Math.round(core.player.position.x / chunkSize) * chunkSize;
+      const z = Math.floor(core.player.position.z) + 3;
+      const y = Math.min(core.highestBlockY(x, z), core.highestBlockY(x - 1, z)) - 10;
+      const east = { cx: x / chunkSize, cz: Math.floor(z / chunkSize) };
+      const west = { cx: east.cx - 1, cz: east.cz };
+      for (let bx = x - 2; bx <= x + 1; bx++) {
+        for (let by = y - 1; by <= y + 1; by++) {
+          for (let bz = z - 1; bz <= z + 1; bz++) core.setBlock(bx, by, bz, stone);
+        }
+      }
+      core.setBlock(x, y, z, air);
+      const tz = Math.round(core.player.position.z / chunkSize) * chunkSize;
+      const ty = core.highestBlockY(x, tz) + 1;
+      const corner = { cx: x / chunkSize, cz: tz / chunkSize };
+      renderer.syncChunkMeshes(Infinity);
+
+      // 记下每帧重建了几个区块、一共重建了哪些，以及核心报过期的是哪些
+      let rebuilds = 0;
+      const rebuilt = new Set<string>();
+      const reported = new Set<string>();
+      const rebuildChunk = renderer.rebuildChunk.bind(renderer);
+      renderer.rebuildChunk = (cx, cz) => {
+        rebuilds++;
+        rebuilt.add(`${cx},${cz}`);
+        rebuildChunk(cx, cz);
+      };
+      const takeStaleChunks = core.takeStaleChunks.bind(core);
+      core.takeStaleChunks = () => {
+        const stale = takeStaleChunks();
+        for (const { cx, cz } of [...stale.blocks, ...stale.light]) reported.add(`${cx},${cz}`);
+        return stale;
+      };
+      const read = () => ({
+        west: renderer.chunkMeshVertexCount(west.cx, west.cz),
+        east: renderer.chunkMeshVertexCount(east.cx, east.cz),
+        cornerTiles: renderer.chunkMeshTiles(corner.cx, corner.cz),
+      });
+      /** 改一格，同步一帧读网格，再一帧一帧同步到没有推迟的重建；记下每帧重建了几个区块。 */
+      const change = (at: readonly [number, number, number], block: BlockType) => {
+        core.setBlock(...at, block);
+        const frames: number[] = [];
+        rebuilt.clear();
+        reported.clear();
+        rebuilds = 0;
+        renderer.syncChunkMeshes();
+        frames.push(rebuilds);
+        const next = read();
+        while (renderer.deferredRelightCount > 0 && frames.length < 20) {
+          rebuilds = 0;
+          renderer.syncChunkMeshes();
+          frames.push(rebuilds);
+        }
+        return { ...next, frames, rebuilt: [...rebuilt].sort(), reported: [...reported].sort() };
+      };
+
+      const base = read();
+      const C = [x, y, z] as const;
+      const T = [x, ty, tz] as const;
+      const placed = change(C, stone);
+      const dug = change(C, air);
+      const torchPlaced = change(T, torch);
+      const torchDug = change(T, air);
+      renderer.rebuildChunk = rebuildChunk;
+      core.takeStaleChunks = takeStaleChunks;
+      return { base, placed, dug, torchPlaced, torchDug };
+    },
+    {
+      stone: BlockType.Stone,
+      air: BlockType.Air,
+      torch: BlockType.Torch,
+      chunkSize: CHUNK_SIZE,
+    },
+  );
+
+  // 放下石头的那一帧：C 四周 6 块石头朝着 C 的面都不画了（一个面 4 个顶点），西边区块里是 W 那 1 个，
+  // 东边区块里是另外 5 个；C 自己被围住，一个面都不出
+  expect(seen.placed.west).toBe(seen.base.west - 4);
+  expect(seen.placed.east).toBe(seen.base.east - 5 * 4);
+  // 挖掉的那一帧：那些面又露出来，没有透出的洞
+  expect(seen.dug.west).toBe(seen.base.west);
+  expect(seen.dug.east).toBe(seen.base.east);
+  // 光照没变，只有方块变了的两个区块重建，同一帧就完
+  expect(seen.placed.frames).toEqual([2]);
+  expect(seen.dug.frames).toEqual([2]);
+  // 火把那一帧就画出来、挖掉那一帧就没了
+  expect(seen.base.cornerTiles).not.toContain(TILE.torch);
+  expect(seen.torchPlaced.cornerTiles).toContain(TILE.torch);
+  expect(seen.torchDug.cornerTiles).not.toContain(TILE.torch);
+
+  for (const step of [seen.placed, seen.dug, seen.torchPlaced, seen.torchDug]) {
+    // 光照变了的区块有限的几帧内全部重建完：核心报过期的每个区块都重建了一次（都在玩家身边，都有网格）
+    expect(step.frames.length).toBeLessThanOrEqual(RELIGHT_FRAME_LIMIT);
+    expect(step.rebuilt).toEqual(step.reported);
+    expect(step.frames.reduce((sum, n) => sum + n, 0)).toBe(step.reported.length);
+  }
+  for (const step of [seen.torchPlaced, seen.torchDug]) {
+    // 火把的光照进了含对角在内的 4 个区块，有的推迟到了后面几帧
+    expect(step.reported).toHaveLength(4);
+    expect(step.frames.length).toBeGreaterThan(1);
+    // 火把只让自己那个区块的方块变了，每帧重建的不超过预算
+    expect(Math.max(...step.frames)).toBeLessThanOrEqual(MESH_BUDGET_PER_FRAME);
+  }
 });
 
 test('调试句柄给一支火把：选中它时送进着色器的手持光等级是 14，切到泥土或空格是 0', async ({ page }) => {

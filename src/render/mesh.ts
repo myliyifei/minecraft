@@ -1,4 +1,4 @@
-import { BlockType, isAir, isOpaque, type BlockView } from '../core/block';
+import { BLOCKS, BlockType, isAir, isOpaque, type BlockView } from '../core/block';
 import { BLOCK_LIGHT_MASK, SKY_LIGHT_SHIFT, blockIndex, type ChunkView } from '../core/chunk';
 import {
   CHUNK_AREA,
@@ -26,6 +26,19 @@ export interface MeshData {
    */
   readonly light: Float32Array;
   readonly indices: Uint32Array;
+  /**
+   * 这个区块里的发光方块（火把、燃烧中的熔炉）：粒子系统从这里挑出玩家附近的，让它们冒火焰与烟（#59）。
+   * 跟着网格一起建：方块一变区块就重建网格，列表也就跟着变，熄火的熔炉下一次重建就不在了。
+   */
+  readonly glowingBlocks: readonly GlowingBlock[];
+}
+
+/** 一格发光方块：编号与世界坐标（方块的最小角）。编号里带着火把的朝向，冒粒子的位置按它算。 */
+export interface GlowingBlock {
+  readonly block: BlockType;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
 }
 
 /**
@@ -119,6 +132,7 @@ export function buildChunkMesh(chunk: ChunkView, view: MeshView): MeshData {
   const uvs: number[] = [];
   const lights: number[] = [];
   const indices: number[] = [];
+  const glowingBlocks: GlowingBlock[] = [];
   const blocks = chunk.blocks;
   const light = chunk.light;
   const originX = chunk.cx * CHUNK_SIZE;
@@ -164,6 +178,7 @@ export function buildChunkMesh(chunk: ChunkView, view: MeshView): MeshData {
         if (isAir(block)) continue;
         const tiles = BLOCK_TILES[block];
         if (!tiles) continue;
+        if (BLOCKS[block].lightEmission > 0) glowingBlocks.push({ block, x: originX + lx, y, z: originZ + lz });
 
         // 火把不走六面剔除：细杆碰不到邻格，五个面总要画。两个等级写满，方块光那一项同时是着色器认的
         // 标记（`SELF_LIT_BLOCK_LIGHT`）：火把本身不吃光照，按贴图本色画。
@@ -222,5 +237,6 @@ export function buildChunkMesh(chunk: ChunkView, view: MeshView): MeshData {
     uvs: new Float32Array(uvs),
     light: new Float32Array(lights),
     indices: new Uint32Array(indices),
+    glowingBlocks,
   };
 }

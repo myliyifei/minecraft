@@ -65,6 +65,11 @@ const FURNACE_BODY = [108, 108, 108];
 const FURNACE_MOUTH = [28, 28, 28];
 const FIRE = [232, 118, 22];
 const FIRE_BRIGHT = [252, 208, 64];
+/** 火焰光点中心发白的那一小团。 */
+const FIRE_CORE = [255, 244, 190];
+/** 烟粒子：浅灰，边上一圈偏暗。 */
+const SMOKE = [196, 196, 198];
+const SMOKE_EDGE = [148, 148, 152];
 /** 矿点的颜色：煤近黑，铁是浅棕；物品图标上再各配一个亮面。 */
 const COAL = [34, 34, 38];
 const COAL_SHINE = [78, 78, 84];
@@ -462,6 +467,25 @@ const TILES = {
     const tip = (stick && y === 5) || (x === 8 && y === 4);
     if (tip) return shade(FIRE, noise);
     return [0, 0, 0, 0];
+  },
+  // smoke：一团圆的灰烟，半径 6.5 像素，边上一圈偏暗。变淡靠粒子的不透明度，贴图本身不透明
+  45: (x, y, rand) => {
+    const r = Math.hypot(x - 7.5, y - 7.5);
+    if (r > 6.5) return [0, 0, 0, 0];
+    const noise = Math.floor(rand() * 24) - 12;
+    return shade(r > 5.2 ? SMOKE_EDGE : SMOKE, noise);
+  },
+  // flame：火焰光点，上尖下圆，底下是半径 5 的半圆，往上收成尖；中心偏下发白，往外是黄、边上一圈橙
+  46: (x, y, rand) => {
+    const dx = x - 7.5;
+    const dy = y - 9.5;
+    const inside = dy >= 0 ? Math.hypot(dx, dy) <= 5 : Math.abs(dx) <= 5 * (1 + dy / 8);
+    if (!inside) return [0, 0, 0, 0];
+    const noise = Math.floor(rand() * 12) - 6;
+    const core = Math.hypot(dx, y - 10.5);
+    if (core < 2.5) return shade(FIRE_CORE, noise);
+    if (core < 4) return shade(FIRE_BRIGHT, noise);
+    return shade(FIRE, noise);
   },
 };
 

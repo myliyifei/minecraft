@@ -145,9 +145,11 @@ describe('网格生成的可测性', () => {
     'render/daylight.ts',
     'render/shading.ts',
     'render/torch-light.ts',
+    'render/torch-model.ts',
+    'render/particles.ts',
   ].map((f) => join(SRC, f));
 
-  it('mesh、atlas、掉落物的运动学、昼夜、明暗曲线与火把的光不依赖 three', () => {
+  it('mesh、atlas、掉落物的运动学、昼夜、明暗曲线、火把的光与模型、粒子池不依赖 three', () => {
     for (const file of pureRenderFiles) {
       expect(importedModules(readFileSync(file, 'utf8'))).not.toContain('three');
     }

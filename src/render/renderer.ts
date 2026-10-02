@@ -36,12 +36,14 @@ import { heldSwingPhase, heldSwingPose } from './held-swing';
 import {
   entityMaterial,
   frameLighting,
+  particleMaterial,
   setEntityLight,
   terrainMaterial,
   type FrameLighting,
 } from './light-material';
-import { buildChunkMesh, meshTiles, type MeshData } from './mesh';
+import { buildChunkMesh, meshTiles, type GlowingBlock, type MeshData } from './mesh';
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes } from './mesh-plan';
+import { ParticleSystem, type ParticleCounts } from './particles';
 import { selectionBounds } from './selection';
 import { flickerAt, heldLightLevel } from './torch-light';
 import {
@@ -259,6 +261,14 @@ export interface SkyView {
 }
 
 /**
+ * 场景里的粒子现在有多少（见 CONTEXT.md 的「粒子」）：按种类的数量与总数，加上总数的上限。
+ * 总数读的是实例化几何体这一帧画了几个实例；按种类的数量读粒子池，池子里的数组就是那几个实例属性。
+ */
+export interface ParticleView extends ParticleCounts {
+  readonly limit: number;
+}
+
+/**
  * 渲染适配器：把核心的方块数据画成 Three.js 场景。
  *
  * 相机是第一人称的：跟着核心里的玩家走，位置在两次 tick 之间插值（ADR-0002）。
@@ -352,6 +362,12 @@ export class WorldRenderer {
   private readonly celestialPivot = new THREE.Group();
   private readonly sun: THREE.Mesh;
   private readonly moon: THREE.Mesh;
+  /** 粒子池与发射规则（`particles.ts`）。池子里的几条数组直接是下面那份几何体的实例属性。 */
+  private readonly particleSystem = new ParticleSystem();
+  /** 所有粒子共用的一张四边形，按实例画：每帧只改实例属性与实例数。 */
+  private readonly particleGeometry: THREE.InstancedBufferGeometry;
+  /** 上一帧的真实时间（毫秒），粒子按两帧之间的间隔推进。 */
+  private lastFrameMs: number | undefined;
 
   constructor({ canvas, core, texture, crackTexture }: WorldRendererOptions) {
     this.core = core;
@@ -438,6 +454,12 @@ export class WorldRenderer {
     this.crackBox.visible = false;
     this.scene.add(this.crackBox);
 
+    this.particleGeometry = particleGeometry(this.particleSystem);
+    const particleMesh = new THREE.Mesh(this.particleGeometry, particleMaterial(texture, this.frame));
+    // 几何体只是一张原点上的四边形，粒子摆在哪由实例属性定，按它算的包围球不对，不做视锥剔除
+    particleMesh.frustumCulled = false;
+    this.scene.add(particleMesh);
+
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -500,6 +522,15 @@ export class WorldRenderer {
         ? Math.round(this.crackTexture.offset.x * CRACK_STAGES)
         : undefined,
       color,
+    };
+  }
+
+  /** 上一帧画出来的粒子。 */
+  get particles(): ParticleView {
+    return {
+      ...this.particleSystem.pool.counts(),
+      total: this.particleGeometry.instanceCount,
+      limit: this.particleSystem.pool.capacity,
     };
   }
 
@@ -612,15 +643,16 @@ export class WorldRenderer {
     if (!chunk) return;
 
     const data = buildChunkMesh(chunk, this.core);
+    const { glowingBlocks } = data;
     if (data.indices.length === 0) {
-      this.meshes.set(chunkKey(cx, cz), { cx, cz });
+      this.meshes.set(chunkKey(cx, cz), { cx, cz, glowingBlocks });
       return;
     }
 
     const mesh = new THREE.Mesh(toGeometry(data), this.chunkMaterial);
     mesh.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
     this.scene.add(mesh);
-    this.meshes.set(chunkKey(cx, cz), { cx, cz, mesh });
+    this.meshes.set(chunkKey(cx, cz), { cx, cz, mesh, glowingBlocks });
   }
 
   private dropChunkMesh(cx: number, cz: number): void {
@@ -649,6 +681,7 @@ export class WorldRenderer {
     this.updateZombies(alpha);
     this.updateHeldItem();
     this.updateHeldSwing(alpha);
+    this.updateParticles();
 
     // 两遍：先画世界，再把深度清掉画手上那块方块。深度一清，手持就永远在世界前面，
     // 贴着墙站着也不会被墙切穿（`handScene` 的注释里记了为什么不能挂在主相机下）。
@@ -684,6 +717,38 @@ export class WorldRenderer {
   private updateTorchLight(): void {
     this.frame.heldLight.value = heldLightLevel(this.core.inventory.held?.item);
     this.frame.flicker.value = flickerAt(performance.now() / 1000);
+  }
+
+  /**
+   * 推进粒子一帧（#59）：已建网格的区块里、离眼睛 16 格内的发光方块按概率冒火焰光点与烟，池子推进、到期的回收、
+   * 由远到近重排，再把存活的个数交给实例化几何体。
+   *
+   * 按真实时间推进，与闪烁一样：打开界面、世界不推进时火照样冒烟。发光方块的列表跟着网格走，
+   * 熔炉熄火、火把挖掉之后区块重建，下一帧就不冒了；还没建网格的区块看不见，也不冒。
+   */
+  private updateParticles(): void {
+    const now = performance.now();
+    const seconds = this.lastFrameMs === undefined ? 0 : (now - this.lastFrameMs) / 1000;
+    this.lastFrameMs = now;
+    this.particleSystem.update(seconds, this.camera.position, this.glowingBlocks(), this.core);
+
+    const { count } = this.particleSystem.pool;
+    const geometry = this.particleGeometry;
+    geometry.instanceCount = count;
+    // 一个都没有时不上传：长度 0 的上传范围在 WebGL2 里表示「一直到数组末尾」，反而会上传整条数组
+    if (count === 0) return;
+    for (const attribute of Object.values(geometry.attributes)) {
+      if (!(attribute instanceof THREE.InstancedBufferAttribute)) continue;
+      // 只上传存活的那一段
+      attribute.clearUpdateRanges();
+      attribute.addUpdateRange(0, count * attribute.itemSize);
+      attribute.needsUpdate = true;
+    }
+  }
+
+  /** 所有已建网格的区块里的发光方块。 */
+  private *glowingBlocks(): Generator<GlowingBlock> {
+    for (const { glowingBlocks } of this.meshes.values()) yield* glowingBlocks;
   }
 
   /**
@@ -992,6 +1057,8 @@ export class WorldRenderer {
  */
 interface ChunkMesh extends ChunkCoord {
   readonly mesh?: THREE.Mesh;
+  /** 网格构建时顺带记下的发光方块，粒子从这里冒（`MeshData.glowingBlocks`）。 */
+  readonly glowingBlocks: readonly GlowingBlock[];
 }
 
 function lerp(from: number, to: number, alpha: number): number {
@@ -1039,6 +1106,27 @@ function celestialQuad(tile: number, material: THREE.Material, side: 1 | -1): TH
   // PlaneGeometry 的正面朝 +Z，绕 y 轴转 ∓90° 后朝向 ∓X，正对原点。
   mesh.rotation.y = (-side * Math.PI) / 2;
   return mesh;
+}
+
+/**
+ * 粒子共用的那张四边形：边长 1、以原点为中心，每个粒子一个实例。五个实例属性直接用粒子池的数组
+ * （`ParticlePool`）：池子改了数组，渲染层只需标记要上传的范围，不另复制一份。
+ */
+function particleGeometry({ pool }: ParticleSystem): THREE.InstancedBufferGeometry {
+  const quad = new THREE.PlaneGeometry(1, 1);
+  const geometry = new THREE.InstancedBufferGeometry();
+  geometry.index = quad.index;
+  geometry.setAttribute('position', quad.getAttribute('position'));
+  geometry.setAttribute('uv', quad.getAttribute('uv'));
+  const instanced = (array: Float32Array, itemSize: number) =>
+    new THREE.InstancedBufferAttribute(array, itemSize).setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('instanceOffset', instanced(pool.positions, 3));
+  geometry.setAttribute('instanceSize', instanced(pool.sizes, 1));
+  geometry.setAttribute('instanceUv', instanced(pool.uvRects, 4));
+  geometry.setAttribute('instanceLight', instanced(pool.lights, 2));
+  geometry.setAttribute('instanceAlpha', instanced(pool.alphas, 1));
+  geometry.instanceCount = 0;
+  return geometry;
 }
 
 function toGeometry(data: MeshData): THREE.BufferGeometry {

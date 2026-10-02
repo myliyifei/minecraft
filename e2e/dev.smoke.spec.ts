@@ -3678,6 +3678,143 @@ test('连续多帧读送进着色器的闪烁量：不全相同，每一帧都�
   expect(errors).toEqual([]);
 });
 
+/** 渲染层这一帧画了多少粒子（`WorldRenderer.particles`）。 */
+async function readParticles(page: Page): Promise<{ flame: number; smoke: number; total: number; limit: number }> {
+  return page.evaluate(() => window.__VOXEL__!.renderer.particles);
+}
+
+/**
+ * 等到画面上先后出现过火焰光点与烟，返回等了几帧。两种是分别按概率冒的，不要求同一帧都有：
+ * 熔炉每秒平均只冒半个，隔几秒轮询一次容易正好错过。所以在页面里逐帧读，最多等 30 秒，
+ * 两种都没出现过的概率在 10⁻⁶ 以下。
+ */
+async function waitForFlameAndSmoke(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    const { renderer } = window.__VOXEL__!;
+    const end = performance.now() + 30_000;
+    let flame = false;
+    let smoke = false;
+    let frames = 0;
+    while (!(flame && smoke)) {
+      if (performance.now() > end) throw new Error(`30 秒内火焰光点出现过：${flame}，烟出现过：${smoke}`);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      frames++;
+      flame ||= renderer.particles.flame > 0;
+      smoke ||= renderer.particles.smoke > 0;
+    }
+    return frames;
+  });
+}
+
+test('脚下放一支火把：几帧后粒子读回里火焰光点与烟都大于 0；走到 20 格外，几秒后归 0', async ({ page }) => {
+  await waitForFullViewDistance(page);
+  // 火把放在玩家自己那一格（火把不实心），之后一直往前走，火把留在身后。粒子按真实时间推进，
+  // 所以放下之后交给游戏循环跑，用轮询等，不在一次 evaluate 里同步推进。
+  const torch = await page.evaluate(
+    ({ torch }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const x = Math.floor(core.player.position.x);
+      const y = Math.floor(core.player.position.y);
+      const z = Math.floor(core.player.position.z);
+      core.setBlock(x, y, z, torch);
+      renderer.syncChunkMeshes();
+      return { x, y, z, block: core.getBlock(x, y, z) };
+    },
+    { torch: BlockType.Torch },
+  );
+  expect(torch.block).toBe(BlockType.Torch);
+
+  expect(await waitForFlameAndSmoke(page)).toBeGreaterThan(0);
+
+  const eyeToTorch = () =>
+    page.evaluate((cell) => {
+      const eye = window.__VOXEL__!.core.player.eyePosition;
+      return Math.hypot(cell.x + 0.5 - eye.x, cell.y + 0.5 - eye.y, cell.z + 0.5 - eye.z);
+    }, torch);
+  await walkUntil(page, 'forward', async () => (await eyeToTorch()) > 20, 600);
+  // 16 格外不再冒，已有的烟存活时间不超过 2.2 秒
+  await expect.poll(async () => (await readParticles(page)).total, { timeout: 10_000 }).toBe(0);
+  expect(await eyeToTorch()).toBeGreaterThan(16);
+  expect(errors).toEqual([]);
+});
+
+test('身旁的熔炉点着火：几帧后粒子读回里火焰光点与烟都大于 0；1600 tick 煤炭烧完熄火，几秒后归 0', async ({ page }) => {
+  await waitForFullViewDistance(page);
+  // 点火走熔炼状态机：放进原料与燃料、推进一 tick，不直接写燃烧中的编号。熄火同样靠烧完一件煤炭。
+  const spot = await page.evaluate(
+    ({ furnace, rawIron, coal }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const x = Math.floor(core.player.position.x) + 1;
+      const y = Math.floor(core.player.position.y);
+      const z = Math.floor(core.player.position.z);
+      core.setBlock(x, y, z, furnace);
+      const state = core.blockStateAt(x, y, z)!;
+      state.input = { item: rawIron, count: 8 };
+      state.fuel = { item: coal, count: 1 };
+      core.tick();
+      renderer.syncChunkMeshes();
+      return { x, y, z, block: core.getBlock(x, y, z) };
+    },
+    { furnace: BlockType.Furnace, rawIron: ItemType.RawIron, coal: ItemType.Coal },
+  );
+  expect(spot.block).toBe(BlockType.LitFurnace);
+
+  expect(await waitForFlameAndSmoke(page)).toBeGreaterThan(0);
+
+  const out = await page.evaluate(
+    ({ spot, coalTicks }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      core.tick(coalTicks);
+      renderer.syncChunkMeshes();
+      return core.getBlock(spot.x, spot.y, spot.z);
+    },
+    { spot, coalTicks: 1600 },
+  );
+  expect(out).toBe(BlockType.Furnace);
+  await expect.poll(async () => (await readParticles(page)).total, { timeout: 10_000 }).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('玩家周围插 50 支火把：粒子一直在冒，总数始终不超过上限', async ({ page }) => {
+  await waitForFullViewDistance(page);
+  // 10×5 的一片，间隔 2 格，全在 16 格内。每支放在那一列最高的方块之上
+  const placed = await page.evaluate(
+    ({ torch }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const px = Math.floor(core.player.position.x);
+      const pz = Math.floor(core.player.position.z);
+      let count = 0;
+      for (let i = 0; i < 10; i++) {
+        for (let k = 0; k < 5; k++) {
+          const x = px - 9 + i * 2;
+          const z = pz - 5 + k * 2;
+          const y = core.highestBlockY(x, z) + 1;
+          if (core.setBlock(x, y, z, torch)) count++;
+        }
+      }
+      renderer.syncChunkMeshes();
+      return count;
+    },
+    { torch: BlockType.Torch },
+  );
+  expect(placed).toBe(50);
+
+  // 三秒里每 100ms 读一次：烟的存活时间在 2.2 秒以内，三秒后数量已经稳定
+  const samples = await page.evaluate(async () => {
+    const { renderer } = window.__VOXEL__!;
+    const out: { total: number; limit: number }[] = [];
+    for (let i = 0; i < 30; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      out.push(renderer.particles);
+    }
+    return out;
+  });
+  const most = Math.max(...samples.map((s) => s.total));
+  expect(most).toBeGreaterThan(50);
+  for (const { total, limit } of samples) expect(total).toBeLessThanOrEqual(limit);
+  expect(errors).toEqual([]);
+});
+
 test('午夜低头看露天的地面：画面不是一片黑，仍数得出许多种颜色', async ({ page }) => {
   // 夜晚露天的折算天光是 4：比白天暗，但方块的轮廓与贴图的纹理都还在。
   const center = await page.evaluate(

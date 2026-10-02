@@ -73,11 +73,21 @@ describe('方块到贴图格号的映射表', () => {
     expect(new Set([off.top, off.side, off.front, lit.front]).size).toBe(4);
   });
 
-  it('图集是 8x8，64 格里现在用了 44 格', () => {
+  it('图集是 8x8，64 格里现在用了 46 格', () => {
     expect(ATLAS_COLS).toBe(8);
     expect(ATLAS_ROWS).toBe(8);
-    expect(Object.keys(TILE)).toHaveLength(44);
-    expect(new Set(Object.values(TILE)).size).toBe(44);
+    expect(Object.keys(TILE)).toHaveLength(46);
+    expect(new Set(Object.values(TILE)).size).toBe(46);
+  });
+
+  it('粒子的烟与火焰两格接在火把之后（#59），不是任何方块或物品的贴图', () => {
+    expect(TILE.smoke).toBe(45);
+    expect(TILE.flame).toBe(46);
+    const used = [...Object.values(BLOCK_TILES), ...Object.values(ITEM_TILES)].flatMap((tiles) =>
+      tiles ? [tiles.top, tiles.bottom, tiles.side, tiles.front] : [],
+    );
+    expect(used).not.toContain(TILE.smoke);
+    expect(used).not.toContain(TILE.flame);
   });
 
   it('腐肉接在僵尸的四张之后占一格，现有格号不变；物品六面同一张（#42）', () => {

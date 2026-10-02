@@ -378,6 +378,43 @@ describe('火把的细杆几何（#57）', () => {
   });
 });
 
+describe('网格构建顺带输出发光方块（#59）', () => {
+  it('列表含火把与燃烧中的熔炉的编号与世界坐标，熄火的熔炉与其他方块不在', () => {
+    const chunk = new Chunk(1, -2);
+    chunk.set(3, 70, 4, BlockType.Torch);
+    chunk.set(5, 71, 6, BlockType.WallTorchPosZ);
+    chunk.set(7, 72, 8, BlockType.LitFurnace);
+    chunk.set(9, 70, 10, BlockType.Furnace);
+    chunk.set(11, 70, 12, BlockType.Stone);
+    const { glowingBlocks } = buildChunkMesh(chunk, blocksOnly(() => BlockType.Air));
+    const ox = CHUNK_SIZE;
+    const oz = -2 * CHUNK_SIZE;
+    expect(glowingBlocks).toHaveLength(3);
+    expect(glowingBlocks).toEqual(
+      expect.arrayContaining([
+        { block: BlockType.Torch, x: ox + 3, y: 70, z: oz + 4 },
+        { block: BlockType.WallTorchPosZ, x: ox + 5, y: 71, z: oz + 6 },
+        { block: BlockType.LitFurnace, x: ox + 7, y: 72, z: oz + 8 },
+      ]),
+    );
+  });
+
+  it('熔炉熄火后重建，列表里就没有它了', () => {
+    const world = new World(flatTestTerrain);
+    for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 1)) world.loadChunk(cx, cz);
+    world.setBlock(2, FLAT_GROUND_Y + 1, 2, BlockType.LitFurnace);
+    expect(meshOf(fromWorld(world, 0, 0)).glowingBlocks).toEqual([
+      { block: BlockType.LitFurnace, x: 2, y: FLAT_GROUND_Y + 1, z: 2 },
+    ]);
+    world.setBlock(2, FLAT_GROUND_Y + 1, 2, BlockType.Furnace);
+    expect(meshOf(fromWorld(world, 0, 0)).glowingBlocks).toEqual([]);
+  });
+
+  it('平地上没有发光方块，列表是空的', () => {
+    expect(meshOf(uniform(BlockType.Stone)).glowingBlocks).toEqual([]);
+  });
+});
+
 describe('面到图集贴图的映射', () => {
   const x = 8;
   const y = FLAT_GROUND_Y + 4;

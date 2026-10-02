@@ -12,8 +12,10 @@ import { FLICKER_AMPLITUDE, SELF_LIT_FLICKER_DIM } from './torch-light';
  *
  * - 地形：每个顶点带两个等级（网格的 `light` 属性，见 `MeshData.light`），按平滑光照取过平均。
  * - 实体：每个对象一份材质，每帧把它所在那一格的两个等级写进 `entityLight`（`setEntityLight`）。
+ * - 粒子（#59）：一个实例化的四边形，每个粒子的两个等级是一个实例属性（`ParticlePool.lights`）。
  *
- * 两种只差一个宏，着色器源码相同，three 会复用编译好的程序；每个实体一份材质的代价只是 uniform 上传。
+ * 地形与实体只差一个宏，着色器源码相同，three 会复用编译好的程序；每个实体一份材质的代价只是 uniform 上传。
+ * 粒子另有一份顶点着色器（面朝相机），片元着色器与它们相同，只多乘一个不透明度。
  */
 
 /**
@@ -67,6 +69,38 @@ void main() {
 }
 `;
 
+/**
+ * 粒子的顶点着色器：每个实例是一个面朝相机的正方形。中心与边长、贴图的 uv 矩形、两个光照等级、
+ * 不透明度都是实例属性，排布与 `ParticlePool` 的那几条数组相同。
+ *
+ * 在相机坐标里把正方形的四个角摆开，所以总是正对着屏幕；不乘面系数（`vShade` 为 1），正对相机的一张
+ * 方片没有「哪一面朝上」。手持光按粒子中心离眼睛的距离算。
+ */
+const PARTICLE_VERTEX_SHADER = /* glsl */ `
+attribute vec3 instanceOffset;
+attribute float instanceSize;
+attribute vec4 instanceUv;
+attribute vec2 instanceLight;
+attribute float instanceAlpha;
+
+varying vec2 vUv;
+varying vec2 vLight;
+varying float vShade;
+varying vec3 vWorldPosition;
+varying float vAlpha;
+
+void main() {
+  vUv = mix(instanceUv.xy, instanceUv.zw, uv);
+  vLight = instanceLight;
+  vShade = 1.0;
+  vAlpha = instanceAlpha;
+  vWorldPosition = instanceOffset;
+  vec4 view = viewMatrix * vec4(instanceOffset, 1.0);
+  view.xy += position.xy * instanceSize;
+  gl_Position = projectionMatrix * view;
+}
+`;
+
 const FRAGMENT_SHADER = /* glsl */ `
 uniform sampler2D map;
 uniform float alphaTest;
@@ -80,6 +114,9 @@ varying vec2 vUv;
 varying vec2 vLight;
 varying float vShade;
 varying vec3 vWorldPosition;
+#ifdef PARTICLE
+varying float vAlpha;
+#endif
 
 // 与 shading.ts 的 brightnessAt 同一个算法：在表的相邻两项之间线性插值。
 float brightness(float level) {
@@ -107,7 +144,12 @@ void main() {
   // 画面上的值，乘完再换回线性。不能用 2.2 次方近似成线性空间里的一个乘数：sRGB 在接近黑的那一段是线性的，
   // 近似会把暗处的贴图再压暗一截，0 级看不出轮廓。
   vec3 display = sRGBTransferOETF(vec4(texel.rgb, 1.0)).rgb * (selfLit ? selfLitShade : brightness(level) * vShade);
-  gl_FragColor = vec4(sRGBTransferEOTF(vec4(display, 1.0)).rgb * tint, 1.0);
+#ifdef PARTICLE
+  float alpha = vAlpha;
+#else
+  float alpha = 1.0;
+#endif
+  gl_FragColor = vec4(sRGBTransferEOTF(vec4(display, 1.0)).rgb * tint, alpha);
   #include <colorspace_fragment>
 }
 `;
@@ -115,10 +157,13 @@ void main() {
 /** 树叶、平面图标的镂空：透明度低于它的像素丢掉，不做半透明排序。 */
 const ALPHA_TEST = 0.5;
 
+/** 三种画法：地形（顶点带光照）、实体（光照是 uniform）、粒子（光照与样子都是实例属性）。 */
+type LightSource = 'vertex' | 'entity' | 'particle';
+
 function lightMaterial(
   texture: THREE.Texture,
   frame: FrameLighting,
-  vertexLight: boolean,
+  source: LightSource,
   side: THREE.Side,
 ): THREE.ShaderMaterial {
   const defines: Record<string, string> = {
@@ -130,9 +175,10 @@ function lightMaterial(
     SELF_LIT_FLICKER_DIM: glslFloat(SELF_LIT_FLICKER_DIM),
     FLICKER_AMPLITUDE: glslFloat(FLICKER_AMPLITUDE),
   };
-  if (vertexLight) defines.VERTEX_LIGHT = '';
+  if (source === 'vertex') defines.VERTEX_LIGHT = '';
+  if (source === 'particle') defines.PARTICLE = '';
   return new THREE.ShaderMaterial({
-    vertexShader: VERTEX_SHADER,
+    vertexShader: source === 'particle' ? PARTICLE_VERTEX_SHADER : VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
     defines,
     uniforms: {
@@ -148,12 +194,16 @@ function lightMaterial(
     },
     alphaTest: ALPHA_TEST,
     side,
+    // 粒子按不透明度混合（烟会变淡），排在不透明的东西之后画。不写深度：变淡的烟写了深度，之后画的
+    // 东西落在它后面的部分整片被挡掉；粒子之间的前后靠绘制顺序（`ParticlePool.sortBackToFront`）
+    transparent: source === 'particle',
+    depthWrite: source !== 'particle',
   });
 }
 
 /** 地形的材质：两个等级从顶点属性 `light` 来。所有区块共用一份。 */
 export function terrainMaterial(texture: THREE.Texture, frame: FrameLighting): THREE.ShaderMaterial {
-  return lightMaterial(texture, frame, true, THREE.FrontSide);
+  return lightMaterial(texture, frame, 'vertex', THREE.FrontSide);
 }
 
 /**
@@ -165,7 +215,15 @@ export function entityMaterial(
   frame: FrameLighting,
   side: THREE.Side = THREE.FrontSide,
 ): THREE.ShaderMaterial {
-  return lightMaterial(texture, frame, false, side);
+  return lightMaterial(texture, frame, 'entity', side);
+}
+
+/**
+ * 粒子的材质（#59）：所有粒子共用一份，画在一个实例化的四边形上。贴图透明的像素照样按 alphaTest 丢掉，
+ * 留下的部分再乘每个粒子的不透明度。
+ */
+export function particleMaterial(texture: THREE.Texture, frame: FrameLighting): THREE.ShaderMaterial {
+  return lightMaterial(texture, frame, 'particle', THREE.FrontSide);
 }
 
 /** 实体这一帧所在那一格的两个等级。 */

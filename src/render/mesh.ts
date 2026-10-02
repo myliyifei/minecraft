@@ -7,7 +7,10 @@ import {
   WORLD_MAX_Y,
   WORLD_MIN_Y,
 } from '../core/constants';
-import { BLOCK_TILES, faceTile, tileAtUv, tileUvRect, type Face } from './atlas';
+import { BLOCK_TILES, faceTile, tileAtUv, tileUvRect, type FaceTiles } from './atlas';
+import { CUBE_FACES, type FaceSpec } from './cube-faces';
+import { SELF_LIT_BLOCK_LIGHT } from './shading';
+import { torchModel } from './torch-model';
 
 /**
  * 一个区块的网格数据。纯 TypedArray，不含任何 three.js 类型——
@@ -34,133 +37,17 @@ export interface MeshView extends BlockView {
   blockLightAt(x: number, y: number, z: number): number;
 }
 
-/** 单位立方体内的一个点，或一个轴向方向。 */
-type Point3 = readonly [number, number, number];
-
-/** 一对归一化 uv 坐标。 */
-type Uv = readonly [number, number];
-
-interface FaceSpec {
-  /** 邻居方向，同时是这个面的法线。 */
-  readonly normal: Point3;
-  /** 面的四个角（单位立方体内），从外部看是逆时针。 */
-  readonly corners: readonly [Point3, Point3, Point3, Point3];
-  /** 四个角对应的 uv 归一化坐标，v 向上。 */
-  readonly uv: readonly [Uv, Uv, Uv, Uv];
-  /** 取方块的哪一张贴图。正面（`front`）贴在 −X 与 −Z 两面，没有正面贴图的方块落回侧面。 */
-  readonly face: Face;
-}
-
-const FACES: readonly FaceSpec[] = [
-  {
-    normal: [1, 0, 0],
-    corners: [
-      [1, 0, 0],
-      [1, 1, 0],
-      [1, 1, 1],
-      [1, 0, 1],
-    ],
-    uv: [
-      [0, 0],
-      [0, 1],
-      [1, 1],
-      [1, 0],
-    ],
-    face: 'side',
-  },
-  {
-    normal: [-1, 0, 0],
-    corners: [
-      [0, 0, 0],
-      [0, 0, 1],
-      [0, 1, 1],
-      [0, 1, 0],
-    ],
-    uv: [
-      [0, 0],
-      [1, 0],
-      [1, 1],
-      [0, 1],
-    ],
-    face: 'front',
-  },
-  {
-    normal: [0, 1, 0],
-    corners: [
-      [0, 1, 0],
-      [0, 1, 1],
-      [1, 1, 1],
-      [1, 1, 0],
-    ],
-    uv: [
-      [0, 0],
-      [0, 1],
-      [1, 1],
-      [1, 0],
-    ],
-    face: 'top',
-  },
-  {
-    normal: [0, -1, 0],
-    corners: [
-      [0, 0, 0],
-      [1, 0, 0],
-      [1, 0, 1],
-      [0, 0, 1],
-    ],
-    uv: [
-      [0, 0],
-      [1, 0],
-      [1, 1],
-      [0, 1],
-    ],
-    face: 'bottom',
-  },
-  {
-    normal: [0, 0, 1],
-    corners: [
-      [0, 0, 1],
-      [1, 0, 1],
-      [1, 1, 1],
-      [0, 1, 1],
-    ],
-    uv: [
-      [0, 0],
-      [1, 0],
-      [1, 1],
-      [0, 1],
-    ],
-    face: 'side',
-  },
-  {
-    normal: [0, 0, -1],
-    corners: [
-      [0, 0, 0],
-      [0, 1, 0],
-      [1, 1, 0],
-      [1, 0, 0],
-    ],
-    uv: [
-      [0, 0],
-      [0, 1],
-      [1, 1],
-      [1, 0],
-    ],
-    face: 'front',
-  },
-];
-
 /** 六个面的法线分量，摊成三条扁平数组：内层循环里取分量不必解构对象。 */
-const FACE_DX = Int8Array.from(FACES, (spec) => spec.normal[0]);
-const FACE_DY = Int8Array.from(FACES, (spec) => spec.normal[1]);
-const FACE_DZ = Int8Array.from(FACES, (spec) => spec.normal[2]);
+const FACE_DX = Int8Array.from(CUBE_FACES, (spec) => spec.normal[0]);
+const FACE_DY = Int8Array.from(CUBE_FACES, (spec) => spec.normal[1]);
+const FACE_DZ = Int8Array.from(CUBE_FACES, (spec) => spec.normal[2]);
 
 /**
- * 邻居方块在区块数据里的下标偏移，与 FACES 一一对应。
+ * 邻居方块在区块数据里的下标偏移，与 CUBE_FACES 一一对应。
  * 区块内的邻居因此是一次加法，不必重算下标——见 `blockIndex` 的排布约定。
  */
 const FACE_OFFSETS = Int32Array.from(
-  FACES,
+  CUBE_FACES,
   (spec) => spec.normal[1] * CHUNK_AREA + spec.normal[2] * CHUNK_SIZE + spec.normal[0],
 );
 
@@ -170,7 +57,7 @@ const FACE_OFFSETS = Int32Array.from(
  * 4 格都在这一面外侧那一层（方块加上法线），是那一层里围着这个角的 2×2：沿这一面的两条边各往角
  * 那一侧走 0 或 1 格。角坐标是 1 的那条轴往 +1 走，是 0 的往 −1 走。
  */
-const CORNER_SAMPLES = FACES.map((spec) => {
+const CORNER_SAMPLES = CUBE_FACES.map((spec) => {
   const offsets: number[] = [];
   for (const corner of spec.corners) {
     const toward = corner.map((c) => (c === 1 ? 1 : -1));
@@ -253,6 +140,21 @@ export function buildChunkMesh(chunk: ChunkView, view: MeshView): MeshData {
     return (view.skyLightAt(x, y, z) << SKY_LIGHT_SHIFT) | view.blockLightAt(x, y, z);
   };
 
+  /** 区块局部坐标那一格的一个面：位置、法线、uv 与两个三角形。光照由调用处按顶点顺序补上。 */
+  const pushQuad = (spec: FaceSpec, lx: number, y: number, lz: number, tiles: FaceTiles): void => {
+    const base = positions.length / 3;
+    const rect = tileUvRect(faceTile(tiles, spec.face));
+    const [nx, ny, nz] = spec.normal;
+    for (let v = 0; v < 4; v++) {
+      const [ox, oy, oz] = spec.corners[v]!;
+      positions.push(lx + ox, y + oy, lz + oz);
+      normals.push(nx, ny, nz);
+      const [du, dv] = spec.uv[v]!;
+      uvs.push(rect.u0 + du * (rect.u1 - rect.u0), rect.v0 + dv * (rect.v1 - rect.v0));
+    }
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+
   for (let y = WORLD_MIN_Y; y <= WORLD_MAX_Y; y++) {
     for (let lz = 0; lz < CHUNK_SIZE; lz++) {
       // 一行 16 格在数据里是连着的，下标随 lx 递增即可。
@@ -263,7 +165,18 @@ export function buildChunkMesh(chunk: ChunkView, view: MeshView): MeshData {
         const tiles = BLOCK_TILES[block];
         if (!tiles) continue;
 
-        for (let f = 0; f < FACES.length; f++) {
+        // 火把不走六面剔除：细杆碰不到邻格，五个面总要画。两个等级写满，方块光那一项同时是着色器认的
+        // 标记（`SELF_LIT_BLOCK_LIGHT`）：火把本身不吃光照，按贴图本色画。
+        const model = torchModel(block);
+        if (model) {
+          for (const spec of model) {
+            pushQuad(spec, lx, y, lz, tiles);
+            for (let v = 0; v < 4; v++) lights.push(MAX_LIGHT_LEVEL, SELF_LIT_BLOCK_LIGHT);
+          }
+          continue;
+        }
+
+        for (let f = 0; f < CUBE_FACES.length; f++) {
           const dy = FACE_DY[f]!;
           const ny = y + dy;
           // 世界底面之下永远看不见，省掉每个区块 256 个无用面。
@@ -286,9 +199,7 @@ export function buildChunkMesh(chunk: ChunkView, view: MeshView): MeshData {
           // 留着只会 z-fighting、还让树冠内部的几何翻倍。整片树叶因此只保留最外层的面。
           if (neighbor === block) continue;
 
-          const spec = FACES[f]!;
-          const base = positions.length / 3;
-          const rect = tileUvRect(faceTile(tiles, spec.face));
+          pushQuad(CUBE_FACES[f]!, lx, y, lz, tiles);
           const samples = CORNER_SAMPLES[f]!;
           for (let v = 0; v < 4; v++) {
             let sky = 0;
@@ -299,16 +210,7 @@ export function buildChunkMesh(chunk: ChunkView, view: MeshView): MeshData {
               blockLight += s & BLOCK_LIGHT_MASK;
             }
             lights.push(sky / 4, blockLight / 4);
-            const [ox, oy, oz] = spec.corners[v]!;
-            positions.push(lx + ox, y + oy, lz + oz);
-            normals.push(FACE_DX[f]!, dy, FACE_DZ[f]!);
-            const [du, dv] = spec.uv[v]!;
-            uvs.push(
-              rect.u0 + du * (rect.u1 - rect.u0),
-              rect.v0 + dv * (rect.v1 - rect.v0),
-            );
           }
-          indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
         }
       }
     }

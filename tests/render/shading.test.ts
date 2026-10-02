@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_LIGHT_LEVEL } from '../../src/core/constants';
-import { BRIGHTNESS_CURVE, FACE_SHADE, brightnessAt } from '../../src/render/shading';
+import { BLOCKS } from '../../src/core/block';
+import { BRIGHTNESS_CURVE, FACE_SHADE, SELF_LIT_BLOCK_LIGHT, brightnessAt } from '../../src/render/shading';
 
 describe('等级到亮度的曲线', () => {
   it('15 处是 1；0 处是一个大于 0 的最低值，看得出轮廓', () => {
@@ -40,5 +41,14 @@ describe('各面的明暗系数', () => {
     expect(FACE_SHADE.side).toBeLessThan(FACE_SHADE.top);
     expect(FACE_SHADE.bottom).toBeLessThan(FACE_SHADE.side);
     expect(FACE_SHADE.bottom).toBeGreaterThan(0);
+  });
+});
+
+describe('火把本身不吃光照（ADR-0016）', () => {
+  it('标记用的方块光等级高于任何方块的发光等级：光照传播与平滑光照的平均都到不了它', () => {
+    for (const [block, def] of Object.entries(BLOCKS)) {
+      expect(def.lightEmission, `方块 ${block}`).toBeLessThan(SELF_LIT_BLOCK_LIGHT);
+    }
+    expect(SELF_LIT_BLOCK_LIGHT).toBe(MAX_LIGHT_LEVEL);
   });
 });

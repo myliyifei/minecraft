@@ -1,8 +1,9 @@
 import { BlockType, placedBlock } from '../core/block';
+import { isTorch } from '../core/torch';
 import { ItemType } from '../core/item';
 
 /**
- * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 8 行，目前用了前 44 格。
+ * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 8 行，目前用了前 45 格里的 44 格（第 43 格不用）。
  *
  * 行列数都取 2 的幂：uv 是格号除以行列数，除以 8 在 float32 里是精确的，除以 5 就不是
  * ——顶点属性存的是 Float32Array，1/5 一进去就带上舍入误差，一个面的边缘会取到相邻那一格的像素。
@@ -65,8 +66,9 @@ export const TILE = {
   woodenSword: 40,
   stoneSword: 41,
   ironSword: 42,
-  // 火把（#56）：一根细木杆，顶端一团火。#57 换成细杆几何之前，方块也暂按整格立方体贴这一格。
-  torch: 43,
+  // 火把（#57）：居中一根两像素宽、十像素高的木杆，顶端两行是火——细杆几何（`torch-model.ts`）的侧面与
+  // 顶面只取这一竖条，手持与格子里的平面图标是整格。第 43 格不用：那是 #56 的临时贴图，火焰画在细杆之外。
+  torch: 44,
 } as const;
 
 /**
@@ -225,9 +227,11 @@ export type HeldItemShape = (typeof HeldItemShape)[keyof typeof HeldItemShape];
  *
  * 看的是放置表：放得下去的物品就是方块，画立方体；放不下去的（木棍、工具、将来的食物）
  * 没有「六个面」可画，画图标。不另开一张表——「是不是方块物品」这件事放置表已经记了。
+ * 火把放得下去，但它的方块是一根细杆，同样没有六个面，画图标（#57）。
  */
 export function heldItemShape(item: ItemType): HeldItemShape {
-  return placedBlock(item) === null ? HeldItemShape.Flat : HeldItemShape.Cube;
+  const block = placedBlock(item);
+  return block === null || isTorch(block) ? HeldItemShape.Flat : HeldItemShape.Cube;
 }
 
 export interface UvRect {

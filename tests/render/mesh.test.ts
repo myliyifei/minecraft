@@ -13,6 +13,8 @@ import { chunkOf, chunksAround, ORIGIN_CHUNK, World } from '../../src/core/world
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 import { tileUvRect, TILE } from '../../src/render/atlas';
 import { buildChunkMesh, meshTiles, type MeshData, type MeshView } from '../../src/render/mesh';
+import { torchHitbox } from '../../src/core/torch';
+import { SELF_LIT_BLOCK_LIGHT } from '../../src/render/shading';
 
 /**
  * 待生成网格的区块，配一个「区块之外」的视图。
@@ -214,6 +216,165 @@ describe('不遮挡视线的方块与邻居', () => {
     );
     // 树叶朝石头那面被剔除（5 面），石头朝树叶那面保留（6 面）
     expect(faceCount(mesh)).toBe(11);
+  });
+});
+
+describe('火把的细杆几何（#57）', () => {
+  const x = 8;
+  const y = FLAT_GROUND_Y + 1;
+  const z = 8;
+
+  it('一支地面火把输出 5 个面——四个侧面与顶面，没有底面，也不是整格立方体', () => {
+    const mesh = meshOf(sparse([[x, y, z, BlockType.Torch]]));
+    expect(faceCount(mesh)).toBe(5);
+    expect(mesh.positions).toHaveLength(5 * 4 * 3);
+    expect(mesh.light).toHaveLength(5 * 4 * 2);
+    expect(mesh.indices).toHaveLength(5 * 6);
+    expect(new Set(faceNormals(mesh).map((n) => n.join(',')))).toEqual(
+      new Set(['1,0,0', '-1,0,0', '0,1,0', '0,0,1', '0,0,-1']),
+    );
+    // 细杆截面 2/16、高 10/16，以格中心为轴立在格底
+    for (let i = 0; i < mesh.positions.length; i += 3) {
+      expect(mesh.positions[i]).toBeCloseTo(x + 0.5 + (mesh.positions[i]! > x + 0.5 ? 1 : -1) / 16);
+      expect(mesh.positions[i + 1]).toBeGreaterThanOrEqual(y);
+      expect(mesh.positions[i + 1]).toBeLessThanOrEqual(y + 10 / 16 + 1e-6);
+      expect(mesh.positions[i + 2]).toBeCloseTo(z + 0.5 + (mesh.positions[i + 2]! > z + 0.5 ? 1 : -1) / 16);
+    }
+  });
+
+  /** 网格全部顶点的平均位置，相对火把那一格的最小角。 */
+  function centroid(mesh: MeshData): [number, number, number] {
+    const sum = [0, 0, 0];
+    for (let i = 0; i < mesh.positions.length; i++) sum[i % 3]! += mesh.positions[i]!;
+    const n = mesh.positions.length / 3;
+    return [sum[0]! / n - x, sum[1]! / n - y, sum[2]! / n - z];
+  }
+
+  it('地面火把居中；四个墙上编号各自偏向贴着的那面墙，另一条水平轴仍在格中心', () => {
+    const [gx, , gz] = centroid(meshOf(sparse([[x, y, z, BlockType.Torch]])));
+    expect(gx).toBeCloseTo(0.5);
+    expect(gz).toBeCloseTo(0.5);
+    // [编号, 墙在哪条轴上, 墙在那条轴的哪一头]
+    const walls: Array<[BlockType, 0 | 2, -1 | 1]> = [
+      [BlockType.WallTorchNegX, 0, -1],
+      [BlockType.WallTorchPosX, 0, 1],
+      [BlockType.WallTorchNegZ, 2, -1],
+      [BlockType.WallTorchPosZ, 2, 1],
+    ];
+    for (const [block, axis, side] of walls) {
+      const center = centroid(meshOf(sparse([[x, y, z, block]])));
+      // 偏向墙那一侧至少四分之一格，但不越出这一格
+      expect((center[axis]! - 0.5) * side, `编号 ${block}`).toBeGreaterThan(0.25);
+      expect((center[axis]! - 0.5) * side, `编号 ${block}`).toBeLessThan(0.5);
+      expect(center[2 - axis]!, `编号 ${block}`).toBeCloseTo(0.5);
+    }
+  });
+
+  it('墙上火把是斜的：顶端离墙比底部远，底部贴着墙，整根比地面火把抬高', () => {
+    const mesh = meshOf(sparse([[x, y, z, BlockType.WallTorchNegX]]));
+    let bottomX = Infinity;
+    let topX = -Infinity;
+    let lowest = Infinity;
+    for (let i = 0; i < mesh.positions.length; i += 3) {
+      const px = mesh.positions[i]! - x;
+      const py = mesh.positions[i + 1]! - y;
+      lowest = Math.min(lowest, py);
+      if (py < 0.25) bottomX = Math.min(bottomX, px);
+      if (py > 0.7) topX = Math.max(topX, px);
+      // 每个顶点都在这一格里
+      expect(px).toBeGreaterThanOrEqual(0);
+      expect(px).toBeLessThanOrEqual(1);
+    }
+    expect(bottomX).toBeLessThan(1 / 16);
+    expect(topX).toBeGreaterThan(0.25);
+    expect(lowest).toBeGreaterThan(0.1);
+  });
+
+  it('墙上火把的几何正好装进视线用的盒子（torchHitbox），选框套住的就是画出来的整根斜杆', () => {
+    for (const block of [
+      BlockType.WallTorchNegX,
+      BlockType.WallTorchPosX,
+      BlockType.WallTorchNegZ,
+      BlockType.WallTorchPosZ,
+    ]) {
+      const mesh = meshOf(sparse([[x, y, z, block]]));
+      const min = [Infinity, Infinity, Infinity];
+      const max = [-Infinity, -Infinity, -Infinity];
+      for (let i = 0; i < mesh.positions.length; i++) {
+        min[i % 3] = Math.min(min[i % 3]!, mesh.positions[i]!);
+        max[i % 3] = Math.max(max[i % 3]!, mesh.positions[i]!);
+      }
+      // 顶点存在 Float32Array 里，y 在 70 左右时只有五六位小数是准的
+      const box = torchHitbox(block, x, y, z)!;
+      expect(min[0], `编号 ${block}`).toBeCloseTo(box.min.x, 5);
+      expect(min[1], `编号 ${block}`).toBeCloseTo(box.min.y, 5);
+      expect(min[2], `编号 ${block}`).toBeCloseTo(box.min.z, 5);
+      expect(max[0], `编号 ${block}`).toBeCloseTo(box.max.x, 5);
+      expect(max[1], `编号 ${block}`).toBeCloseTo(box.max.y, 5);
+      expect(max[2], `编号 ${block}`).toBeCloseTo(box.max.z, 5);
+    }
+  });
+
+  it('火把顶点的天光与方块光都是 15，夜里洞中也一样', () => {
+    // 区块外一律读作 0 的视图里，四周没有任何光源
+    for (const block of [BlockType.Torch, BlockType.WallTorchPosZ]) {
+      const mesh = meshOf(sparse([[x, y, z, block]]));
+      expect([...new Set(mesh.light)], `编号 ${block}`).toEqual([15]);
+    }
+  });
+
+  it('只有火把自己的顶点带标记的方块光：贴着它的石头，最亮的角也低于这个等级', () => {
+    // 真实光照：世界里放一支火把，石头的面按平滑光照取到它那一格的 14
+    const world = new World(flatTestTerrain);
+    for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 1)) world.loadChunk(cx, cz);
+    world.setBlock(x, FLAT_GROUND_Y + 1, z, BlockType.Stone);
+    world.setBlock(x + 1, FLAT_GROUND_Y + 1, z, BlockType.WallTorchNegX);
+    const mesh = meshOf(fromWorld(world, 0, 0));
+    let torchVertices = 0;
+    let brightestOther = 0;
+    for (let v = 0; v < mesh.positions.length / 3; v++) {
+      const blockLight = mesh.light[v * 2 + 1]!;
+      if (blockLight === SELF_LIT_BLOCK_LIGHT) torchVertices++;
+      else brightestOther = Math.max(brightestOther, blockLight);
+    }
+    expect(torchVertices).toBe(5 * 4);
+    expect(brightestOther).toBeGreaterThan(10);
+    expect(brightestOther).toBeLessThan(SELF_LIT_BLOCK_LIGHT);
+  });
+
+  it('火把不剔除邻格的面：贴着的石头朝火把那一面照常生成', () => {
+    // 石头在下、火把立在它上面；另一块石头在西边、墙上火把贴着它
+    const ground = meshOf(sparse([[x, y - 1, z, BlockType.Stone], [x, y, z, BlockType.Torch]]));
+    expect(faceCount(ground)).toBe(6 + 5);
+    const wall = meshOf(sparse([[x - 1, y, z, BlockType.Stone], [x, y, z, BlockType.WallTorchNegX]]));
+    expect(faceCount(wall)).toBe(6 + 5);
+    // 石头的 +X 面落在 x 那个平面上，正对着火把
+    const normals = faceNormals(wall);
+    const stoneFace = faceCenters(wall).filter(([cx], f) => normals[f]![0] === 1 && cx === x);
+    expect(stoneFace).toEqual([[x, y + 0.5, z + 0.5]]);
+  });
+
+  it('火把贴的是火把那一格；侧面取那一格居中的竖条，顶面取竖条最上面一块', () => {
+    const mesh = meshOf(sparse([[x, y, z, BlockType.Torch]]));
+    expect([...meshTiles(mesh.uvs)]).toEqual([TILE.torch]);
+    const rect = tileUvRect(TILE.torch);
+    const px = (rect.u1 - rect.u0) / 16;
+    const normals = faceNormals(mesh);
+    for (let f = 0; f < normals.length; f++) {
+      const us: number[] = [];
+      const vs: number[] = [];
+      for (let v = 0; v < 4; v++) {
+        us.push(mesh.uvs[f * 8 + v * 2]!);
+        vs.push(mesh.uvs[f * 8 + v * 2 + 1]!);
+      }
+      // 第 7、8 两列像素
+      expect(Math.min(...us)).toBeCloseTo(rect.u0 + 7 * px);
+      expect(Math.max(...us)).toBeCloseTo(rect.u0 + 9 * px);
+      // 侧面从格底（第 15 行）到第 6 行，顶面是第 6、7 两行
+      const top = normals[f]![1] === 1;
+      expect(Math.min(...vs)).toBeCloseTo(rect.v0 + (top ? 8 : 0) * px);
+      expect(Math.max(...vs)).toBeCloseTo(rect.v0 + 10 * px);
+    }
   });
 });
 

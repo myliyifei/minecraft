@@ -17,6 +17,7 @@ import {
   heldItemShape,
   itemCubeUvs,
   itemIconUvs,
+  tileQuadUvs,
   tileAtUv,
   tileCell,
   tileUvRect,
@@ -315,6 +316,12 @@ describe('手持物品画立方体还是平面图标', () => {
       expect(heldItemShape(item), `物品 ${item}`).toBe(HeldItemShape.Flat);
     }
   });
+
+  it('火把放得下去，但它的方块是一根细杆不是整格：手持画平面图标，与格子里同一张（#57）', () => {
+    expect(heldItemShape(ItemType.Torch)).toBe(HeldItemShape.Flat);
+    expect(itemIconUvs(ItemType.Torch)).toEqual(tileQuadUvs(ITEM_TILES[ItemType.Torch].side));
+    expect(ITEM_TILES[ItemType.Torch].side).toBe(TILE.torch);
+  });
 });
 
 describe('手持平面图标的 uv', () => {
@@ -396,6 +403,13 @@ describe('图集与生成脚本、PNG 文件保持同步', () => {
     );
     for (const [name, tile] of Object.entries(TILE)) {
       expect(painted.has(tile), `gen-atlas.mjs 没画 ${name}（格号 ${tile}）`).toBe(true);
+    }
+  });
+
+  it('生成脚本画的每一格都在 TILE 表里：换掉的贴图不会留在图集里', () => {
+    const tiles = new Set<number>(Object.values(TILE));
+    for (const match of source.matchAll(/^ {2}(\d+): /gm)) {
+      expect(tiles.has(Number(match[1])), `gen-atlas.mjs 画了 TILE 表里没有的格号 ${match[1]}`).toBe(true);
     }
   });
 

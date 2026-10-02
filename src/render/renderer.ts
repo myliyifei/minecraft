@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { DEBUG_BUILD } from '../build-flags';
 import type { GameCore } from '../core/game';
+import type { Hitbox } from '../core/physics';
 import { CHUNK_SIZE } from '../core/constants';
 import { DROP_SIZE } from '../core/drop';
 import type { ItemType } from '../core/item';
@@ -41,6 +42,7 @@ import {
 } from './light-material';
 import { buildChunkMesh, meshTiles, type MeshData } from './mesh';
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes } from './mesh-plan';
+import { selectionBounds } from './selection';
 import {
   ZombiePart,
   createZombieModel,
@@ -86,12 +88,15 @@ const HELD_ICON_SIZE = 0.52;
 const HELD_ITEM_TILT = { x: 0.32, y: -0.72, z: 0.12 } as const;
 
 /**
- * 选框与裂纹这两个方块外壳比方块本身大一点（方块）。
+ * 裂纹的外壳比方块本身大一点（方块），选框按同样的量放大（`SELECTION_PAD`）。
  *
  * 正好等于 1 会与方块表面共面，深度测试分不出前后，画面上就是一片闪烁的斑点。
  * 放大这么一点，两者就都稳稳地浮在表面外侧，而这个量在屏幕上看不出来。
  */
 const BLOCK_SHELL = 1.004;
+
+/** 选框每条边比它套住的范围长出多少：与整格的外壳同一个量，套火把细杆时也不与杆面共面。 */
+const SELECTION_PAD = BLOCK_SHELL - 1;
 
 /**
  * 连锁预览轮廓的外壳（方块）：比选框那一层再往外一点。
@@ -157,6 +162,11 @@ export interface WorldRendererOptions {
 export interface SelectionView {
   /** 选框套在哪个方块上（方块坐标），没有目标时 undefined。 */
   readonly target?: Vec3;
+  /**
+   * 选框套住的范围（世界坐标，不含浮在表面外的那一点余量），没有目标时 undefined。整格方块是那一格，
+   * 火把是细杆（`selectionBounds`）。
+   */
+  readonly bounds?: Hitbox;
   /** 裂纹阶（0 到 CRACK_STAGES−1），没画裂纹时 undefined。 */
   readonly crackStage?: number;
   /** 选框线的颜色。端到端测试拿它与连锁预览的颜色比，验两者在画面上分得开。 */
@@ -398,8 +408,9 @@ export class WorldRenderer {
       transparent: true,
       opacity: 0.55,
     });
+    // 选框是边长 1 的线框，每帧按套住的范围缩放：整格方块与火把细杆共用一个对象。
     this.selectionBox = new THREE.LineSegments(
-      new THREE.EdgesGeometry(shell),
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
       this.selectionMaterial,
     );
     this.selectionBox.visible = false;
@@ -476,8 +487,14 @@ export class WorldRenderer {
   get selection(): SelectionView {
     const color = this.selectionMaterial.color.getHex();
     if (!this.selectionBox.visible) return { color };
+    const { position, scale } = this.selectionBox;
+    const half = scale.clone().subScalar(SELECTION_PAD).multiplyScalar(0.5);
+    const min = position.clone().sub(half);
+    const max = position.clone().add(half);
     return {
-      target: blockOf(this.selectionBox.position),
+      // 套住的范围总在目标那一格里，它的中心取整就是那一格
+      target: { x: Math.floor(position.x), y: Math.floor(position.y), z: Math.floor(position.z) },
+      bounds: { min: { x: min.x, y: min.y, z: min.z }, max: { x: max.x, y: max.y, z: max.z } },
       crackStage: this.crackBox.visible
         ? Math.round(this.crackTexture.offset.x * CRACK_STAGES)
         : undefined,
@@ -884,13 +901,25 @@ export class WorldRenderer {
     this.crackBox.visible = false;
     if (!target) return;
 
-    // 方块坐标是它的最小角，两个外壳都以自己的中心为原点。
-    this.selectionBox.position.set(target.x + 0.5, target.y + 0.5, target.z + 0.5);
+    // 选框以自己的中心为原点，套住的范围由方块决定：火把只套细杆。
+    const { min, max } = selectionBounds(
+      this.core.getBlock(target.x, target.y, target.z),
+      target.x,
+      target.y,
+      target.z,
+    );
+    this.selectionBox.position.set((min.x + max.x) / 2, (min.y + max.y) / 2, (min.z + max.z) / 2);
+    this.selectionBox.scale.set(
+      max.x - min.x + SELECTION_PAD,
+      max.y - min.y + SELECTION_PAD,
+      max.z - min.z + SELECTION_PAD,
+    );
     const stage = crackStage(progress);
     if (stage === undefined) return;
 
+    // 裂纹贴在整格外壳上，以那一格的中心为原点。火把按下即碎，出不了裂纹。
     this.crackTexture.offset.x = stage / CRACK_STAGES;
-    this.crackBox.position.copy(this.selectionBox.position);
+    this.crackBox.position.set(target.x + 0.5, target.y + 0.5, target.z + 0.5);
     this.crackBox.visible = true;
   }
 
@@ -959,8 +988,8 @@ function lerp(from: number, to: number, alpha: number): number {
 }
 
 /**
- * 一个方块外壳摆在哪一格：外壳以方块中心为原点，而方块坐标是它的最小角。
- * 选框与连锁预览共用这一步换算，两边不会各减一次 0.5。
+ * 一个方块外壳摆在哪一格：外壳以方块中心为原点，而方块坐标是它的最小角。连锁预览的轮廓用它；
+ * 选框套的可能是火把细杆，中心不在格中心，按中心取整（`selection`）。
  */
 function blockOf(position: THREE.Vector3): Vec3 {
   return { x: position.x - 0.5, y: position.y - 0.5, z: position.z - 0.5 };

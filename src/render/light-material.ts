@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { MAX_LIGHT_LEVEL } from '../core/constants';
-import { BRIGHTNESS_CURVE, FACE_SHADE } from './shading';
+import { BRIGHTNESS_CURVE, FACE_SHADE, SELF_LIT_BLOCK_LIGHT } from './shading';
 
 /**
  * 按光照等级画的着色器材质（ADR-0016）：地形、僵尸、掉落物与手持物品共用一份着色器，场景里没有灯。
  *
  * 一处的亮度 = max(折算天光, 方块光 + 闪烁, 手持光 + 闪烁) 经 `BRIGHTNESS_CURVE` 映射，再乘上这一面的
- * 系数（`FACE_SHADE`）。天光与方块光的来源有两种：
+ * 系数（`FACE_SHADE`）。火把自己的顶点例外，按贴图本色画（`SELF_LIT_BLOCK_LIGHT`）。天光与方块光的来源有两种：
  *
  * - 地形：每个顶点带两个等级（网格的 `light` 属性，见 `MeshData.light`），按平滑光照取过平均。
  * - 实体：每个对象一份材质，每帧把它所在那一格的两个等级写进 `entityLight`（`setEntityLight`）。
@@ -92,12 +92,15 @@ void main() {
 #ifdef USE_ALPHATEST
   if (texel.a < alphaTest) discard;
 #endif
+  // 火把自己的顶点（方块光是 SELF_LIT_BLOCK_LIGHT）不吃光照：按贴图本色画，不乘曲线也不乘面系数。
+  // 一个面四个顶点同为这个值，插值后不变；留半级余量防插值的舍入。
+  bool selfLit = vLight.y > SELF_LIT_BLOCK_LIGHT - 0.5;
   float held = max(0.0, heldLight - distance(vWorldPosition, cameraPosition));
   float level = max(max(vLight.x - skyDarkening, 0.0), max(vLight.y, held) + flicker);
   // 曲线与系数给的是画面上的亮度（乘在 sRGB 颜色上），贴图采样出来却是线性的：按 sRGB 的传递函数换回
   // 画面上的值，乘完再换回线性。不能用 2.2 次方近似成线性空间里的一个乘数：sRGB 在接近黑的那一段是线性的，
   // 近似会把暗处的贴图再压暗一截，0 级看不出轮廓。
-  vec3 display = sRGBTransferOETF(vec4(texel.rgb, 1.0)).rgb * (brightness(level) * vShade);
+  vec3 display = sRGBTransferOETF(vec4(texel.rgb, 1.0)).rgb * (selfLit ? 1.0 : brightness(level) * vShade);
   gl_FragColor = vec4(sRGBTransferEOTF(vec4(display, 1.0)).rgb * tint, 1.0);
   #include <colorspace_fragment>
 }
@@ -117,6 +120,7 @@ function lightMaterial(
     TOP_SHADE: glslFloat(FACE_SHADE.top),
     SIDE_SHADE: glslFloat(FACE_SHADE.side),
     BOTTOM_SHADE: glslFloat(FACE_SHADE.bottom),
+    SELF_LIT_BLOCK_LIGHT: glslFloat(SELF_LIT_BLOCK_LIGHT),
   };
   if (vertexLight) defines.VERTEX_LIGHT = '';
   return new THREE.ShaderMaterial({

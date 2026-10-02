@@ -51,3 +51,12 @@ export function brightnessAt(level: number): number {
  * 不随太阳转：太阳方向影响明暗不在本切片（#50 的范围之外）。
  */
 export const FACE_SHADE = { top: 1, side: 0.75, bottom: 0.55 } as const;
+
+/**
+ * 火把自己的顶点在网格里带的方块光（ADR-0016 补记）：着色器见到它就不乘亮度曲线、不乘面系数，按贴图本色画，
+ * 火把本身因此总是最亮，四个侧面与顶面一样亮。
+ *
+ * 用一个等级当标记而不另开顶点属性：任何方块的发光都低于 15，传到邻格只会更低，平滑光照取平均也到不了，
+ * 所以只有火把的顶点是这个值（测试守着这一条）。实体的等级读自光照数组，同样到不了。
+ */
+export const SELF_LIT_BLOCK_LIGHT = MAX_LIGHT_LEVEL;

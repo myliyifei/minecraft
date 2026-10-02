@@ -65,14 +65,21 @@ const STICK_HALF = 1 / 16;
 const STICK_HEIGHT = 10 / 16;
 /** 墙上火把的细杆比格底抬高多少：3/16。 */
 const WALL_LIFT = 3 / 16;
+/**
+ * 墙上火把往外斜的角度：22.5°（#57）。细杆以底面中心为轴，顶端往离开墙的方向倒，底部仍靠墙。
+ *
+ * 画面按这个角度画（`src/render/torch-model.ts`），视线碰的盒子也按它取外包盒（`torchHitbox`），
+ * 所以记在核心里，两边读同一个数。
+ */
+export const WALL_TORCH_TILT = Math.PI / 8;
 
 /**
- * (x, y, z) 那一格火把的细杆占的轴对齐盒子（世界坐标），不是火把时 undefined。视线只碰得到它（`raycastBlocks`）。
+ * (x, y, z) 那一格火把的细杆**倾斜之前**占的轴对齐盒子（世界坐标），不是火把时 undefined。
  *
- * 地面火把以格中心为轴、落在格底；墙上火把同样截面与高度，贴着墙那一侧、底部抬高 3/16。墙上火把画出来是
- * 斜的，这里用轴对齐的盒子近似。
+ * 地面火把以格中心为轴、落在格底，它就是细杆本身；墙上火把同样截面与高度，贴着墙那一侧、底部抬高 3/16，
+ * 画面再把它绕底面中心斜 `WALL_TORCH_TILT`。视线用的是 `torchHitbox`。
  */
-export function torchHitbox(block: BlockType, x: number, y: number, z: number): Hitbox | undefined {
+export function torchStickBox(block: BlockType, x: number, y: number, z: number): Hitbox | undefined {
   const support = SUPPORT[block];
   if (!support) return undefined;
   const lift = support.y < 0 ? 0 : WALL_LIFT;
@@ -82,5 +89,33 @@ export function torchHitbox(block: BlockType, x: number, y: number, z: number): 
   return {
     min: { x: cx - STICK_HALF, y: y + lift, z: cz - STICK_HALF },
     max: { x: cx + STICK_HALF, y: y + lift + STICK_HEIGHT, z: cz + STICK_HALF },
+  };
+}
+
+/**
+ * (x, y, z) 那一格火把的细杆占的轴对齐盒子（世界坐标），不是火把时 undefined。视线只碰得到它（`raycastBlocks`），
+ * 选框也套它。
+ *
+ * 地面火把就是 `torchStickBox`。墙上火把是斜过 `WALL_TORCH_TILT` 之后那根细杆的外包盒：朝外伸到
+ * 截面半边长·cos + 高度·sin，底与顶各被斜过的截面带出半边长·sin，贴墙那一侧缩回半边长·(1 − cos)。
+ * 盒子仍是轴对齐的，所以斜杆旁边的一小块空处也算碰到。
+ */
+export function torchHitbox(block: BlockType, x: number, y: number, z: number): Hitbox | undefined {
+  const box = torchStickBox(block, x, y, z);
+  const support = SUPPORT[block];
+  if (!box || !support || support.y < 0) return box;
+  const cos = Math.cos(WALL_TORCH_TILT);
+  const sin = Math.sin(WALL_TORCH_TILT);
+  // 沿离开墙的方向，相对截面中心：贴墙那边到 −半边长·cos，朝外那边到 半边长·cos + 高度·sin
+  const near = STICK_HALF * cos;
+  const far = STICK_HALF * cos + STICK_HEIGHT * sin;
+  const cx = (box.min.x + box.max.x) / 2;
+  const cz = (box.min.z + box.max.z) / 2;
+  // 离开墙的方向是 −support；沿另一个轴的那一对不变
+  const spanX = support.x === 0 ? [box.min.x, box.max.x] : support.x < 0 ? [cx - near, cx + far] : [cx - far, cx + near];
+  const spanZ = support.z === 0 ? [box.min.z, box.max.z] : support.z < 0 ? [cz - near, cz + far] : [cz - far, cz + near];
+  return {
+    min: { x: spanX[0]!, y: box.min.y - STICK_HALF * sin, z: spanZ[0]! },
+    max: { x: spanX[1]!, y: box.min.y + STICK_HEIGHT * cos + STICK_HALF * sin, z: spanZ[1]! },
   };
 }

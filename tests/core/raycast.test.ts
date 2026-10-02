@@ -173,6 +173,14 @@ describe('火把只有细杆挡视线（#56）', () => {
   const HALF = 1 / 16;
   const HEIGHT = 10 / 16;
   const LIFT = 3 / 16;
+  /**
+   * 墙上火把（#57）：细杆以底面中心为轴、往离开墙的方向斜 22.5°，盒子是斜杆的外包盒。底面中心离墙 1/16，
+   * 所以盒子朝外那一面离墙 1/16 + 1/16·cos + 10/16·sin，底与顶各被斜过的截面带出 1/16·sin。
+   */
+  const TILT = Math.PI / 8;
+  const WALL_OUT = HALF + HALF * Math.cos(TILT) + HEIGHT * Math.sin(TILT);
+  const WALL_BOTTOM = LIFT - HALF * Math.sin(TILT);
+  const WALL_TOP = LIFT + HEIGHT * Math.cos(TILT) + HALF * Math.sin(TILT);
 
   it('地面火把：正对细杆命中火把那一格，命中面是细杆那一面，距离到细杆表面', () => {
     const world = worldWithBlocks([[2, LAYER_Y, 0], BlockType.Torch], [[4, LAYER_Y, 0], BlockType.Stone]);
@@ -204,23 +212,30 @@ describe('火把只有细杆挡视线（#56）', () => {
     expect(hit!.distance).toBeCloseTo(3.5 - HEIGHT, 12);
   });
 
-  it('墙上火把：细杆贴着墙那一侧、底部抬高 3/16，命中面是盒子朝外那一面', () => {
-    // 贴在 −X 侧墙上：盒子 x ∈ [2, 2 + 2/16]
+  it('墙上火把：细杆贴着墙那一侧、底部抬高，盒子包住整根斜杆，命中面是盒子朝外那一面', () => {
+    // 贴在 −X 侧墙上：盒子 x 到 2 + WALL_OUT
     const world = worldWithBlocks([[2, LAYER_Y, 0], BlockType.WallTorchNegX]);
     const from = { x: 4.5, y: LAYER_Y + 0.5, z: 0.5 };
     const hit = raycastBlocks(world, from, { x: -1, y: 0, z: 0 }, FAR);
     expect(hit).toMatchObject({ x: 2, y: LAYER_Y, z: 0, normal: { x: 1, y: 0, z: 0 } });
-    expect(hit!.distance).toBeCloseTo(4.5 - (2 + 2 * HALF), 12);
-    // 低于抬高的底部：穿过去，后面什么都没有
-    const below = { ...from, y: LAYER_Y + LIFT - 0.05 };
+    expect(hit!.distance).toBeCloseTo(4.5 - (2 + WALL_OUT), 12);
+    // 低于盒底：穿过去，后面什么都没有
+    const below = { ...from, y: LAYER_Y + WALL_BOTTOM - 0.05 };
     expect(raycastBlocks(world, below, { x: -1, y: 0, z: 0 }, FAR)).toBeUndefined();
     // 高于盒顶同样穿过
-    const over = { ...from, y: LAYER_Y + LIFT + HEIGHT + 0.05 };
+    const over = { ...from, y: LAYER_Y + WALL_TOP + 0.05 };
     expect(raycastBlocks(world, over, { x: -1, y: 0, z: 0 }, FAR)).toBeUndefined();
   });
 
+  it('墙上火把：从侧面平视细杆上半段（离墙 4/16、高 10/16 处）也命中火把，不穿到后面的方块', () => {
+    // 斜杆的上半段离墙超过 2/16：只按竖直细杆算盒子的话，这条视线会穿过去打到 z = 2 的石头
+    const world = worldWithBlocks([[0, LAYER_Y, 0], BlockType.WallTorchNegX], [[0, LAYER_Y, 2], BlockType.Stone]);
+    const hit = raycastBlocks(world, { x: 0.25, y: LAYER_Y + 0.65, z: -2 }, { x: 0, y: 0, z: 1 }, FAR);
+    expect(hit).toMatchObject({ x: 0, y: LAYER_Y, z: 0, normal: { x: 0, y: 0, z: -1 } });
+  });
+
   it('四面墙上火把的细杆各贴着自己那一侧的墙', () => {
-    // 视线都从墙的对面、离火把格 1.5 格处平视过去：盒子贴墙，所以要走完这一格的 1 − 2/16 才碰到它
+    // 视线都从墙的对面、离火把格 1.5 格处平视过去：盒子贴墙，所以要走完这一格的 1 − WALL_OUT 才碰到它
     const cases: Array<[BlockType, Vec3, Vec3]> = [
       // [编号, 视线起点, 期望的命中面]
       [BlockType.WallTorchNegX, { x: 4.5, y: 0.5, z: 0.5 }, { x: 1, y: 0, z: 0 }],
@@ -234,17 +249,17 @@ describe('火把只有细杆挡视线（#56）', () => {
       const toward = { x: -normal.x, y: 0, z: -normal.z };
       const hit = raycastBlocks(world, from, toward, FAR);
       expect(hit, `编号 ${block}`).toMatchObject({ x: 2, y: LAYER_Y, z: 0, normal });
-      expect(hit!.distance, `编号 ${block}`).toBeCloseTo(1.5 + 1 - 2 * HALF, 12);
+      expect(hit!.distance, `编号 ${block}`).toBeCloseTo(1.5 + 1 - WALL_OUT, 12);
     }
   });
 
   it('眼睛在火把那一格里：背对细杆接着往前走，转身看它命中这一格', () => {
-    // 贴在 −X 侧墙上：细杆在 x ∈ [0, 2/16]，眼睛在格中心
+    // 贴在 −X 侧墙上：盒子 x 到 WALL_OUT，眼睛在格中心
     const world = worldWithBlocks([[0, LAYER_Y, 0], BlockType.WallTorchNegX], [[4, LAYER_Y, 0], BlockType.Stone]);
     expect(raycastBlocks(world, EYE, { x: 1, y: 0, z: 0 }, FAR)).toMatchObject({ x: 4, distance: 3.5 });
     const hit = raycastBlocks(world, EYE, { x: -1, y: 0, z: 0 }, FAR);
     expect(hit).toMatchObject({ x: 0, y: LAYER_Y, z: 0, normal: { x: 1, y: 0, z: 0 } });
-    expect(hit!.distance).toBeCloseTo(0.5 - 2 * HALF, 12);
+    expect(hit!.distance).toBeCloseTo(0.5 - WALL_OUT, 12);
   });
 
   it('眼睛就在细杆里面：报不出进入面，这一格不算目标', () => {

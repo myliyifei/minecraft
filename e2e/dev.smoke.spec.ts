@@ -762,6 +762,12 @@ test('瞄准脚下的方块显示选框，挖掘中出裂纹，挖穿后网格�
   // 瞄上就有选框，还没挖所以没有裂纹；画面正中是草的绿
   expect(dig.aimed.block).toBe(BlockType.Grass);
   expect(dig.aimed.selection.target).toEqual(dig.at);
+  // 整格方块：选框套住那一整格
+  const cell = dig.aimed.selection.bounds!;
+  for (const axis of ['x', 'y', 'z'] as const) {
+    expect(cell.min[axis]).toBeCloseTo(dig.at[axis]);
+    expect(cell.max[axis]).toBeCloseTo(dig.at[axis] + 1);
+  }
   expect(dig.aimed.selection.crackStage).toBeUndefined();
   expect(dig.aimed.rgb[1]).toBeGreaterThan(dig.aimed.rgb[0]);
 
@@ -3428,7 +3434,7 @@ test('午夜在脚边放一座熔炉，放进煤炭与粗铁点火：低头看�
   expect(errors).toEqual([]);
 });
 
-test('调试句柄给 4 支火把：快捷栏画中文名「火把」；午夜对着脚边的地面放下一支，网格用到火把那一格，低头看脚下的地面比放之前亮', async ({
+test('调试句柄给 4 支火把：快捷栏画中文名「火把」；午夜对着脚边的地面放下一支，网格用到火把那一格，低头看脚下的地面比放之前亮；手持画平面图标，选框只套细杆', async ({
   page,
 }) => {
   await waitForFullViewDistance(page);
@@ -3474,13 +3480,25 @@ test('调试句柄给 4 支火把：快捷栏画中文名「火把」；午夜�
 
       lookDown();
       hud.update();
+      const after = { rgb: centerRgb(), blockLight: core.blockLightAt(px, py, pz), tiles: renderer.chunkMeshTiles(cx, cz) };
+
+      // 再对准火把细杆的中段：选框套住的应当是细杆，不是整格
+      const sx = px + 1.5 - eye.x;
+      const sy = py + 0.3 - eye.y;
+      const sz = pz + 0.5 - eye.z;
+      core.turn(Math.atan2(-sx, -sz) - core.player.yaw, Math.atan2(sy, Math.hypot(sx, sz)) - core.player.pitch);
+      core.tick();
+      renderer.render(1);
       return {
         left,
         target,
         expectedTarget: { x: px + 1, y: py - 1, z: pz },
         placed,
         before,
-        after: { rgb: centerRgb(), blockLight: core.blockLightAt(px, py, pz), tiles: renderer.chunkMeshTiles(cx, cz) },
+        after,
+        torchCell: { x: px + 1, y: py, z: pz },
+        selection: renderer.selection,
+        held: renderer.heldItem,
         hotbar: core.inventory.hotbar(),
       };
     },
@@ -3492,13 +3510,32 @@ test('调试句柄给 4 支火把：快捷栏画中文名「火把」；午夜�
   expect(seen.target).toMatchObject({ ...seen.expectedTarget, normal: { x: 0, y: 1, z: 0 } });
   expect(seen.placed).toBe(BlockType.Torch);
   expect(seen.hotbar[0]).toEqual({ item: ItemType.Torch, count: 3 });
-  // 网格用到火把那一格（#57 换成细杆之前，暂按整格立方体贴它）
+  // 网格用到火把那一格，不再用 #56 的临时贴图（#57 起那一格不用）
+  const STAND_IN_TORCH_TILE = 43;
   expect(seen.before.tiles).not.toContain(TILE.torch);
   expect(seen.after.tiles).toContain(TILE.torch);
+  expect(seen.after.tiles).not.toContain(STAND_IN_TORCH_TILE);
   // 脚下那格方块光从 0 变成 13，画面正中的地面明显变亮
   expect(seen.before.blockLight).toBe(0);
   expect(seen.after.blockLight).toBe(13);
   expect(brightness(seen.after.rgb)).toBeGreaterThan(brightness(seen.before.rgb) * 1.5);
+
+  // 手持火把画平面图标，在画面右下
+  expect(seen.held?.item).toBe(ItemType.Torch);
+  expect(seen.held?.shape).toBe(HeldItemShape.Flat);
+  expect(seen.held!.screen.x).toBeGreaterThan(0);
+  expect(seen.held!.screen.y).toBeLessThan(0);
+
+  // 选框对着火把：套住的是截面 2/16、高 10/16 的细杆
+  const { torchCell } = seen;
+  expect(seen.selection.target).toEqual(torchCell);
+  const bounds = seen.selection.bounds!;
+  expect(bounds.min.x).toBeCloseTo(torchCell.x + 7 / 16);
+  expect(bounds.max.x).toBeCloseTo(torchCell.x + 9 / 16);
+  expect(bounds.min.y).toBeCloseTo(torchCell.y);
+  expect(bounds.max.y).toBeCloseTo(torchCell.y + 10 / 16);
+  expect(bounds.min.z).toBeCloseTo(torchCell.z + 7 / 16);
+  expect(bounds.max.z).toBeCloseTo(torchCell.z + 9 / 16);
 
   // 快捷栏第一格：火把的图标与简体中文名
   const slot = page.locator('#hotbar .hotbar__slot[data-slot="0"]');

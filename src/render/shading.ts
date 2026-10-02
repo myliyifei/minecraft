@@ -60,3 +60,29 @@ export const FACE_SHADE = { top: 1, side: 0.75, bottom: 0.55 } as const;
  * 所以只有火把的顶点是这个值（测试守着这一条）。实体的等级读自光照数组，同样到不了。
  */
 export const SELF_LIT_BLOCK_LIGHT = MAX_LIGHT_LEVEL;
+
+/** 着色器在一处合成等级要用的输入：这一处的两个等级、这一处到眼睛的距离，与这一帧送进着色器的三个数。 */
+export interface ShadedLevelInput {
+  readonly sky: number;
+  readonly block: number;
+  /** 这一处到玩家眼睛的距离（方块）。 */
+  readonly distance: number;
+  readonly skyDarkening: number;
+  readonly flicker: number;
+  /** 手持光等级（`heldLightLevel`）。 */
+  readonly heldLight: number;
+}
+
+/**
+ * 一处送进 `brightnessAt` 的等级，与着色器同一个算法：max(折算天光, 照到的光 + 闪烁)，
+ * 照到的光是方块光与这一处的手持光（手持光等级减去离眼睛的距离，不低于 0）中较大的那个。
+ *
+ * 闪烁只加在照到的光上，天光不加（见 CONTEXT.md 的「闪烁」）。照到的光不足 1 级时闪烁按比例减小，
+ * 到 0 就不闪：洞里没被火把照到的墙不跟着火把一明一暗，光圈的边缘也不会因为加了闪烁多出一道台阶。
+ */
+export function shadedLevel({ sky, block, distance, skyDarkening, flicker, heldLight }: ShadedLevelInput): number {
+  const held = Math.max(0, heldLight - distance);
+  const lit = Math.max(block, held);
+  return Math.max(Math.max(sky - skyDarkening, 0), lit + flicker * Math.min(lit, 1));
+}
+

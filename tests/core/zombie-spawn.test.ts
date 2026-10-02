@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType, isSolid } from '../../src/core/block';
 import { GameCore } from '../../src/core/game';
+import { ItemType } from '../../src/core/item';
 import { IDLE_INTENT } from '../../src/core/player';
 import { WORLD_MAX_Y } from '../../src/core/constants';
 import { NIGHT_END, NIGHT_SKY_DARKENING, NIGHT_START } from '../../src/core/time-of-day';
@@ -202,6 +203,26 @@ describe('生成的条件', () => {
 
     expect(open.length).toBeGreaterThan(0);
     expect(spawnsOver(covered, 2000)).toEqual(open);
+  });
+
+  it('手持火把不影响生成：手持光只在画面上，玩家脚下那格与每只生成处的方块光仍 0，生成的位置与 tick 与空手时逐一相同（#58）', () => {
+    const bare = spawnsOver(atNight(core()), 2000);
+
+    const holding = atNight(core());
+    expect(holding.giveItem(ItemType.Torch, 64)).toBe(0);
+    expect(holding.inventory.held?.item).toBe(ItemType.Torch);
+    const { x, y, z } = holding.player.position;
+    // 玩家站着那一列：列顶上面那格就是脚下那格
+    expect(holding.highestBlockY(Math.floor(x), Math.floor(z)) + 1).toBe(y);
+    expect(holding.blockLightAt(Math.floor(x), y, Math.floor(z))).toBe(0);
+
+    const spawned = spawnsOver(holding, 2000);
+    expect(bare.length).toBeGreaterThan(0);
+    expect(spawned).toEqual(bare);
+    for (const { tick, position } of spawned) {
+      const [bx, by, bz] = [Math.floor(position.x), position.y, Math.floor(position.z)];
+      expect(holding.blockLightAt(bx, by, bz), `第 ${tick} tick 生成的那只`).toBe(0);
+    }
   });
 });
 

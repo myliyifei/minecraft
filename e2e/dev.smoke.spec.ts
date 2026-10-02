@@ -54,6 +54,7 @@ import { recipesFor, type GridSize } from '../src/core/recipe';
 import { HURT_FLASH_TICKS } from '../src/ui/hurt-flash';
 import { ZOMBIE_HURT_TINT_TICKS } from '../src/render/zombie-model';
 import { BRIGHTNESS_FLOOR } from '../src/render/shading';
+import { FLICKER_AMPLITUDE } from '../src/render/torch-light';
 import { ATTACK_COOLDOWN_TICKS, ATTACK_RANGE } from '../src/core/attack';
 import { XP_ATTRACT_RANGE } from '../src/core/xp-orb';
 import { NIGHT_START } from '../src/core/time-of-day';
@@ -3316,8 +3317,10 @@ test('调试句柄把时刻拨到午夜：背景色比白天暗、天光减量�
   expect(seen.day.sky).toMatchObject({ moonVisible: false, sunVisible: true });
   // 画面上的天空也真的暗下去了：读回来的像素与场景背景色一致地变暗
   expect(brightness(seen.night.rgb)).toBeLessThan(brightness(seen.day.rgb) - 150);
-  // 拨回 6000 与一开始的白天完全相同
-  expect(seen.back.sky).toEqual(seen.day.sky);
+  // 拨回 6000 与一开始的白天完全相同。闪烁量按真实时间每帧变，与时刻无关，不在比较之列
+  const { flicker: _dayFlicker, ...daySky } = seen.day.sky;
+  const { flicker: _backFlicker, ...backSky } = seen.back.sky;
+  expect(backSky).toEqual(daySky);
   expect(seen.back.rgb).toEqual(seen.day.rgb);
   expect(errors).toEqual([]);
 });
@@ -3457,7 +3460,9 @@ test('调试句柄给 4 支火把：快捷栏画中文名「火把」；午夜�
       const cx = Math.floor((px + 1) / chunkSize);
       const cz = Math.floor(pz / chunkSize);
 
+      // 低头看脚下时切到空着的第 2 格：手持火把的手持光也会照亮脚下，读数要只看放下的那支
       const lookDown = () => {
+        core.selectHotbarSlot(1);
         core.turn(0, -maxPitch - core.player.pitch);
         core.tick();
         renderer.syncChunkMeshes();
@@ -3471,6 +3476,7 @@ test('调试句柄给 4 支火把：快捷栏画中文名「火把」；午夜�
       const dx = px + 1.5 - eye.x;
       const dy = py - 0.1 - eye.y;
       const dz = pz + 0.5 - eye.z;
+      core.selectHotbarSlot(0);
       core.turn(Math.atan2(-dx, -dz) - core.player.yaw, Math.atan2(dy, Math.hypot(dx, dz)) - core.player.pitch);
       core.tick();
       const target = core.mining.target;
@@ -3486,6 +3492,7 @@ test('调试句柄给 4 支火把：快捷栏画中文名「火把」；午夜�
       const sx = px + 1.5 - eye.x;
       const sy = py + 0.3 - eye.y;
       const sz = pz + 0.5 - eye.z;
+      core.selectHotbarSlot(0);
       core.turn(Math.atan2(-sx, -sz) - core.player.yaw, Math.atan2(sy, Math.hypot(sx, sz)) - core.player.pitch);
       core.tick();
       renderer.render(1);
@@ -3547,6 +3554,127 @@ test('调试句柄给 4 支火把：快捷栏画中文名「火把」；午夜�
   const icon = slot.locator('.hotbar__icon');
   await expect(icon).toHaveCSS('--tile-col', String(col));
   await expect(icon).toHaveCSS('--tile-row', String(row));
+  expect(errors).toEqual([]);
+});
+
+test('调试句柄给一支火把：选中它时送进着色器的手持光等级是 14，切到泥土或空格是 0', async ({ page }) => {
+  const seen = await page.evaluate(
+    ({ torch, dirt }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const heldLightAfterSelecting = (slot: number) => {
+        core.selectHotbarSlot(slot);
+        core.tick();
+        renderer.render(1);
+        return { held: core.inventory.held?.item ?? null, heldLight: renderer.sky.heldLight };
+      };
+      core.giveItem(torch, 1);
+      core.giveItem(dirt, 1);
+      return {
+        torch: heldLightAfterSelecting(0),
+        dirt: heldLightAfterSelecting(1),
+        empty: heldLightAfterSelecting(2),
+        torchAgain: heldLightAfterSelecting(0),
+      };
+    },
+    { torch: ItemType.Torch, dirt: ItemType.Dirt },
+  );
+
+  expect(seen.torch).toEqual({ held: ItemType.Torch, heldLight: 14 });
+  expect(seen.dirt).toEqual({ held: ItemType.Dirt, heldLight: 0 });
+  expect(seen.empty).toEqual({ held: null, heldLight: 0 });
+  expect(seen.torchAgain).toEqual({ held: ItemType.Torch, heldLight: 14 });
+  expect(errors).toEqual([]);
+});
+
+test('洞里选中火把：身边的墙面比空手时亮，14 格外的墙面一点不变；切回空格又暗回去', async ({ page }) => {
+  await waitForFullViewDistance(page);
+  // 整段跑在一次同步的 evaluate 里，游戏循环插不进来。以玩家为起点朝 −Z 挖一条 1 格宽、2 格高、
+  // 20 格长的隧道，四面、顶、底与两头都用石头封死，里面天光 0、方块光 0。平视 −Z：画面正中是 20 格外
+  // 那头的端墙，画面左侧靠边是挨着玩家的左墙（离眼睛不到 1 格）。
+  const seen = await page.evaluate(
+    ({ stone, air, torch, eyeHeight }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const pixel = window.__PIXEL_RGB__!;
+      core.setTimeOfDay(6000);
+      core.turn(-core.player.yaw, -core.player.pitch);
+      const px = Math.floor(core.player.position.x);
+      const py = Math.floor(core.player.position.y);
+      const pz = Math.floor(core.player.position.z);
+      const eyeY = Math.floor(core.player.position.y + eyeHeight);
+      const FAR_END = -21;
+      for (let dz = FAR_END; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 2; dy++) {
+            const wall = dx !== 0 || dy === -1 || dy === 2 || dz === FAR_END || dz === 1;
+            core.setBlock(px + dx, py + dy, pz + dz, wall ? stone : air);
+          }
+        }
+      }
+      const read = () => {
+        core.tick();
+        renderer.syncChunkMeshes();
+        renderer.render(1);
+        return {
+          near: pixel(-0.8, 0),
+          far: pixel(0, 0),
+          heldLight: renderer.sky.heldLight,
+        };
+      };
+
+      const bare = read();
+      core.giveItem(torch, 1);
+      core.selectHotbarSlot(0);
+      const holding = read();
+      core.selectHotbarSlot(1);
+      const after = read();
+      const eye = core.player.eyePosition;
+      return {
+        bare,
+        holding,
+        after,
+        nearLight: { sky: core.skyLightAt(px, eyeY, pz), block: core.blockLightAt(px, eyeY, pz) },
+        farLight: { sky: core.skyLightAt(px, eyeY, pz + FAR_END + 1), block: core.blockLightAt(px, eyeY, pz + FAR_END + 1) },
+        // 端墙朝着玩家那一面到眼睛的距离
+        farDistance: eye.z - (pz + FAR_END + 1),
+      };
+    },
+    { stone: BlockType.Stone, air: BlockType.Air, torch: ItemType.Torch, eyeHeight: PLAYER_EYE_HEIGHT },
+  );
+  const brightness = ([r, g, b]: readonly number[]) => r! + g! + b!;
+
+  // 隧道里没有光：两面墙外侧那一格都是 0
+  expect(seen.nearLight).toEqual({ sky: 0, block: 0 });
+  expect(seen.farLight).toEqual({ sky: 0, block: 0 });
+  expect(seen.farDistance).toBeGreaterThan(14);
+  expect(seen.bare.heldLight).toBe(0);
+  expect(seen.holding.heldLight).toBe(14);
+  expect(seen.after.heldLight).toBe(0);
+
+  // 身边的墙：0 级对 13 级上下，亮度差得很多
+  expect(brightness(seen.holding.near)).toBeGreaterThan(brightness(seen.bare.near) * 2);
+  // 14 格外的端墙：手持光到不了，闪烁也不加在没被照到的地方，像素一点不变
+  expect(seen.holding.far).toEqual(seen.bare.far);
+  // 切回空格，身边又暗回去
+  expect(seen.after.near).toEqual(seen.bare.near);
+  expect(errors).toEqual([]);
+});
+
+test('连续多帧读送进着色器的闪烁量：不全相同，每一帧都在 0 到设定的幅度之间', async ({ page }) => {
+  const flickers = await page.evaluate(async () => {
+    const { renderer } = window.__VOXEL__!;
+    const out: number[] = [];
+    for (let frame = 0; frame < 20; frame++) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      out.push(renderer.sky.flicker);
+    }
+    return out;
+  });
+
+  expect(new Set(flickers).size).toBeGreaterThan(1);
+  for (const flicker of flickers) {
+    expect(flicker).toBeGreaterThanOrEqual(0);
+    expect(flicker).toBeLessThanOrEqual(FLICKER_AMPLITUDE);
+  }
   expect(errors).toEqual([]);
 });
 

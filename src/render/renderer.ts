@@ -43,6 +43,7 @@ import {
 import { buildChunkMesh, meshTiles, type MeshData } from './mesh';
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes } from './mesh-plan';
 import { selectionBounds } from './selection';
+import { flickerAt, heldLightLevel } from './torch-light';
 import {
   ZombiePart,
   createZombieModel,
@@ -249,9 +250,9 @@ export interface SkyView {
   readonly background: number;
   /** 天光减量（浮点，见 `daylightAt`）：白天 0，夜晚 11。 */
   readonly skyDarkening: number;
-  /** 闪烁量（见 CONTEXT.md 的「闪烁」）。#58 之前恒为 0。 */
+  /** 闪烁量（见 CONTEXT.md 的「闪烁」）：在 0 到 `FLICKER_AMPLITUDE` 之间，按真实时间每帧变。 */
   readonly flicker: number;
-  /** 手持光等级（见 CONTEXT.md 的「手持光」）。#58 之前恒为 0。 */
+  /** 手持光等级（见 CONTEXT.md 的「手持光」）：选中格是火把时 14，否则 0。 */
   readonly heldLight: number;
   readonly sunVisible: boolean;
   readonly moonVisible: boolean;
@@ -640,6 +641,7 @@ export class WorldRenderer {
   render(alpha = 1): void {
     this.updateCamera(alpha);
     this.updateSky(alpha);
+    this.updateTorchLight();
     this.updateSelection();
     this.updateChainPreview();
     this.updateDrops(alpha);
@@ -673,6 +675,15 @@ export class WorldRenderer {
     this.celestialPivot.rotation.z = celestialAngle(time);
     this.sun.visible = celestialVisible(sunDirection(time));
     this.moon.visible = celestialVisible(moonDirection(time));
+  }
+
+  /**
+   * 更新送进着色器的手持光与闪烁量（ADR-0016）：手持光看选中格里的物品，每帧都写，切到别的格子
+   * 下一帧就灭；闪烁量按真实时间算。两者都只在画面上，核心不知道它们。
+   */
+  private updateTorchLight(): void {
+    this.frame.heldLight.value = heldLightLevel(this.core.inventory.held?.item);
+    this.frame.flicker.value = flickerAt(performance.now() / 1000);
   }
 
   /**

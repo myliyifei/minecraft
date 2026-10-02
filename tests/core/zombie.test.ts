@@ -615,6 +615,24 @@ describe('白天露天燃烧（#44）', () => {
     expect(night.zombies.all()[0]).toMatchObject({ health: ZOMBIE_MAX_HEALTH, burning: false });
   });
 
+  it('手持火把不改燃烧：白天露天照样烧，夜晚照样不烧，脚底那格方块光 0（#58）', () => {
+    const day = core();
+    day.giveItem(ItemType.Torch, 1);
+    expect(day.inventory.held?.item).toBe(ItemType.Torch);
+    const { x, y, z } = day.player.position;
+    day.spawnZombieAt(x, y, z);
+    day.tick(20);
+    expect(day.blockLightAt(Math.floor(x), y, Math.floor(z))).toBe(0);
+    expect(day.zombies.all()[0]).toMatchObject({ health: 19, burning: true });
+
+    const night = core();
+    night.giveItem(ItemType.Torch, 1);
+    night.setTimeOfDay(NIGHT_START);
+    night.spawnZombieAt(x, y, z);
+    night.tick(20);
+    expect(night.zombies.all()[0]).toMatchObject({ health: ZOMBIE_MAX_HEALTH, burning: false });
+  });
+
   it('白天按世界时刻：12999 露天烧，13000 不烧', () => {
     const game = core();
     const { x, y, z } = game.player.position;

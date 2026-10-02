@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { MAX_LIGHT_LEVEL } from '../core/constants';
 import { BRIGHTNESS_CURVE, FACE_SHADE, SELF_LIT_BLOCK_LIGHT } from './shading';
+import { FLICKER_AMPLITUDE, SELF_LIT_FLICKER_DIM } from './torch-light';
 
 /**
  * 按光照等级画的着色器材质（ADR-0016）：地形、僵尸、掉落物与手持物品共用一份着色器，场景里没有灯。
  *
- * 一处的亮度 = max(折算天光, 方块光 + 闪烁, 手持光 + 闪烁) 经 `BRIGHTNESS_CURVE` 映射，再乘上这一面的
- * 系数（`FACE_SHADE`）。火把自己的顶点例外，按贴图本色画（`SELF_LIT_BLOCK_LIGHT`）。天光与方块光的来源有两种：
+ * 一处的亮度 = 一处的等级（`shadedLevel`：折算天光与「方块光、手持光中较大者 + 闪烁」取较大者）经
+ * `BRIGHTNESS_CURVE` 映射，再乘上这一面的系数（`FACE_SHADE`）。火把自己的顶点例外，按贴图本色画
+ * （`SELF_LIT_BLOCK_LIGHT`），只随闪烁起伏（`selfLitBrightness`）。天光与方块光的来源有两种：
  *
  * - 地形：每个顶点带两个等级（网格的 `light` 属性，见 `MeshData.light`），按平滑光照取过平均。
  * - 实体：每个对象一份材质，每帧把它所在那一格的两个等级写进 `entityLight`（`setEntityLight`）。
@@ -21,9 +23,9 @@ import { BRIGHTNESS_CURVE, FACE_SHADE, SELF_LIT_BLOCK_LIGHT } from './shading';
 export interface FrameLighting {
   /** 天光减量（浮点，见 `daylightAt`）。 */
   readonly skyDarkening: { value: number };
-  /** 闪烁量（见 CONTEXT.md 的「闪烁」），加在方块光与手持光上，天光不加。#58 之前恒为 0。 */
+  /** 闪烁量（`flickerAt`），加在方块光与手持光中较大的那个上，天光不加（`shadedLevel`）。 */
   readonly flicker: { value: number };
-  /** 手持光等级：选中格是火把时 14，否则 0。每一处再按离眼睛的距离减。#58 之前恒为 0。 */
+  /** 手持光等级（`heldLightLevel`）：选中格是火把时 14，否则 0。每一处再按离眼睛的距离减。 */
   readonly heldLight: { value: number };
 }
 
@@ -92,15 +94,19 @@ void main() {
 #ifdef USE_ALPHATEST
   if (texel.a < alphaTest) discard;
 #endif
-  // 火把自己的顶点（方块光是 SELF_LIT_BLOCK_LIGHT）不吃光照：按贴图本色画，不乘曲线也不乘面系数。
+  // 火把自己的顶点（方块光是 SELF_LIT_BLOCK_LIGHT）不吃光照：按贴图本色画，不乘曲线也不乘面系数，
+  // 只随闪烁起伏（与 torch-light.ts 的 selfLitBrightness 同一个算法）。
   // 一个面四个顶点同为这个值，插值后不变；留半级余量防插值的舍入。
   bool selfLit = vLight.y > SELF_LIT_BLOCK_LIGHT - 0.5;
+  float selfLitShade = 1.0 - SELF_LIT_FLICKER_DIM * (1.0 - flicker / FLICKER_AMPLITUDE);
+  // 与 shading.ts 的 shadedLevel 同一个算法：闪烁只加在照到的光上，照到的不足 1 级时按比例减小。
   float held = max(0.0, heldLight - distance(vWorldPosition, cameraPosition));
-  float level = max(max(vLight.x - skyDarkening, 0.0), max(vLight.y, held) + flicker);
+  float lit = max(vLight.y, held);
+  float level = max(max(vLight.x - skyDarkening, 0.0), lit + flicker * min(lit, 1.0));
   // 曲线与系数给的是画面上的亮度（乘在 sRGB 颜色上），贴图采样出来却是线性的：按 sRGB 的传递函数换回
   // 画面上的值，乘完再换回线性。不能用 2.2 次方近似成线性空间里的一个乘数：sRGB 在接近黑的那一段是线性的，
   // 近似会把暗处的贴图再压暗一截，0 级看不出轮廓。
-  vec3 display = sRGBTransferOETF(vec4(texel.rgb, 1.0)).rgb * (selfLit ? 1.0 : brightness(level) * vShade);
+  vec3 display = sRGBTransferOETF(vec4(texel.rgb, 1.0)).rgb * (selfLit ? selfLitShade : brightness(level) * vShade);
   gl_FragColor = vec4(sRGBTransferEOTF(vec4(display, 1.0)).rgb * tint, 1.0);
   #include <colorspace_fragment>
 }
@@ -121,6 +127,8 @@ function lightMaterial(
     SIDE_SHADE: glslFloat(FACE_SHADE.side),
     BOTTOM_SHADE: glslFloat(FACE_SHADE.bottom),
     SELF_LIT_BLOCK_LIGHT: glslFloat(SELF_LIT_BLOCK_LIGHT),
+    SELF_LIT_FLICKER_DIM: glslFloat(SELF_LIT_FLICKER_DIM),
+    FLICKER_AMPLITUDE: glslFloat(FLICKER_AMPLITUDE),
   };
   if (vertexLight) defines.VERTEX_LIGHT = '';
   return new THREE.ShaderMaterial({

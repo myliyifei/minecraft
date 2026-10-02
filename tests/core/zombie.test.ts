@@ -537,6 +537,18 @@ describe('白天露天燃烧（#44）', () => {
     expect(zombies.all()[0]).toMatchObject({ health: ZOMBIE_MAX_HEALTH, burning: false });
   });
 
+  it('头顶上方插一支火把照样烧：火把不挡天光，脚底那格天光 15，列顶却是火把本身（#56）', () => {
+    // 旧规则按「列顶低于脚底」判露天，这里会判成不露天；按天光判则照样烧
+    const { world, zombies, advance } = burningOnPlayer();
+    world.setBlock(0, FLAT_STAND_Y + 2, 0, BlockType.Torch);
+    expect(world.skyLightAt(0, FLAT_STAND_Y, 0)).toBe(15);
+    expect(world.highestBlockY(0, 0)).toBeGreaterThan(FLAT_STAND_Y);
+    advance(20);
+    expect(zombies.all()[0]).toMatchObject({ health: 19, burning: true });
+    advance(20);
+    expect(zombies.all()[0]).toMatchObject({ health: 18, burning: true });
+  });
+
   it('屋顶底下不烧：头顶 5×5 的屋顶，脚底那格天光低于 15', () => {
     const { world, zombies, advance } = burningOnPlayer();
     for (let dx = -2; dx <= 2; dx++) {

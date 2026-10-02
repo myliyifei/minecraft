@@ -1,4 +1,4 @@
-import { BlockType, blockStateKind, type BlockEdit } from './block';
+import { BlockType, blockDrop, blockStateKind, isOpaque, type BlockEdit } from './block';
 import {
   initialBlockState,
   type BlockState,
@@ -7,7 +7,10 @@ import {
 } from './block-state';
 import { Chunk } from './chunk';
 import { CHUNK_SHIFT, CHUNK_SIZE, MAX_LIGHT_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from './constants';
+import type { DropSink } from './drop';
+import { BARE_HAND } from './item';
 import { Lighting } from './light';
+import { TORCH_ATTACH_OFFSETS, torchSupportCell } from './torch';
 
 export interface ChunkCoord {
   readonly cx: number;
@@ -80,11 +83,17 @@ export class World implements BlockEdit, BlockStateView {
    */
   private readonly blockStates = new Map<string, BlockStateEntry>();
   private readonly source: ChunkSource;
+  /**
+   * 支撑没了的火把变成的掉落物交给谁（见 `dropDetachedTorches`）。核心里是 `Drops`；只测方块与光照的
+   * 世界不接，那时火把照样改成空气，只是没有掉落物。
+   */
+  private readonly drops: DropSink;
   /** 光照的计算（ADR-0017）。光照数组本身在各区块上，这里只有算法与它的工作量计数。 */
   private readonly lighting: Lighting;
 
-  constructor(source: ChunkSource) {
+  constructor(source: ChunkSource, drops: DropSink = NO_DROPS) {
     this.source = source;
+    this.drops = drops;
     this.lighting = new Lighting({
       chunkAt: (cx, cz) => this.chunks.get(chunkKey(cx, cz)),
       markStale: (cx, cz) => this.markChunkStale(cx, cz),
@@ -179,6 +188,9 @@ export class World implements BlockEdit, BlockStateView {
   /**
    * 写入方块。返回值表示这次写入是否落到了世界里：
    * 坐标所在区块未加载、或 y 超出世界高度时不做任何事并返回 false。
+   *
+   * 一格从不透明方块换成非不透明方块（挖掉、换成树叶）之后，贴着它的火把在原位变成掉落物（`dropDetachedTorches`）。
+   * 连锁挖掘逐块写入，自然覆盖。
    */
   setBlock(x: number, y: number, z: number, block: BlockType): boolean {
     const bx = Math.floor(x);
@@ -200,7 +212,28 @@ export class World implements BlockEdit, BlockStateView {
     this.markStale(bx, bz);
     // 同步更新光照，不等下一 tick：同一 tick 之后的步骤读到的就是新值（ADR-0017）。
     this.lighting.blockChanged(chunk, lx, by, lz, previous, block);
+    if (isOpaque(previous) && !isOpaque(block)) this.dropDetachedTorches(bx, by, bz);
     return true;
+  }
+
+  /**
+   * (x, y, z) 那一格刚不再是不透明方块：上方与四侧贴着它的火把（见 CONTEXT.md 的「火把」）各改成空气，
+   * 在原位掉出一支火把。改成空气走 `setBlock`，光照随之更新。要求整数输入。
+   *
+   * 只在「不透明 → 非不透明」时查：火把只放得上不透明方块，原本就不是不透明的那一格上不会贴着火把。
+   */
+  private dropDetachedTorches(x: number, y: number, z: number): void {
+    for (const offset of TORCH_ATTACH_OFFSETS) {
+      const tx = x + offset.x;
+      const ty = y + offset.y;
+      const tz = z + offset.z;
+      const torch = this.getBlock(tx, ty, tz);
+      const support = torchSupportCell(torch, tx, ty, tz);
+      if (!support || support.x !== x || support.y !== y || support.z !== z) continue;
+      if (!this.setBlock(tx, ty, tz, BlockType.Air)) continue;
+      const drop = blockDrop(torch, BARE_HAND);
+      if (drop) this.drops.spawnInBlock(drop, tx, ty, tz);
+    }
   }
 
   blockStateAt(x: number, y: number, z: number): BlockState | undefined {
@@ -297,6 +330,9 @@ export class World implements BlockEdit, BlockStateView {
     return chunk.blockLight(localOf(bx), Math.floor(y), localOf(bz));
   }
 }
+
+/** 不接掉落物的世界用的那一份：收到什么都丢掉。 */
+const NO_DROPS: DropSink = Object.freeze({ spawnInBlock: () => {} });
 
 /** 方块状态表的坐标键。要求整数输入。 */
 function blockKey(x: number, y: number, z: number): string {

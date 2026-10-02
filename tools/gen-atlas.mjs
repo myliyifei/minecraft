@@ -450,6 +450,17 @@ const TILES = {
   40: toolIcon(swordHead, WOOD_HEAD),
   41: toolIcon(swordHead, STONE_HEAD),
   42: toolIcon(swordHead, IRON_HEAD),
+  // torch：透明底上居中一根两像素宽的竖木杆，顶端一团火——外圈橙、芯是亮黄
+  43: (x, y, rand) => {
+    if (x >= 7 && x <= 8 && y >= 6 && y <= 15) {
+      return shade(x === 8 ? STICK_SHADOW : STICK, Math.floor(rand() * 12) - 6);
+    }
+    const core = x >= 7 && x <= 8 && y >= 3 && y <= 5;
+    if (core) return shade(FIRE_BRIGHT, Math.floor(rand() * 16) - 8);
+    const flame = (x >= 6 && x <= 9 && y >= 3 && y <= 5) || (x >= 7 && x <= 8 && y === 2);
+    if (flame) return shade(FIRE, Math.floor(rand() * 16) - 8);
+    return [0, 0, 0, 0];
+  },
 };
 
 /** 太阳与月亮那块方片的范围：居中 12×12，四周各留 2 像素透明边。 */

@@ -75,11 +75,11 @@ describe('方块的硬度表', () => {
     }
   });
 
-  it('除空气外每种方块都有正的硬度', () => {
+  it('除空气与火把外每种方块都有正的硬度；火把硬度 0（#56）', () => {
     for (const block of Object.values(BlockType)) {
       const { hardness } = BLOCKS[block];
-      if (block === BlockType.Air) {
-        expect(hardness).toBe(0);
+      if (block === BlockType.Air || baseBlock(block) === BlockType.Torch) {
+        expect(hardness, `方块 ${block} 的硬度`).toBe(0);
       } else {
         expect(hardness, `方块 ${block} 的硬度`).toBeGreaterThan(0);
       }
@@ -419,20 +419,29 @@ describe('挖掉一块给多少经验', () => {
     expect(blockExperience(BlockType.OakLeaves)).toBeGreaterThan(0);
   });
 
-  it('挖得动的方块都给正的经验', () => {
+  it('挖得动的方块都给正的经验，火把除外：挪火把没有代价（#56）', () => {
     for (const block of Object.values(BlockType)) {
       if (!isBreakable(block)) continue;
+      if (baseBlock(block) === BlockType.Torch) {
+        expect(blockExperience(block), `方块 ${block}`).toBe(0);
+        continue;
+      }
       expect(blockExperience(block), `方块 ${block}`).toBeGreaterThan(0);
     }
   });
 });
 
 describe('外观变体归到的编号（ADR-0012）', () => {
-  it('燃烧中的熔炉归到熔炉，其余方块都是自己', () => {
-    expect(baseBlock(BlockType.LitFurnace)).toBe(BlockType.Furnace);
+  it('燃烧中的熔炉归到熔炉，四个墙上火把归到地面火把（#56），其余方块都是自己', () => {
+    const variants: Partial<Record<BlockType, BlockType>> = {
+      [BlockType.LitFurnace]: BlockType.Furnace,
+      [BlockType.WallTorchNegX]: BlockType.Torch,
+      [BlockType.WallTorchPosX]: BlockType.Torch,
+      [BlockType.WallTorchNegZ]: BlockType.Torch,
+      [BlockType.WallTorchPosZ]: BlockType.Torch,
+    };
     for (const block of Object.values(BlockType)) {
-      if (block === BlockType.LitFurnace) continue;
-      expect(baseBlock(block), `方块 ${block}`).toBe(block);
+      expect(baseBlock(block), `方块 ${block}`).toBe(variants[block] ?? block);
     }
   });
 });
@@ -472,6 +481,8 @@ describe('放置表', () => {
     // 木炭是原木炼出来的材料（issue #34），没有对应的方块
     ['木炭放不下去', ItemType.Charcoal, null],
     ['腐肉放不下去', ItemType.RottenFlesh, null],
+    // 火把放下去先按地面火把查，朝向由放置按命中面换（issue #56）
+    ['火把放下去是地面火把', ItemType.Torch, BlockType.Torch],
   ];
 
   it('上面这张表覆盖了物品表的每一行：加一种物品就得在这里补一条', () => {
@@ -524,20 +535,22 @@ describe('方块表的「方块状态」一列（issue #30）', () => {
 });
 
 describe('方块表的发光等级与透光方式两列（issue #51）', () => {
-  it('燃烧中的熔炉发光 13（#54），其余现有方块都不发光，熄火的熔炉也不发光', () => {
+  it('火把五个编号发光 14（#56），燃烧中的熔炉发光 13（#54），其余方块都不发光，熄火的熔炉也不发光', () => {
     for (const block of Object.values(BlockType)) {
-      expect(BLOCKS[block].lightEmission, `方块 ${block}`).toBe(block === BlockType.LitFurnace ? 13 : 0);
+      const expected = baseBlock(block) === BlockType.Torch ? 14 : block === BlockType.LitFurnace ? 13 : 0;
+      expect(BLOCKS[block].lightEmission, `方块 ${block}`).toBe(expected);
     }
   });
 
-  it('树叶是树叶式，空气不衰减，其余都是不透明', () => {
+  it('树叶是树叶式，空气与火把不衰减，其余都是不透明', () => {
     const passages: Partial<Record<BlockType, LightPassage>> = {
       [BlockType.Air]: LightPassage.Clear,
       [BlockType.OakLeaves]: LightPassage.Leaves,
     };
     for (const block of Object.values(BlockType)) {
+      const torch = baseBlock(block) === BlockType.Torch;
       expect(BLOCKS[block].lightPassage, `方块 ${block}`).toBe(
-        passages[block] ?? LightPassage.Opaque,
+        torch ? LightPassage.Clear : (passages[block] ?? LightPassage.Opaque),
       );
     }
   });

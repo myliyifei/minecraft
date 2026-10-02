@@ -106,7 +106,8 @@ function toolRecipes({ head, pickaxe, axe, shovel, sword }: ToolTier): Recipe[] 
 /**
  * 配方表——纯数据（见 CONTEXT.md 的「合成」）。加配方只加一条。
  *
- * 目前有原木出木板、木板出木棍、木板出工作台三条，加木、石、铁三档各四件（镐、斧、铲、剑），再加圆石出熔炉。
+ * 目前有原木出木板、木板出木棍、木板出工作台三条，加木、石、铁三档各四件（镐、斧、铲、剑），再加圆石出熔炉、
+ * 煤炭与木炭各出火把。
  * 金、钻石那两档各再加一组 `toolRecipes`。
  */
 export const RECIPES: ReadonlyArray<Recipe> = [
@@ -167,6 +168,16 @@ export const RECIPES: ReadonlyArray<Recipe> = [
     ],
     mirrored: false,
   },
+  // 火把（#56）：一块煤炭或木炭竖排在一根木棍上面，各出 4 支。图案 1 列 2 行，2x2 与 3x3 都做得出；
+  // 左右对称，镜像与否结果相同，写 false。配方书里两条，名称都是「火把」。
+  ...[ItemType.Coal, ItemType.Charcoal].map(
+    (fuel): Recipe => ({
+      kind: 'shaped',
+      result: { item: ItemType.Torch, count: 4 },
+      pattern: [[fuel], [ItemType.Stick]],
+      mirrored: false,
+    }),
+  ),
 ];
 
 /**

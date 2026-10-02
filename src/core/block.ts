@@ -32,6 +32,16 @@ export const BlockType = {
   CoalOre: 12,
   /** 铁矿石（issue #31）：最低材质档石，持木镐挖得动但什么都不掉。 */
   IronOre: 13,
+  /**
+   * 火把（见 CONTEXT.md 的「火把」，#56）：每个朝向一个编号（ADR-0012 补记），五个是同一种方块，
+   * `baseBlock` 都归到 `Torch`。`Torch` 立在下面那块的顶面上；`WallTorchNegX` 贴在它 −X 那一侧的
+   * 墙上（墙在 x − 1），其余三个同理。贴着哪一格见 `torch.ts` 的「支撑」。
+   */
+  Torch: 14,
+  WallTorchNegX: 15,
+  WallTorchPosX: 16,
+  WallTorchNegZ: 17,
+  WallTorchPosZ: 18,
 } as const;
 
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
@@ -72,7 +82,7 @@ export type BlockStateKind = (typeof BlockStateKind)[keyof typeof BlockStateKind
  *
  * - `Opaque`：不透明，两种光都完全挡住。与 `BlockDef.opaque` 为 true 的方块是同一批。
  * - `Leaves`：树叶式，天光竖直穿过每格减 1；横向传播与方块光按空格算。
- * - `Clear`：不衰减，光照常通过。空气是这一档，火把（#56）加入后也是。
+ * - `Clear`：不衰减，光照常通过。空气与火把是这一档。
  *
  * 值是字符串，理由同 `BlockUse`：它不进存档。
  */
@@ -88,7 +98,7 @@ export type LightPassage = (typeof LightPassage)[keyof typeof LightPassage];
 export const UNBREAKABLE = Infinity;
 
 export interface BlockDef {
-  /** 是否完全遮挡视线。false 的方块（空气、树叶）不会剔除邻居的面。 */
+  /** 是否完全遮挡视线。false 的方块（空气、树叶、火把）不会剔除邻居的面。 */
   readonly opaque: boolean;
   /**
    * 是否阻挡玩家与生物移动。
@@ -147,7 +157,7 @@ export interface BlockDef {
   /**
    * 发光等级：这种方块发出多强的方块光（0 到 15，见 CONTEXT.md 的「方块光」），0 是不发光。
    *
-   * 燃烧中的熔炉是 13，其余现有方块为 0；火把（14）由 #56 加入。
+   * 火把是 14，燃烧中的熔炉是 13，其余方块为 0。
    */
   readonly lightEmission: number;
   /** 光经过它时怎么走（见 `LightPassage`）。 */
@@ -210,6 +220,25 @@ function ore(minimumMaterial: ToolMaterial, drop: ItemType, experience: number):
     lightPassage: LightPassage.Opaque,
   };
 }
+
+/**
+ * 火把（#56）：不实心、不挡光、发光 14。硬度 0，挖掘耗时按公式得 0 tick，按下那一 tick 就碎，不损耗耐久
+ * （`wearsToolWhenMined`）。没有合格工具也不需要工具，拿什么挖都掉火把自己，不给经验。五个编号共用这一份。
+ */
+const TORCH: BlockDef = {
+  opaque: false,
+  solid: false,
+  hardness: 0,
+  qualifiedToolClass: ToolClass.None,
+  minimumMaterial: ToolMaterial.Wood,
+  requiresTool: false,
+  drop: one(ItemType.Torch),
+  experience: 0,
+  use: BlockUse.None,
+  state: BlockStateKind.None,
+  lightEmission: 14,
+  lightPassage: LightPassage.Clear,
+};
 
 /** 方块属性表——纯数据。加方块只加一行。 */
 export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
@@ -377,6 +406,11 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
   [BlockType.CoalOre]: ore(ToolMaterial.Wood, ItemType.Coal, 90),
   // 铁矿石：最低档石，持木镐挖得动却什么都不掉（`dropFor`），持石镐掉粗铁。
   [BlockType.IronOre]: ore(ToolMaterial.Stone, ItemType.RawIron, 120),
+  [BlockType.Torch]: TORCH,
+  [BlockType.WallTorchNegX]: TORCH,
+  [BlockType.WallTorchPosX]: TORCH,
+  [BlockType.WallTorchNegZ]: TORCH,
+  [BlockType.WallTorchPosZ]: TORCH,
 };
 
 export function isAir(block: BlockType): boolean {
@@ -396,6 +430,14 @@ export function isSolid(block: BlockType): boolean {
 /** 挖得动的方块。空气不是挖掘目标，基岩挖不动。 */
 export function isBreakable(block: BlockType): boolean {
   return block !== BlockType.Air && BLOCKS[block].hardness !== UNBREAKABLE;
+}
+
+/**
+ * 挖穿这种方块损不损耗手上那件工具的耐久：硬度 0 的方块（火把）不损耗，镐斧铲与剑都一样。
+ * 损耗几点按工具类别查（`miningWearOf`），这里只回答「这一块算不算」。
+ */
+export function wearsToolWhenMined(block: BlockType): boolean {
+  return BLOCKS[block].hardness > 0;
 }
 
 /**
@@ -444,7 +486,8 @@ export function miningTicksFor(def: BlockDef, tool: MiningTool): number {
     return Math.ceil(def.hardness * TICKS_PER_HARDNESS_WITHOUT_TOOL - TICK_EPSILON);
   }
   const speed = qualified ? tool.speed : 1;
-  return Math.ceil((def.hardness * TICKS_PER_HARDNESS) / speed - TICK_EPSILON);
+  // 硬度 0（火把）减掉容差后向上取整是 −0，钳到 0：按下那一 tick 就碎（#56）。
+  return Math.max(0, Math.ceil((def.hardness * TICKS_PER_HARDNESS) / speed - TICK_EPSILON));
 }
 
 /**
@@ -492,16 +535,22 @@ export function blockUse(block: BlockType): BlockUse {
 }
 
 /**
- * 外观变体（ADR-0012）归到的那个编号：燃烧中的熔炉归到熔炉。不在表里的方块归到自己。
+ * 外观变体（ADR-0012）归到的那个编号：燃烧中的熔炉归到熔炉，墙上火把归到地面火把。不在表里的方块归到自己。
  */
 const VARIANT_BASE: Readonly<Partial<Record<BlockType, BlockType>>> = {
   [BlockType.LitFurnace]: BlockType.Furnace,
+  // 四个墙上火把归到地面火把（#56）：朝向不同，是同一种方块。
+  [BlockType.WallTorchNegX]: BlockType.Torch,
+  [BlockType.WallTorchPosX]: BlockType.Torch,
+  [BlockType.WallTorchNegZ]: BlockType.Torch,
+  [BlockType.WallTorchPosZ]: BlockType.Torch,
 };
 
 /**
  * 这个编号是哪一种方块：外观变体归到它的基本编号，其余方块是自己。
  *
- * 「与目标同一类型」按它比（连锁挖掘）：熄火与燃烧中的熔炉只是外观不同，排在一起时连成一片。
+ * 「与目标同一类型」按它比（连锁挖掘）：熄火与燃烧中的熔炉只是外观不同，排在一起时连成一片；地面与
+ * 墙上的火把也是。
  */
 export function baseBlock(block: BlockType): BlockType {
   return VARIANT_BASE[block] ?? block;
@@ -558,6 +607,8 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   [ItemType.WoodenSword]: null,
   [ItemType.StoneSword]: null,
   [ItemType.IronSword]: null,
+  // 火把放下去先按地面火把查，放置再按命中面换成哪一个朝向（`torchOnFace`，#56）。
+  [ItemType.Torch]: BlockType.Torch,
 };
 
 /**

@@ -36,6 +36,8 @@ export const ItemType = {
   WoodenSword: 22,
   StoneSword: 23,
   IronSword: 24,
+  /** 火把（#56）：煤炭或木炭加木棍合成，可堆叠 64，是方块物品，放下去是火把方块。不是燃料。 */
+  Torch: 25,
 } as const;
 
 export type ItemType = (typeof ItemType)[keyof typeof ItemType];
@@ -245,6 +247,7 @@ export const ITEMS: Readonly<Record<ItemType, ItemDef>> = {
   [ItemType.WoodenSword]: tool(ToolClass.Sword, ToolMaterial.Wood, 4),
   [ItemType.StoneSword]: tool(ToolClass.Sword, ToolMaterial.Stone, 5),
   [ItemType.IronSword]: tool(ToolClass.Sword, ToolMaterial.Iron, 6),
+  [ItemType.Torch]: STACKABLE,
 };
 
 /** 这种物品一格最多堆多少个。 */

@@ -4,6 +4,7 @@ import {
   blockExperience,
   isBreakable,
   miningTicks,
+  wearsToolWhenMined,
   type BlockEdit,
 } from './block';
 import { blockStateContents, type BlockStateView } from './block-state';
@@ -190,13 +191,15 @@ export class Mining implements MiningView {
 
     // 连锁集合里含目标本身，所以两条路都是「挖掉一批格子」，只是批的大小不同。
     // 掉落与耐久都按挖穿这一 tick 手上的工具算，整批用同一件。
-    let broken = 0;
+    let worn = 0;
     for (const cell of this.chain ?? [this.hit]) {
-      if (this.breakBlock(cell.x, cell.y, cell.z, tool)) broken++;
+      const brokenBlock = this.breakBlock(cell.x, cell.y, cell.z, tool);
+      if (brokenBlock !== undefined && wearsToolWhenMined(brokenBlock)) worn++;
     }
     // 每挖穿一块按类别损耗（镐斧铲 1、剑 2），整批一次结算：损耗超过剩余耐久时那些方块照样全碎，
-    // 工具随后消失（见 CONTEXT.md 的「连锁挖掘」）。空手与拿着材料时损耗是 0。
-    this.hand.wearHeld(broken * miningWearOf(this.hand.held));
+    // 工具随后消失（见 CONTEXT.md 的「连锁挖掘」）。空手与拿着材料时损耗是 0；硬度 0 的方块（火把）
+    // 不计入块数，连锁挖掉一排火把耐久不变。
+    this.hand.wearHeld(worn * miningWearOf(this.hand.held));
     this.restart();
     // 挖穿了，视线随即落到后面那块上。当场重瞄一次，选框不会在这一 tick 里还套着一个
     // 已经不存在的方块；按住不放因此接着挖下一块，与原版一致。
@@ -205,9 +208,8 @@ export class Mining implements MiningView {
 
   /**
    * 挖掉一格：变成空气，掉落表里有东西就在原地掉出一个掉落物，有经验就再生成一个经验球。
-   * 返回真的挖掉了没有——耐久按挖掉的块数算。spec 说的是「硬度大于 0 的方块」，这里判的是
-   * `isBreakable`：方块表里硬度为 0 的只有空气，两者目前等价；将来加了硬度 0 又挖得动的方块
-   * （草丛那类）再在这里分开。
+   * 返回挖掉的是哪种方块，没挖掉（空气、挖不动）时 undefined——耐久按挖掉的块里损耗工具的那些算。
+   * 挖不挖得动看 `isBreakable`：空气不是挖掘目标，火把硬度 0 却挖得动。
    *
    * 方块种类当场重读而不是沿用连锁开始时记下的：那之后世界可能被别处改过（区块卸载、
    * 外部写入），已经不在了的格子直接跳过，不会凭空掉出东西，也不算一块。
@@ -215,9 +217,9 @@ export class Mining implements MiningView {
    * 带方块状态的方块（熔炉）还要把状态里装着的东西掉出来。状态得在写成空气之前读：那一下
    * 写入会让世界把这条状态删掉（ADR-0011）。
    */
-  private breakBlock(x: number, y: number, z: number, tool: MiningTool): boolean {
+  private breakBlock(x: number, y: number, z: number, tool: MiningTool): BlockType | undefined {
     const block = this.blocks.getBlock(x, y, z);
-    if (!isBreakable(block)) return false;
+    if (!isBreakable(block)) return undefined;
     const state = this.blocks.blockStateAt(x, y, z);
     this.blocks.setBlock(x, y, z, BlockType.Air);
     // 掉落物与经验球都落在方块原来那一格里。什么都不掉的方块（树叶、空手挖的石头）
@@ -230,7 +232,7 @@ export class Mining implements MiningView {
     }
     const experience = blockExperience(block);
     if (experience > 0) this.experience.spawnInBlock(experience, x, y, z);
-    return true;
+    return block;
   }
 
 

@@ -2,7 +2,7 @@ import { BlockType, placedBlock } from '../core/block';
 import { ItemType } from '../core/item';
 
 /**
- * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 8 行，目前用了前 43 格。
+ * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 8 行，目前用了前 44 格。
  *
  * 行列数都取 2 的幂：uv 是格号除以行列数，除以 8 在 float32 里是精确的，除以 5 就不是
  * ——顶点属性存的是 Float32Array，1/5 一进去就带上舍入误差，一个面的边缘会取到相邻那一格的像素。
@@ -65,6 +65,8 @@ export const TILE = {
   woodenSword: 40,
   stoneSword: 41,
   ironSword: 42,
+  // 火把（#56）：一根细木杆，顶端一团火。#57 换成细杆几何之前，方块也暂按整格立方体贴这一格。
+  torch: 43,
 } as const;
 
 /**
@@ -151,6 +153,12 @@ export const BLOCK_TILES: Readonly<Record<BlockType, FaceTiles | null>> = {
   // 矿石：以石头贴图为底加矿点，六面同一张。
   [BlockType.CoalOre]: flat(TILE.coalOre),
   [BlockType.IronOre]: flat(TILE.ironOre),
+  // 火把五个编号暂画整格立方体、六面贴同一格（#56），细杆几何由 #57 接手。
+  [BlockType.Torch]: flat(TILE.torch),
+  [BlockType.WallTorchNegX]: flat(TILE.torch),
+  [BlockType.WallTorchPosX]: flat(TILE.torch),
+  [BlockType.WallTorchNegZ]: flat(TILE.torch),
+  [BlockType.WallTorchPosZ]: flat(TILE.torch),
 };
 
 /**
@@ -196,6 +204,7 @@ export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
   [ItemType.WoodenSword]: flat(TILE.woodenSword),
   [ItemType.StoneSword]: flat(TILE.stoneSword),
   [ItemType.IronSword]: flat(TILE.ironSword),
+  [ItemType.Torch]: flat(TILE.torch),
 };
 
 /**

@@ -1,8 +1,8 @@
 import { Attack } from './attack';
-import { BlockStateKind, BlockType, BlockUse, blockUse, type BlockEdit } from './block';
+import { BlockStateKind, BlockType, BlockUse, blockUse, isSolid, type BlockEdit } from './block';
 import type { BlockState, BlockStateEntry, BlockStateView } from './block-state';
 import type { ChunkView } from './chunk';
-import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS } from './constants';
+import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS, WORLD_MIN_Y } from './constants';
 import { CRAFTING_TABLE_GRID, CraftingGrid, INVENTORY_CRAFTING_GRID } from './crafting-grid';
 import { Drops, type DropsView } from './drop';
 import { Experience, type ExperienceView } from './experience';
@@ -134,7 +134,11 @@ export class GameCore implements BlockEdit, BlockStateView {
   constructor(options: GameCoreOptions = {}) {
     this.worldSeed = options.seed ?? DEFAULT_SEED;
     this.radius = options.viewRadius ?? DEFAULT_VIEW_RADIUS;
-    this.world = new World((options.chunkSource ?? plainsTerrain)(this.worldSeed));
+    // 支撑没了的火把交给掉落物（`World.dropDetachedTorches`）。掉落物要拿世界算碰撞，比世界晚建，
+    // 所以这里传一个转发给掉落物的函数。世界在这个构造函数里只加载区块、不写方块，调用到它时掉落物已经建好。
+    this.world = new World((options.chunkSource ?? plainsTerrain)(this.worldSeed), {
+      spawnInBlock: (stack, x, y, z) => this.dropsState.spawnInBlock(stack, x, y, z),
+    });
     // 出生点要先有地形才算得出来，所以先加载原点周围，玩家最后造。
     // 来源当场给不出区块时（浏览器里 Worker 还在生成）这里只加载得到已经就绪的那些，
     // 其余由 tick 补上——所以浏览器那一侧要先把出生点那一带备好，见 src/main.ts。
@@ -583,8 +587,9 @@ export class GameCore implements BlockEdit, BlockStateView {
   /**
    * 出生点：世界原点那一列最高实心方块的顶面，落在方块中心。重生也回到这里。
    *
-   * `highestBlockY` 找的是最高的非空气方块。当前除空气之外的方块都是实心的，两者等价。
-   * 树冠会把它抬到树冠的高度，所以出生点那一带干脆不长树，见 `OAK_SPAWN_CLEARANCE`。
+   * 从最高的非空气方块（`highestBlockY`）往下跳过不实心的火把（#56）：玩家穿得过火把，站在它顶上
+   * 就会掉下去，插在高处墙上的一支足以让重生摔死。树冠是实心的，会把出生点抬到树冠的高度，所以
+   * 出生点那一带干脆不长树，见 `OAK_SPAWN_CLEARANCE`。
    *
    * 原点区块没加载时读不出那一列（「未加载即空气」），就用进入世界时的出生点。这时原点区块一定
    * 没改过：改过的区块卸载后仍留在世界里（ADR-0008），`respawn` 先把它放回来再问这里。
@@ -594,9 +599,11 @@ export class GameCore implements BlockEdit, BlockStateView {
     return this.originColumnTop();
   }
 
-  /** 世界原点那一列此刻最高方块的顶面中心。 */
+  /** 世界原点那一列此刻最高实心方块的顶面中心。 */
   private originColumnTop(): Vec3 {
-    return { x: 0.5, y: this.highestBlockY(0, 0) + 1, z: 0.5 };
+    let y = this.highestBlockY(0, 0);
+    while (y >= WORLD_MIN_Y && !isSolid(this.world.getBlock(0, y, 0))) y--;
+    return { x: 0.5, y: y + 1, z: 0.5 };
   }
 
   /** 一个 tick 的全部逻辑。 */
@@ -627,9 +634,11 @@ export class GameCore implements BlockEdit, BlockStateView {
     // 进度因此当场归零，回头得重挖。攻击排在挖掘之前：左键按下那一 tick 先看视线先碰到的是不是
     // 僵尸，是的话这一次按住不挖（ADR-0015）。
     // 按下也一样：界面模式下按的那一下作废，关掉界面时左键还按着也不算按下。
-    const held = uiMode ? IDLE_MINING : { held: this.miningHeld, chain: this.chainHeld };
+    // 按下的那一 tick 算按着：两个 tick 之间按下又松开，挖掘也收到一 tick 的按住，硬度 0 的火把因此
+    // 照样碎掉（#56）；别的方块挖一 tick 不够，下一 tick 没按着，进度归零。
     const pressed = this.miningPressQueued && !uiMode;
     this.miningPressQueued = false;
+    const held = uiMode ? IDLE_MINING : { held: this.miningHeld || pressed, chain: this.chainHeld };
     this.miningState.step(this.attackState.step(held, pressed, this.ticks));
     // 使用排在挖掘之后：目标方块是挖掘那一步按走完之后的眼睛位置重投出来的（ADR-0006），
     // 与玩家碰撞箱的判定用的也是这一 tick 走完之后的位置。

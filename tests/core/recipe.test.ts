@@ -98,11 +98,17 @@ describe('配方表里的原木出木板', () => {
     expect(matchRecipe(grid(TWO_BY_TWO, [0, ItemType.Dirt]), TWO_BY_TWO)).toBeUndefined();
   });
 
-  it('木板、木棍、工作台三条摆得进 2x2，工具那几条要 3x3', () => {
+  it('木板、木棍、工作台与两条火把摆得进 2x2，工具那几条要 3x3', () => {
     const twoByTwo = RECIPES.filter((recipe) => recipeFits(recipe, TWO_BY_TWO)).map(
       (recipe) => recipe.result.item,
     );
-    expect(twoByTwo).toEqual([ItemType.OakPlanks, ItemType.Stick, ItemType.CraftingTable]);
+    expect(twoByTwo).toEqual([
+      ItemType.OakPlanks,
+      ItemType.Stick,
+      ItemType.CraftingTable,
+      ItemType.Torch,
+      ItemType.Torch,
+    ]);
     for (const recipe of RECIPES) expect(recipeFits(recipe, THREE_BY_THREE)).toBe(true);
   });
 });
@@ -593,12 +599,14 @@ describe('配方书列出哪些配方', () => {
     expect(recipesFor(THREE_BY_THREE, table)).toEqual(table);
   });
 
-  it('默认列的是配方表：3x3 列全表，2x2 列摆得进的那三条', () => {
+  it('默认列的是配方表：3x3 列全表，2x2 列摆得进的那五条', () => {
     expect(recipesFor(THREE_BY_THREE)).toEqual(RECIPES);
     expect(recipesFor(TWO_BY_TWO).map((recipe) => recipe.result.item)).toEqual([
       ItemType.OakPlanks,
       ItemType.Stick,
       ItemType.CraftingTable,
+      ItemType.Torch,
+      ItemType.Torch,
     ]);
   });
 });

@@ -163,12 +163,20 @@ describe('方块光的形状（issue #54）', () => {
 });
 
 describe('方块光的增量更新等于从头算', () => {
-  it('随机放与挖 200 次（石头、树叶、燃烧中的熔炉、空气混合）之后两种光逐格相同，中途每 5 次也相同', () => {
+  it('随机放与挖 200 次（石头、树叶、燃烧中的熔炉、火把、空气混合）之后两种光逐格相同，中途每 5 次也相同', () => {
     // 原点周围 2×2 个区块：随机的范围跨过它们共用的那个角，跨区块的传播与撤光都会走到
     const world = new World(flatTestTerrain);
     for (const [cx, cz] of [[-1, -1], [-1, 0], [0, -1], [0, 0]]) world.loadChunk(cx, cz);
     const random = seededRandom(54);
-    const blocks = [BlockType.Air, BlockType.Stone, BlockType.OakLeaves, BlockType.LitFurnace];
+    // 火把（#56）：不透明方块换掉时贴着它的火把跟着改成空气，那一下连带的写入也要与从头算一致
+    const blocks = [
+      BlockType.Air,
+      BlockType.Stone,
+      BlockType.OakLeaves,
+      BlockType.LitFurnace,
+      BlockType.Torch,
+      BlockType.WallTorchNegX,
+    ];
     for (let n = 0; n < 200; n++) {
       const x = Math.floor(random() * 12) - 6;
       const z = Math.floor(random() * 12) - 6;

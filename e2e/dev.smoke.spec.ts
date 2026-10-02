@@ -3428,6 +3428,91 @@ test('午夜在脚边放一座熔炉，放进煤炭与粗铁点火：低头看�
   expect(errors).toEqual([]);
 });
 
+test('调试句柄给 4 支火把：快捷栏画中文名「火把」；午夜对着脚边的地面放下一支，网格用到火把那一格，低头看脚下的地面比放之前亮', async ({
+  page,
+}) => {
+  await waitForFullViewDistance(page);
+  // 整段跑在一次同步的 evaluate 里。玩家东边一格的地面换成石头、上面两格清空，转头对准那块石头的
+  // 顶面按使用键：火把落在玩家东边一格、与脚同高。之后低头看脚下，画面正中是脚下那块地面的顶面，
+  // 夜里它的亮度来自火把的方块光（隔一格，13）。
+  const seen = await page.evaluate(
+    ({ torch, stone, air, maxPitch, chunkSize }) => {
+      const { core, renderer, hud } = window.__VOXEL__!;
+      const centerRgb = window.__CENTER_RGB__!;
+      const left = core.giveItem(torch, 4);
+      core.selectHotbarSlot(0);
+      core.setTimeOfDay(18000);
+      const px = Math.floor(core.player.position.x);
+      const py = Math.floor(core.player.position.y);
+      const pz = Math.floor(core.player.position.z);
+      core.setBlock(px + 1, py - 1, pz, stone);
+      core.setBlock(px + 1, py, pz, air);
+      core.setBlock(px + 1, py + 1, pz, air);
+      const cx = Math.floor((px + 1) / chunkSize);
+      const cz = Math.floor(pz / chunkSize);
+
+      const lookDown = () => {
+        core.turn(0, -maxPitch - core.player.pitch);
+        core.tick();
+        renderer.syncChunkMeshes();
+        renderer.render(1);
+      };
+      lookDown();
+      const before = { rgb: centerRgb(), blockLight: core.blockLightAt(px, py, pz), tiles: renderer.chunkMeshTiles(cx, cz) };
+
+      // 对准东边那块石头顶面的中心偏下一点
+      const eye = core.player.eyePosition;
+      const dx = px + 1.5 - eye.x;
+      const dy = py - 0.1 - eye.y;
+      const dz = pz + 0.5 - eye.z;
+      core.turn(Math.atan2(-dx, -dz) - core.player.yaw, Math.atan2(dy, Math.hypot(dx, dz)) - core.player.pitch);
+      core.tick();
+      const target = core.mining.target;
+      core.use();
+      core.tick();
+      const placed = core.getBlock(px + 1, py, pz);
+
+      lookDown();
+      hud.update();
+      return {
+        left,
+        target,
+        expectedTarget: { x: px + 1, y: py - 1, z: pz },
+        placed,
+        before,
+        after: { rgb: centerRgb(), blockLight: core.blockLightAt(px, py, pz), tiles: renderer.chunkMeshTiles(cx, cz) },
+        hotbar: core.inventory.hotbar(),
+      };
+    },
+    { torch: ItemType.Torch, stone: BlockType.Stone, air: BlockType.Air, maxPitch: MAX_PITCH, chunkSize: CHUNK_SIZE },
+  );
+  const brightness = ([r, g, b]: readonly number[]) => r! + g! + b!;
+
+  expect(seen.left).toBe(0);
+  expect(seen.target).toMatchObject({ ...seen.expectedTarget, normal: { x: 0, y: 1, z: 0 } });
+  expect(seen.placed).toBe(BlockType.Torch);
+  expect(seen.hotbar[0]).toEqual({ item: ItemType.Torch, count: 3 });
+  // 网格用到火把那一格（#57 换成细杆之前，暂按整格立方体贴它）
+  expect(seen.before.tiles).not.toContain(TILE.torch);
+  expect(seen.after.tiles).toContain(TILE.torch);
+  // 脚下那格方块光从 0 变成 13，画面正中的地面明显变亮
+  expect(seen.before.blockLight).toBe(0);
+  expect(seen.after.blockLight).toBe(13);
+  expect(brightness(seen.after.rgb)).toBeGreaterThan(brightness(seen.before.rgb) * 1.5);
+
+  // 快捷栏第一格：火把的图标与简体中文名
+  const slot = page.locator('#hotbar .hotbar__slot[data-slot="0"]');
+  await expect(slot).toHaveAttribute('data-item', String(ItemType.Torch));
+  await expect(slot).toHaveAttribute('title', ITEM_NAMES[ItemType.Torch]);
+  expect(ITEM_NAMES[ItemType.Torch]).toBe('火把');
+  await expect(slot.locator('.hotbar__count')).toHaveText('3');
+  const { col, row } = tileCell(ITEM_TILES[ItemType.Torch].side);
+  const icon = slot.locator('.hotbar__icon');
+  await expect(icon).toHaveCSS('--tile-col', String(col));
+  await expect(icon).toHaveCSS('--tile-row', String(row));
+  expect(errors).toEqual([]);
+});
+
 test('午夜低头看露天的地面：画面不是一片黑，仍数得出许多种颜色', async ({ page }) => {
   // 夜晚露天的折算天光是 4：比白天暗，但方块的轮廓与贴图的纹理都还在。
   const center = await page.evaluate(

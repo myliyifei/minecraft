@@ -1,5 +1,6 @@
-import { isAir, type BlockView } from './block';
+import { isAir, type BlockType, type BlockView } from './block';
 import type { Hitbox } from './physics';
+import { isTorch, torchHitbox } from './torch';
 import type { Axis, Vec3 } from './vec3';
 
 /** 视线命中的方块。 */
@@ -42,9 +43,12 @@ export function blockOutsideFace(hit: BlockHit): Vec3 {
  * `direction` 必须是单位向量，`distance` 与 `maxDistance` 才是真实距离。方向为零向量时
  * 没有命中。
  *
- * 起点那一格本身不是候选：眼睛埋在方块里时没有「进入面」可报，继续往前走又会命中墙后面
- * 的方块，所以直接判为没有目标。当前的方块种类下这不会发生——除空气之外都是实心的，
- * 玩家进不去。
+ * 火把那一格（#56）不是整格命中：射线与那根细杆占的轴对齐盒子求交（`torchHitbox`），碰到才算命中这一格，
+ * 命中面取盒子被碰到的那一面；碰不到就穿过这一格接着走。挖掘、使用、放置、攻击分派都走这一条。
+ *
+ * 起点那一格本身不是整格候选：眼睛埋在方块里时没有「进入面」可报，继续往前走又会命中墙后面
+ * 的方块，所以直接判为没有目标。玩家进得去的非空气格只有火把（不实心）：眼睛在火把那一格里时
+ * 照样与细杆求交，碰不到（含眼睛就在细杆里面）就接着往前走。
  */
 export function raycastBlocks(
   blocks: BlockView,
@@ -57,7 +61,8 @@ export function raycastBlocks(
     y: Math.floor(origin.y),
     z: Math.floor(origin.z),
   };
-  if (!isAir(blocks.getBlock(at.x, at.y, at.z))) return undefined;
+  const start = blocks.getBlock(at.x, at.y, at.z);
+  if (!isAir(start) && !isTorch(start)) return undefined;
 
   /** 沿这个轴每次跨一格，坐标加多少。 */
   const step: Record<Axis, number> = { x: 0, y: 0, z: 0 };
@@ -76,6 +81,10 @@ export function raycastBlocks(
     toBoundary[axis] = gap / speed;
   }
 
+  // 起点在火把那一格里：先看这一格的细杆挡不挡视线。
+  const startHit = torchCellHit(start, at.x, at.y, at.z, origin, direction, maxDistance);
+  if (startHit) return startHit;
+
   for (;;) {
     // 三个轴里哪条边界最近，就沿它跨一格。
     const axis = nearestAxis(toBoundary);
@@ -86,7 +95,13 @@ export function raycastBlocks(
 
     at[axis] += step[axis];
     toBoundary[axis] += perBlock[axis];
-    if (isAir(blocks.getBlock(at.x, at.y, at.z))) continue;
+    const block = blocks.getBlock(at.x, at.y, at.z);
+    if (isAir(block)) continue;
+    if (isTorch(block)) {
+      const hit = torchCellHit(block, at.x, at.y, at.z, origin, direction, maxDistance);
+      if (hit) return hit;
+      continue;
+    }
     return {
       x: at.x,
       y: at.y,
@@ -96,6 +111,33 @@ export function raycastBlocks(
       distance,
     };
   }
+}
+
+/**
+ * 射线碰到 (x, y, z) 那一格火把的细杆就是命中这一格：坐标是这一格，命中面是盒子被碰到的那一面。
+ * 不是火把、碰不到、或者起点就在细杆里面（报不出进入面）时 undefined。
+ */
+function torchCellHit(
+  block: BlockType,
+  x: number,
+  y: number,
+  z: number,
+  origin: Vec3,
+  direction: Vec3,
+  maxDistance: number,
+): BlockHit | undefined {
+  const box = torchHitbox(block, x, y, z);
+  if (!box) return undefined;
+  const entry = boxEntry(origin, direction, box, maxDistance);
+  if (!entry || entry.axis === undefined) return undefined;
+  return {
+    x,
+    y,
+    z,
+    // 沿 +x 碰到盒子，碰的是它的 −X 面。
+    normal: axisNormal(entry.axis, direction[entry.axis] > 0 ? -1 : 1),
+    distance: entry.distance,
+  };
 }
 
 /**
@@ -133,8 +175,20 @@ export function raycastBox(
   box: Hitbox,
   maxDistance: number,
 ): number | undefined {
+  return boxEntry(origin, direction, box, maxDistance)?.distance;
+}
+
+/** 射线进入一个碰撞箱的距离，以及从哪个轴的边界面进去的。起点在箱子里面（含贴在表面上）时轴是 undefined。 */
+interface BoxEntry {
+  readonly distance: number;
+  readonly axis: Axis | undefined;
+}
+
+/** `raycastBox` 的算法本身，多报一个进入面所在的轴：火把的命中面要它（`torchCellHit`）。 */
+function boxEntry(origin: Vec3, direction: Vec3, box: Hitbox, maxDistance: number): BoxEntry | undefined {
   let near = 0;
   let far = maxDistance;
+  let entered: Axis | undefined;
   for (const axis of AXES) {
     const o = origin[axis];
     const d = direction[axis];
@@ -144,13 +198,16 @@ export function raycastBox(
       if (o < min || o > max) return undefined;
       continue;
     }
-    const enter = (min - o) / d;
-    const exit = (max - o) / d;
-    near = Math.max(near, Math.min(enter, exit));
-    far = Math.min(far, Math.max(enter, exit));
+    const enter = Math.min((min - o) / d, (max - o) / d);
+    const exit = Math.max((min - o) / d, (max - o) / d);
+    if (enter > near) {
+      near = enter;
+      entered = axis;
+    }
+    far = Math.min(far, exit);
     if (near > far) return undefined;
   }
-  return near;
+  return { distance: near, axis: entered };
 }
 
 function nearestAxis(toBoundary: Record<Axis, number>): Axis {

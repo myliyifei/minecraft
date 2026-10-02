@@ -339,6 +339,23 @@ describe('候选列（Zombies.spawnNaturally）', () => {
     expect(attempt(tick, NIGHT_SKY_DARKENING, far)?.position).toEqual(plain.position);
   });
 
+  it('候选列被火把照到不生成：火把在 13 格外（方块光 1）不生成，14 格外（0）生成（#56）', () => {
+    const tick = ZOMBIE_SPAWN_INTERVAL;
+    const plain = attempt(tick)!;
+    const [bx, by, bz] = [Math.floor(plain.position.x), plain.position.y, Math.floor(plain.position.z)];
+    const toward = bx > 0 ? -1 : 1;
+
+    const near = flatTestWorld(3);
+    near.setBlock(bx + toward * 13, by, bz, BlockType.Torch);
+    expect(near.blockLightAt(bx, by, bz)).toBe(1);
+    expect(attempt(tick, NIGHT_SKY_DARKENING, near)).toBeUndefined();
+
+    const far = flatTestWorld(3);
+    far.setBlock(bx + toward * 14, by, bz, BlockType.Torch);
+    expect(far.blockLightAt(bx, by, bz)).toBe(0);
+    expect(attempt(tick, NIGHT_SKY_DARKENING, far)?.position).toEqual(plain.position);
+  });
+
   it('列顶在世界最高一层时不生成：上面那一格不在光照数组里；低一层照常生成', () => {
     const tick = ZOMBIE_SPAWN_INTERVAL;
     const plain = attempt(tick)!;

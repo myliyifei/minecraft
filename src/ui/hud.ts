@@ -2,6 +2,7 @@ import type { GameCore } from '../core/game';
 import type { InventoryScreenView } from '../core/inventory-screen';
 import { installCrosshair } from './crosshair';
 import { installDeathScreen } from './death-screen';
+import { installEnterHint } from './enter-hint';
 import { installHealthBar } from './health-bar';
 import { installHotbar } from './hotbar';
 import { installHurtFlash } from './hurt-flash';
@@ -15,14 +16,14 @@ import {
 import { installLevelBar } from './level-bar';
 
 /**
- * 屏幕上那一整套界面：十字准星在正中，底部自上而下是生命值那一排心、等级条、快捷栏，再加
- * 受伤时的红闪、三层覆盖层——按 E 打开的背包界面，与使用键对着工作台、熔炉打开的工作台界面、
- * 熔炉界面——与生命归零时的死亡画面。
+ * 屏幕上那一整套界面：十字准星在正中，没锁定鼠标时准星正下方有进入提示，底部自上而下是生命值
+ * 那一排心、等级条、快捷栏，再加受伤时的红闪、三层覆盖层——按 E 打开的背包界面，与使用键对着
+ * 工作台、熔炉打开的工作台界面、熔炉界面——与生命归零时的死亡画面。
  *
  * 合成一个句柄，接线层与调试句柄因此不必知道界面由几个部件组成——加一块显示（饥饿值）
  * 只改这个文件。心、等级条与快捷栏装在同一个 `#hud` 容器里，等级条的宽度因此自动跟
- * 快捷栏一样宽，不必把 9 格的宽度算式在 CSS 里写第二遍；十字准星、红闪与背包界面各自贴着
- * 视口定位，不在那个容器里。
+ * 快捷栏一样宽，不必把 9 格的宽度算式在 CSS 里写第二遍；十字准星、进入提示、红闪与背包界面各自
+ * 贴着视口定位，不在那个容器里。
  */
 export interface Hud {
   /** 让画面跟上核心。每帧调一次。 */
@@ -65,12 +66,13 @@ function screenSource(source: HudSource, screen: InventoryScreenView): Inventory
  * 把 HUD 挂到页面上。返回的句柄要每帧 `update()`。
  *
  * `afterRespawn` 在死亡画面的重生按钮按下、核心重生之后同步调，接线层在这里抓回指针锁定
- * （见 `installDeathScreen`）。
+ * （见 `installDeathScreen`）。`pointerLocked` 报此刻鼠标是否锁定在画布上，进入提示按它显示与隐藏。
  */
 export function installHud(
   parent: HTMLElement,
   source: HudSource,
   afterRespawn: () => void,
+  pointerLocked: () => boolean,
 ): Hud {
   // 红闪挂在最前面：后挂的元素画在它上面，心、快捷栏、准星与三层界面因此都不被染红，
   // 受伤那一下照样看得清剩几颗心。它挂在 `parent` 而不是 `#hud` 里，理由见下面准星那一段，
@@ -90,6 +92,8 @@ export function installHud(
   // （pointer-events: none），装进去的覆盖层既铺不满屏幕，格子也点不着；准星装进去连
   // 位置都对不上，理由在 style.css 的 `.crosshair` 那一段。
   const crosshair = installCrosshair(parent, source);
+  // 进入提示在准星正下方，与准星一样直接贴着视口定位。
+  const enterHint = installEnterHint(parent, source, pointerLocked);
   const screen = installInventoryScreen(
     parent,
     screenSource(source, source.inventoryScreen),
@@ -125,6 +129,7 @@ export function installHud(
       hotbar.update();
       hurtFlash.update();
       crosshair.update();
+      enterHint.update();
       screen.update();
       craftingTable.update();
       furnace.update();
@@ -134,6 +139,7 @@ export function installHud(
       root.remove();
       hurtFlash.remove();
       crosshair.remove();
+      enterHint.remove();
       screen.remove();
       craftingTable.remove();
       furnace.remove();

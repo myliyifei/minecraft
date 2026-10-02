@@ -212,6 +212,38 @@ body {
 }
 
 /*
+ * 进入提示：没锁定鼠标、又没开界面时画面正中、准星正下方的一行字（enter-hint.ts）。
+ *
+ * 位置与准星同一套做法，只是往下让出一格半：不压住准星，玩家仍看得见点下去瞄的是哪一点。
+ * pointer-events: none 的理由与准星一样：它离玩家点的那一点很近，点击要落到画布上才锁得上。
+ * 关掉界面时锁定是异步抓回的，中间可能有一两帧既没界面也没锁定；淡入从透明开始，那一两帧
+ * 看不出闪了一下。与准星一样不给 display，hidden 属性直接生效。
+ */
+.enter-hint {
+  position: fixed;
+  left: 50%;
+  top: calc(50% + var(--tile) * 1.5);
+  transform: translateX(-50%);
+  padding: calc(var(--tile) / 2) var(--tile);
+  background: rgb(0 0 0 / 40%);
+  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 35%);
+  font-family: var(--font-ui);
+  font-size: var(--text);
+  letter-spacing: 0.1em;
+  color: #fff;
+  text-shadow: 1px 1px 0 var(--ink);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: enter-hint-fade 0.2s ease-in;
+}
+
+@keyframes enter-hint-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/*
  * 生命值：等级条上方靠左的一排 10 颗心，每颗 2 点。
  *
  * 一颗心是 7×6 的像素心，一个像素是 --tile 的 1/8（与 16×16 贴图放大 2 倍时的像素一样大）；形状由 clip-path 裁出来，颜色按 health-bar.ts

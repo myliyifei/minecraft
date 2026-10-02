@@ -145,6 +145,18 @@ describe('物品进背包', () => {
     expect(inventory.slot(9)).toEqual({ item: ItemType.Dirt, count: 7 });
   });
 
+  it('快捷栏与背包各有一堆未满的泥土时，先填快捷栏那一堆', () => {
+    const inventory = new Inventory();
+    // 背包那一堆排在快捷栏那一堆前面写进去，结果仍是快捷栏先填：顺序看下标，不看写入先后
+    inventory.setSlot(HOTBAR_SIZE + 3, dirt(10));
+    inventory.setSlot(5, dirt(60));
+
+    expect(inventory.add(dirt(6))).toBe(0);
+    // 快捷栏那一堆补满 4 个，剩下 2 个才进背包那一堆
+    expect(inventory.slot(5)).toEqual(dirt(64));
+    expect(inventory.slot(HOTBAR_SIZE + 3)).toEqual(dirt(12));
+  });
+
   it('占空格时快捷栏先于背包', () => {
     const inventory = new Inventory();
     // 快捷栏 9 格填满，第 10 堆才落到背包的第一格

@@ -117,7 +117,7 @@ export const CELESTIAL_DISTANCE = 400;
 export const CELESTIAL_SIZE = 60;
 
 /**
- * 太阳与月亮的中心能落到地平线下多深还画：方片的半边长对应的仰角的正弦。
+ * 太阳与月亮的中心能落到地平线下多深还画：方片的半边长对应的高度角的正弦。
  * 中心刚过地平线时方片还露着上半截，整块落下去才不画。
  */
 const CELESTIAL_HIDE_BELOW = -Math.sin(Math.atan(CELESTIAL_SIZE / 2 / CELESTIAL_DISTANCE));

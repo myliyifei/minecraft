@@ -142,9 +142,9 @@ export class Inventory implements InventoryView, ItemSink, Hand, ToolHand, SlotS
   /**
    * 第一轮：填同种的未满堆。返回还剩多少。
    *
-   * 与第二轮一样按下标升序走，「快捷栏优先」因此不需要额外一行代码。留意一点：走完
-   * `add` 之后同一种物品最多只剩一个未满堆（先填满已有的才另起一堆），所以「快捷栏与
-   * 背包各有一堆未满、看谁先被填」这种局面在本切片的接口下构造不出来。
+   * 与第二轮一样按下标升序走，「快捷栏优先」因此不需要额外一行代码。只走 `add` 时同一种
+   * 物品最多只有一个未满堆（先填满已有的才另起一堆）；背包界面里拿起放下、拆堆，或 `setSlot`
+   * 直接写格子，都能让快捷栏与背包各有一堆未满，这时先填的是快捷栏那一堆。
    */
   private topUpExisting(stack: ItemStack, limit: number, count: number): number {
     let left = count;

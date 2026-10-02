@@ -358,7 +358,7 @@ class Zombie implements ZombieView {
   private prevZ: number;
   private velocityY = 0;
   /**
-   * 击退的水平速度，每 tick 乘 `KNOCKBACK_DECAY`。走路的位移另算、没有惯性，两者每 tick 相加。
+   * 击退的水平速度，每 tick 乘 `KNOCKBACK_DECAY`。移动的位移另算、没有惯性，两者每 tick 相加。
    * 没被打过时是 `NO_WALK`。
    */
   private knock: HorizontalDelta = NO_WALK;
@@ -537,7 +537,7 @@ class Zombie implements ZombieView {
   }
 
   /**
-   * 推进第 now 个 tick：重力与竖直碰撞，再沿两个水平轴各走一步。水平那一步是走路的位移加上击退的速度，
+   * 推进第 now 个 tick：重力与竖直碰撞，再沿两个水平轴各走一步。水平那一步是移动的位移加上击退的速度，
    * 走完击退速度衰减一次。
    *
    * 竖直那一步落地时按落差受摔落伤害，规则与玩家同一条（`fallDamage`），受击后的无敌时间里不生效。

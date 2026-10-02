@@ -102,7 +102,7 @@ export class Player implements PlayerView {
   private prevZ: number;
   private velocityY = 0;
   /**
-   * 击退的水平速度，每 tick 乘 `KNOCKBACK_DECAY`，只由 `knockBack` 写入。走路的位移另算、没有惯性，
+   * 击退的水平速度，每 tick 乘 `KNOCKBACK_DECAY`，只由 `knockBack` 写入。移动的位移另算、没有惯性，
    * 两者每 tick 相加，与僵尸一致。没被打过时是 `NO_WALK`。
    */
   private knock: HorizontalDelta = NO_WALK;
@@ -247,7 +247,7 @@ export class Player implements PlayerView {
 
     // 竖直走完再走水平：跳到台阶上时这一 tick 已经抬到了台阶顶面之上，
     // 水平方向因此不再被台阶挡住。从边缘走下去时，离地前的高度已经在上面记下，下一 tick 起算落差。
-    // 两个轴分开做碰撞，斜着撞墙时会沿着墙滑过去，而不是整步作废。这一步是走路加上击退，走完
+    // 两个轴分开做碰撞，斜着撞墙时会沿着墙滑过去，而不是整步作废。这一步是移动加上击退，走完
     // 击退衰减一次。
     this.knock = decayedKnockback(this.knock);
     this.x = this.movedAlong('x', move.x);

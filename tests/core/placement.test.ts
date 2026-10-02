@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { WORLD_MAX_Y } from '../../src/core/constants';
 import { Inventory } from '../../src/core/inventory';
-import { ItemType, type Hand, type ItemStack } from '../../src/core/item';
+import { ItemType, type ItemStack } from '../../src/core/item';
 import { hitboxAt, type Hitbox } from '../../src/core/physics';
 import { placeBlock } from '../../src/core/placement';
 import { PLAYER_HEIGHT, PLAYER_WIDTH } from '../../src/core/player';
@@ -70,13 +70,11 @@ interface Setup {
 
 /**
  * 一套放置的现场：目标方块摆好、手上拿着东西、玩家站在远处。
- * 手上那一堆走真的 `Inventory`（进背包与扣数量因此是真的那一份逻辑），
- * 只有「手上不是方块物品」那条用假的手。
+ * 手上那一堆走真的 `Inventory`（进背包与扣数量因此是真的那一份逻辑）。
  */
 function setup(
   options: {
     readonly held?: ItemStack;
-    readonly hand?: Hand;
     readonly body?: Hitbox;
     readonly blocks?: Array<[BlockCoord, BlockType]>;
   } = {},
@@ -92,12 +90,11 @@ function setup(
     },
   };
   const body = { hitbox: options.body ?? STANDING };
-  const hand = options.hand ?? inventory;
 
   return {
     world,
     inventory,
-    place: () => placeBlock(world, aim, body, hand),
+    place: () => placeBlock(world, aim, body, inventory),
     aimAt: (hit) => {
       target = hit;
     },
@@ -180,22 +177,12 @@ describe('放不下去的情形', () => {
   });
 
   it('手上不是方块物品时放不下', () => {
-    // 本切片的两种物品都放得下去，所以这条规则只能用一个还不存在的物品编号来验。
-    // 等镐子那类物品做出来，把这里换成真的工具。
-    const notABlock = 99 as ItemType;
-    let taken = 0;
-    const { world, place } = setup({
-      hand: {
-        held: { item: notABlock, count: 1 },
-        takeOne: () => {
-          taken++;
-        },
-      },
-    });
+    const pickaxe: ItemStack = { item: ItemType.WoodenPickaxe, count: 1 };
+    const { world, inventory, place } = setup({ held: pickaxe });
 
     expect(place()).toBe(false);
     expect(world.getBlock(2, LAYER_Y, 0)).toBe(BlockType.Air);
-    expect(taken).toBe(0);
+    expect(inventory.held).toEqual(pickaxe);
   });
 
   it('世界高度之外放不下，手持的那一堆也不会少', () => {

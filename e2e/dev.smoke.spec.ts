@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { BlockType, miningTicks } from '../src/core/block';
+import { BlockType, isSolid, miningTicks } from '../src/core/block';
 import {
   CHUNK_SIZE,
   DEFAULT_SEED,
@@ -65,6 +65,7 @@ import {
   ZOMBIE_HEIGHT,
   ZOMBIE_MAX_HEALTH,
   ZOMBIE_SPAWN_MAX_DISTANCE,
+  ZOMBIE_SPAWN_MAX_SKY_LIGHT,
   ZOMBIE_SPAWN_MIN_DISTANCE,
   ZOMBIE_SPEED,
   ZOMBIE_XP,
@@ -252,6 +253,17 @@ async function grabPointer(page: Page): Promise<void> {
   await page.waitForTimeout(200);
 }
 
+/** 退出指针锁定并等锁定变更事件到达。真人按 Esc 时由浏览器退出，CDP 合成的 Esc 做不到这一步。 */
+async function releasePointer(page: Page): Promise<void> {
+  await page.evaluate(
+    async () =>
+      new Promise<void>((resolve) => {
+        document.addEventListener('pointerlockchange', () => resolve(), { once: true });
+        document.exitPointerLock();
+      }),
+  );
+}
+
 /** 元素中心离视口正中最多差这么多像素：视口边长是奇数时 50% 会落在半像素上。 */
 const CENTER_TOLERANCE_PX = 1;
 
@@ -295,8 +307,8 @@ async function walkWhileHolding(
 }
 
 /**
- * 通过调试句柄往背包里放 1 个原木：脚下那块换成原木再挖来。核心没有直接往背包里塞物品的
- * 入口，「放进背包」走的就是这条路。配方书那两条测试共用。
+ * 通过调试句柄往背包里放 1 个原木：脚下那块换成原木再挖来。挖来而不是用 `giveItem` 给：这几条
+ * 写在 `giveItem` 之前，保留挖掘进背包那条路。配方书那两条测试共用。
  */
 async function giveOneLog(page: Page): Promise<void> {
   await page.evaluate(
@@ -620,13 +632,7 @@ test('释放鼠标后按住的键不会卡着继续走', async ({ page }) => {
 
   // 真人按 Esc 时是浏览器自己退出指针锁定（规范要求 UA 这么做），CDP 合成的 Esc
   // 触发不了它，所以这里直接退出锁定——要测的是我们这一侧：锁定一丢，按键就不算数了。
-  await page.evaluate(
-    async () =>
-      new Promise<void>((resolve) => {
-        document.addEventListener('pointerlockchange', () => resolve(), { once: true });
-        document.exitPointerLock();
-      }),
-  );
+  await releasePointer(page);
   expect(await readLockedElementId(page)).toBe(null);
 
   const stuck = await page.evaluate((ticks) => {
@@ -1825,7 +1831,7 @@ interface PitSpot {
  * 通过调试句柄让玩家拿到一把木镐：脚下换成原木挖穿掉进坑里，坑里眼前再摆一根原木挖来，再远一格
  * 摆工作台，用配方书三步造出木镐放进第 0 格（选中格），最后关掉工作台界面。
  *
- * 原木只能挖来，木镐只能造出来：核心没有直接往背包里放物品的入口。整段在一次同步的 evaluate 里
+ * 原木挖来、木镐造出来，理由同 `giveOneLog`。整段在一次同步的 evaluate 里
  * 给核心，游戏循环插不进来。返回玩家站的那个坑的位置，后面几条测试据此在眼前摆方块。
  */
 async function craftPickaxeIntoHand(page: Page): Promise<PitSpot> {
@@ -2423,8 +2429,7 @@ test('背包界面里点一格拿起泥土，再点空格放下', async ({ page 
 });
 
 test('背包界面里有 2x2 合成网格与输出格，放进原木后输出格出现木板，点它拿走', async ({ page }) => {
-  // 脚下那块换成原木再挖来：东西只能挖来，核心没有往背包里塞物品的入口。挖掘与开合都
-  // 直接给核心，理由同上一条。
+  // 脚下那块换成原木再挖来（见 `giveOneLog`）。挖掘与开合都直接给核心，理由同上一条。
   await giveOneLog(page);
   await openInventoryScreen(page);
 
@@ -2811,11 +2816,44 @@ test('背包界面开着时不显示十字准星', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('没锁定鼠标又没开界面时准星正下方显示进入提示，点画布锁定后隐藏，Esc 退出锁定后再出现', async ({
+  page,
+}) => {
+  const hint = page.locator('#enter-hint');
+  await expect(hint).toBeVisible();
+  await expect(hint).toHaveText(STRINGS.clickToStart);
+  // 左右居中，紧挨在准星下面，不压住准星
+  const box = (await hint.boundingBox())!;
+  const crosshairBox = (await page.locator('#crosshair').boundingBox())!;
+  const viewport = page.viewportSize()!;
+  expect(Math.abs(box.x + box.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(CENTER_TOLERANCE_PX);
+  expect(box.y).toBeGreaterThan(crosshairBox.y + crosshairBox.height);
+  expect(box.y).toBeLessThan(viewport.height * 0.65);
+
+  // 玩家照着提示点，点的就是提示那几个字：点击要穿过它落到画布上，否则锁不上
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect.poll(() => readLockedElementId(page)).toBe('game');
+  await expect(hint).toBeHidden();
+
+  // 背包界面开着时鼠标交还给页面，但玩家在摆物品，不该提示点画面
+  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await expect(page.locator('#inventory-screen')).toBeVisible();
+  expect(await readLockedElementId(page)).toBe(null);
+  await expect(hint).toBeHidden();
+  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await expect.poll(() => readLockedElementId(page)).toBe('game');
+  await expect(hint).toBeHidden();
+
+  await releasePointer(page);
+  await expect(hint).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 /**
  * 在玩家正前方紧挨着的那一格摆一个可使用方块（默认工作台），并让玩家朝它平视。返回那一格的坐标。
  *
- * 方块由 `setBlock` 直接摆进世界：核心没有往背包里放入物品的入口，而 4 块木板合成工作台要先
- * 拆堆（#25）、8 块圆石合成熔炉要先挖石头。这条测的是右键那一下的接线，不是合成。
+ * 方块由 `setBlock` 直接摆进世界：这条测的是右键那一下的接线，不是合成。原木经 2x2 合成出工作台、
+ * 放到世界里再打开的整条链路在 tests/core/game.test.ts 的「GameCore 的工作台」一节里验。
  */
 async function setUsableAhead(
   page: Page,
@@ -3740,7 +3778,7 @@ test('脚下放一支火把：几帧后粒子读回里火焰光点与烟都大�
   expect(errors).toEqual([]);
 });
 
-test('身旁的熔炉点着火：几帧后粒子读回里火焰光点与烟都大于 0；1600 tick 煤炭烧完熄火，几秒后归 0', async ({ page }) => {
+test('身旁的熔炉点火：几帧后粒子读回里火焰光点与烟都大于 0；1600 tick 煤炭烧完熄火，几秒后归 0', async ({ page }) => {
   await waitForFullViewDistance(page);
   // 点火走熔炼状态机：放进原料与燃料、推进一 tick，不直接写燃烧中的编号。熄火同样靠烧完一件煤炭。
   const spot = await page.evaluate(
@@ -4590,6 +4628,402 @@ test('整条战斗流程：夜里等到僵尸，铁剑打死一只拾到腐肉�
     .reduce((sum, stack) => sum + stack.count, 0);
   expect(returned.flesh).toBeGreaterThanOrEqual(fleshBefore);
   expect(returned.experience).toBe(death.before.experience);
+  expect(errors).toEqual([]);
+});
+
+/** 火把全流程里矿道的台阶级数：每级往下一格。 */
+const MINE_STAIR_STEPS = 6;
+
+/** 台阶底下接着往前挖的平巷有几列长（1 格宽、2 格高）。 */
+const MINE_TUNNEL_LENGTH = 19;
+
+/**
+ * 墙上火把插在平巷的第几列（台阶底那一列算第 0 列）。平巷尽头前一列离它 15 格，火把的光（14）与台阶口
+ * 进来的天光都到不了那里。木镐耐久 59：台阶约 17 格、平巷 38 格、煤矿石 1 格，刚好够用。
+ */
+const MINE_TORCH_COLUMN = 3;
+
+/**
+ * 火把全流程里自然生成那一段从第几个 tick 开始。固定下来，候选列的哈希每次相同（ADR-0014）。它要比前面几段
+ * 走完时的 tick 计数大，不然测试当场报错；起始 tick 从 6000 到 13020 试过 12 个，全部通过。
+ */
+const TORCH_CHAIN_SPAWN_START_TICK = 8000;
+
+/** 夜里等自然生成最多等这么多 tick：试 60 次。 */
+const TORCH_CHAIN_SPAWN_TICKS = 1200;
+
+/** 圆环里留着不插火把的扇形：朝 −X，左右各 60°，占整个圆环的三分之一。 */
+const DARK_SECTOR_CENTER = Math.PI;
+const DARK_SECTOR_HALF_ANGLE = Math.PI / 3;
+
+/** 照亮的那三分之二圆环里，火把按这个间隔插成网格。 */
+const SPAWN_RING_TORCH_SPACING = 4;
+
+/** 不实心的方块编号（空气、火把等）。列顶是它们的列不会生成僵尸，数没照到的列时跳过。 */
+const NON_SOLID_BLOCKS = Object.values(BlockType).filter((block) => !isSolid(block));
+
+test('火把全流程：挖原木与煤，2x2 做火把，挖下行矿道在墙上插火把，火把旁亮、平巷尽头黑；回到地表拨到夜晚，火把照到的圆环不生成僵尸、没照到的扇形生成；天亮露天的僵尸烧死', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await waitForFullViewDistance(page);
+
+  // 第一段：原木与煤。原木挖来、工作台里造出木镐（剩 2 根木棍在第 21 格），眼前那一格摆一块煤矿石用木镐挖掉，
+  // 煤炭进第 1 格
+  const pit = await craftPickaxeIntoHand(page);
+  const coal = await page.evaluate(
+    ({ x, eyeY, z, coalOre, air, pickupTicks }) => {
+      const core = window.__VOXEL__!.core;
+      core.setBlock(x, eyeY, z - 1, coalOre);
+      core.turn(-core.player.yaw, -core.player.pitch);
+      core.tick();
+      core.setMining(true);
+      for (let n = 0; n < 200 && core.getBlock(x, eyeY, z - 1) !== air; n++) core.tick();
+      core.setMining(false);
+      core.tick(pickupTicks);
+      return JSON.stringify({ coal: core.inventory.slot(1), sticks: core.inventory.slot(21) });
+    },
+    { ...pit, coalOre: BlockType.CoalOre, air: BlockType.Air, pickupTicks: PICKUP_DELAY_TICKS + 2 },
+  );
+  expect(JSON.parse(coal)).toEqual({
+    coal: { item: ItemType.Coal, count: 1 },
+    sticks: { item: ItemType.Stick, count: 2 },
+  });
+
+  // 第二段：背包界面的 2x2 里煤炭放左上、木棍拆一根放左下，输出格出现 4 支火把
+  await page.evaluate(
+    ({ grid }) => {
+      const core = window.__VOXEL__!.core;
+      core.toggleInventory();
+      core.tick();
+      core.clickSlot(1);
+      core.clickSlot(grid);
+      core.clickSlot(21);
+      core.splitSlot(grid + 2);
+      core.clickSlot(21);
+      core.tick();
+    },
+    { grid: INVENTORY_SIZE },
+  );
+  const output = page.locator('#inventory-screen [data-output]');
+  await expect(output).toHaveAttribute('data-item', String(ItemType.Torch));
+  await expect(output).toHaveAttribute('title', ITEM_NAMES[ItemType.Torch]);
+  await expect(output.locator('.invscreen__count')).toHaveText('4');
+  const crafted = await page.evaluate(() => {
+    const core = window.__VOXEL__!.core;
+    core.clickCraftingOutput();
+    core.clickSlot(1);
+    core.toggleInventory();
+    core.tick();
+    return JSON.stringify({ torches: core.inventory.slot(1), sticks: core.inventory.slot(21), ui: core.uiMode });
+  });
+  expect(JSON.parse(crafted)).toEqual({
+    torches: { item: ItemType.Torch, count: 4 },
+    sticks: { item: ItemType.Stick, count: 1 },
+    ui: false,
+  });
+
+  // 第三段：从坑里朝 +Z 挖下行的台阶，每级挖前方那一列的头顶、身位、脚下三格再走下去（留出跳回来的高度），
+  // 台阶底下接一条 2 格高的平巷。白天挖，走回平巷第 MINE_TORCH_COLUMN 列，对着 −X 那面墙按使用键插一支火把。
+  // 火把前后各读一次画面正中：火把那一列对面的墙，与平巷尽头的墙。整段在一次同步的 evaluate 里
+  const mine = await page.evaluate(
+    ({ steps, tunnel, torchColumn, pitZ, air }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const centerRgb = window.__CENTER_RGB__!;
+      const idle = { forward: false, back: false, left: false, right: false, jump: false };
+      const cell = () => {
+        const { x, y, z } = core.player.position;
+        return { x: Math.floor(x), y: Math.floor(y), z: Math.floor(z) };
+      };
+      /** 把视线转向 (x, y, z)。 */
+      const aimAt = (x: number, y: number, z: number) => {
+        const eye = core.player.eyePosition;
+        const [dx, dy, dz] = [x - eye.x, y - eye.y, z - eye.z];
+        const yaw = Math.atan2(-dx, -dz) - core.player.yaw;
+        core.turn(Math.atan2(Math.sin(yaw), Math.cos(yaw)), Math.atan2(dy, Math.hypot(dx, dz)) - core.player.pitch);
+      };
+      /** 对准 (x, y, z) 的中心按住左键，直到它变成空气。木镐用坏了就空手接着挖。 */
+      const dig = (x: number, y: number, z: number) => {
+        if (core.getBlock(x, y, z) === air) return;
+        aimAt(x + 0.5, y + 0.5, z + 0.5);
+        core.tick();
+        const target = core.mining.target;
+        if (target?.x !== x || target.y !== y || target.z !== z) {
+          throw new Error(`对准 (${x}, ${y}, ${z}) 时目标是 ${JSON.stringify(target)}`);
+        }
+        core.setMining(true);
+        for (let n = 0; n < 400 && core.getBlock(x, y, z) !== air; n++) core.tick();
+        core.setMining(false);
+        if (core.getBlock(x, y, z) !== air) throw new Error(`(${x}, ${y}, ${z}) 挖不掉`);
+      };
+      /** 沿 z 朝 dir（+1 或 −1）走进下一列，走到那一列的中段再站稳。 */
+      const walkOn = (dir: number, jump: boolean) => {
+        const to = cell().z + dir;
+        const yaw = (dir > 0 ? Math.PI : 0) - core.player.yaw;
+        core.turn(Math.atan2(Math.sin(yaw), Math.cos(yaw)), -core.player.pitch);
+        const inside = () => {
+          const { z } = core.player.position;
+          return Math.floor(z) === to && (dir > 0 ? z - to : to + 1 - z) >= 0.4;
+        };
+        for (let n = 0; n < 40 && !inside(); n++) {
+          core.setMoveIntent({ ...idle, forward: true, jump });
+          core.tick();
+        }
+        core.setMoveIntent(idle);
+        core.tick(10);
+        if (cell().z !== to) throw new Error(`没走进第 ${to} 列，停在 ${JSON.stringify(core.player.position)}`);
+      };
+      /** 平视 (x, y, z) 那一点，画一帧，读画面正中。 */
+      const look = (x: number, y: number, z: number) => {
+        aimAt(x, y, z);
+        core.tick();
+        renderer.syncChunkMeshes(Infinity);
+        renderer.render(1);
+        return centerRgb();
+      };
+
+      const top = cell();
+      for (let k = 0; k < steps; k++) {
+        const { x, y, z } = cell();
+        dig(x, y + 1, z + 1);
+        dig(x, y, z + 1);
+        dig(x, y - 1, z + 1);
+        walkOn(1, false);
+      }
+      const bottom = cell();
+      for (let k = 0; k < tunnel; k++) {
+        const { x, y, z } = cell();
+        dig(x, y + 1, z + 1);
+        dig(x, y, z + 1);
+        walkOn(1, false);
+      }
+      const end = cell();
+      const { x, y: floorY } = bottom;
+      const headY = floorY + 1;
+      const torchZ = bottom.z + torchColumn;
+      /** 平巷 +X 那面墙朝里那一面、第 z 列的中心，与它外侧那一格的光照。 */
+      const wall = (z: number) => ({
+        rgb: look(x + 1, headY + 0.5, z + 0.5),
+        sky: core.skyLightAt(x, headY, z),
+        block: core.blockLightAt(x, headY, z),
+      });
+      const farBefore = wall(end.z - 1);
+      while (cell().z > torchZ + 2) walkOn(-1, false);
+      const nearBefore = wall(torchZ);
+
+      // 选中火把，对准 −X 那面墙朝里那一面按使用键；插好再切回木镐那一格，免得手持光照亮读数
+      core.selectHotbarSlot(1);
+      aimAt(x, headY + 0.5, torchZ + 0.5);
+      core.tick();
+      const torchTarget = core.mining.target;
+      core.use();
+      core.tick();
+      const torchBlock = core.getBlock(x, headY, torchZ);
+      core.selectHotbarSlot(0);
+      const nearAfter = wall(torchZ);
+      while (cell().z < end.z) walkOn(1, false);
+      const farAfter = wall(end.z - 1);
+
+      // 回到地表：走回台阶底，一级一级跳上去，出坑站到坑前那一格的地面上
+      while (cell().z > pitZ) walkOn(-1, true);
+      walkOn(-1, true);
+      const surface = cell();
+      return JSON.stringify({
+        top,
+        bottom,
+        end,
+        torchTarget,
+        torchBlock,
+        torchCell: { x, y: headY, z: torchZ },
+        torchesLeft: core.inventory.slot(1),
+        pickaxe: core.inventory.slot(0),
+        nearBefore,
+        nearAfter,
+        farBefore,
+        farAfter,
+        surface,
+        surfaceSky: core.skyLightAt(surface.x, surface.y, surface.z),
+      });
+    },
+    {
+      steps: MINE_STAIR_STEPS,
+      tunnel: MINE_TUNNEL_LENGTH,
+      torchColumn: MINE_TORCH_COLUMN,
+      pitZ: pit.z,
+      air: BlockType.Air,
+    },
+  );
+  const seen = JSON.parse(mine);
+  const brightness = ([r, g, b]: readonly number[]) => r! + g! + b!;
+  // 台阶往下挖了 MINE_STAIR_STEPS 级，平巷挖到了头
+  expect(seen.bottom.y).toBe(seen.top.y - MINE_STAIR_STEPS);
+  expect(seen.end.z).toBe(seen.bottom.z + MINE_TUNNEL_LENGTH);
+  // 对着 −X 那面墙朝里那一面插下的是贴在 −X 侧的墙上火把，手上少了 1 支
+  expect(seen.torchTarget).toMatchObject({ ...seen.torchCell, x: seen.torchCell.x - 1, normal: { x: 1, y: 0, z: 0 } });
+  expect(seen.torchBlock).toBe(BlockType.WallTorchNegX);
+  expect(seen.torchesLeft).toEqual({ item: ItemType.Torch, count: 3 });
+  // 火把旁亮：对面那面墙外侧那一格方块光 14（就是火把那一格），比插之前亮得多
+  expect(seen.nearBefore.block).toBe(0);
+  expect(seen.nearAfter.block).toBe(14);
+  expect(brightness(seen.nearAfter.rgb)).toBeGreaterThan(brightness(seen.nearBefore.rgb) * 1.5);
+  // 平巷尽头黑：天光与方块光都是 0，插火把前后一样暗，比火把旁暗得多
+  expect(seen.farBefore).toMatchObject({ sky: 0, block: 0 });
+  expect(seen.farAfter).toMatchObject({ sky: 0, block: 0 });
+  expect(brightness(seen.farAfter.rgb)).toBe(brightness(seen.farBefore.rgb));
+  expect(brightness(seen.nearAfter.rgb)).toBeGreaterThan(brightness(seen.farAfter.rgb) * 2);
+  // 回到了地表：坑前那一格的地面上，露天
+  expect(seen.surface).toEqual({ x: pit.x, y: pit.eyeY, z: pit.z - 1 });
+  expect(seen.surfaceSky).toBe(15);
+
+  // 第四段：玩家周围八格砌 2 格高的石墙、坑口封死，僵尸走到墙外打不到他（水平 1.5 格内才打得到）。离玩家
+  // 24 到 48 格的圆环里，朝 −X 的扇形留着不插火把，其余三分之二按固定的网格在列顶插火把。固定到第
+  // TORCH_CHAIN_SPAWN_START_TICK 个 tick，拨到午夜，逐 tick 记下新生成的僵尸
+  const spawning = await page.evaluate(
+    ({ pitX, pitZ, startTick, ticks, night, spacing, darkCenter, darkHalf, minD, maxD, torch, stone, air, nonSolid }) => {
+      const core = window.__VOXEL__!.core;
+      const me = { ...core.player.position };
+      const feetY = Math.floor(me.y);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          if (dx === 0 && dz === 0) continue;
+          for (let dy = 0; dy < 2; dy++) {
+            const [x, y, z] = [Math.floor(me.x) + dx, feetY + dy, Math.floor(me.z) + dz];
+            if (core.getBlock(x, y, z) === air) core.setBlock(x, y, z, stone);
+          }
+        }
+      }
+      core.setBlock(pitX, feetY - 1, pitZ, stone);
+
+      const angleFromPlayer = (x: number, z: number) => Math.atan2(z - me.z, x - me.x);
+      const inDarkSector = (x: number, z: number) => {
+        const off = angleFromPlayer(x, z) - darkCenter;
+        return Math.abs(Math.atan2(Math.sin(off), Math.cos(off))) <= darkHalf;
+      };
+      /** 候选列：列的中心离玩家的水平距离在 24 到 48 格之间。 */
+      const ring: Array<{ x: number; z: number }> = [];
+      for (let x = Math.floor(me.x - maxD) - 1; x <= me.x + maxD + 1; x++) {
+        for (let z = Math.floor(me.z - maxD) - 1; z <= me.z + maxD + 1; z++) {
+          const d = Math.hypot(x + 0.5 - me.x, z + 0.5 - me.z);
+          if (d >= minD && d <= maxD) ring.push({ x, z });
+        }
+      }
+      const lit = ring.filter(({ x, z }) => !inDarkSector(x + 0.5, z + 0.5));
+      /** 这一列会不会生成：列顶是实心方块，上面那一格方块光是 0。 */
+      const unlit = ({ x, z }: { x: number; z: number }) => {
+        const top = core.highestBlockY(x, z);
+        return !nonSolid.includes(core.getBlock(x, top, z)) && core.blockLightAt(x, top + 1, z) === 0;
+      };
+      // 火把按固定的网格插，不看插下去之后的光照：插在哪里只由种子与网格决定，光照算错时不会被补插的火把
+      // 顶替掉（插了火把的那一列列顶不实心，本来就不生成）
+      let torches = 0;
+      const onGrid = (v: number) => ((v % spacing) + spacing) % spacing === 0;
+      for (const { x, z } of lit) {
+        if (!onGrid(x) || !onGrid(z)) continue;
+        if (core.setBlock(x, core.highestBlockY(x, z) + 1, z, torch)) torches++;
+      }
+
+      if (core.tickCount > startTick) throw new Error(`前几段走完已经是第 ${core.tickCount} 个 tick`);
+      while (core.tickCount < startTick) core.tick();
+      core.setTimeOfDay(night);
+      const known = new Set(core.zombies.all().map((zombie) => zombie.id));
+      const spawned: Array<{ distance: number; dark: boolean; blockLight: number; skyLight: number }> = [];
+      for (let n = 0; n < ticks; n++) {
+        core.tick();
+        for (const zombie of core.zombies.all()) {
+          if (known.has(zombie.id)) continue;
+          known.add(zombie.id);
+          const { x, y, z } = zombie.position;
+          spawned.push({
+            distance: Math.hypot(x - me.x, z - me.z),
+            dark: inDarkSector(x, z),
+            blockLight: core.blockLightAt(Math.floor(x), Math.floor(y), Math.floor(z)),
+            skyLight: core.effectiveSkyLightAt(Math.floor(x), Math.floor(y), Math.floor(z)),
+          });
+        }
+      }
+      return JSON.stringify({
+        lit: lit.length,
+        ring: ring.length,
+        torches,
+        unlitLeft: lit.filter(unlit).length,
+        darkUnlit: ring.filter((column) => !lit.includes(column) && unlit(column)).length,
+        spawned,
+        dead: core.health.dead,
+      });
+    },
+    {
+      pitX: pit.x,
+      pitZ: pit.z,
+      startTick: TORCH_CHAIN_SPAWN_START_TICK,
+      ticks: TORCH_CHAIN_SPAWN_TICKS,
+      night: 18000,
+      spacing: SPAWN_RING_TORCH_SPACING,
+      darkCenter: DARK_SECTOR_CENTER,
+      darkHalf: DARK_SECTOR_HALF_ANGLE,
+      minD: ZOMBIE_SPAWN_MIN_DISTANCE,
+      maxD: ZOMBIE_SPAWN_MAX_DISTANCE,
+      torch: BlockType.Torch,
+      stone: BlockType.Stone,
+      air: BlockType.Air,
+      nonSolid: NON_SOLID_BLOCKS,
+    },
+  );
+  const night = JSON.parse(spawning);
+  // 照亮的那三分之二圆环里，列顶实心的每一列上面那一格方块光都大于 0；留暗的扇形里有方块光是 0 的列
+  expect(night.torches).toBeGreaterThan(0);
+  expect(night.unlitLeft).toBe(0);
+  expect(night.darkUnlit).toBeGreaterThan(0);
+  // 没照到的扇形里生成了僵尸；每一只都在暗扇形里、离玩家 24 到 48 格、那一格方块光 0、折算天光不超过 7。
+  // 候选列的角度是均匀的，火把要是不起作用，几只全部落在三分之一的扇形里几乎不可能
+  expect(night.spawned.length).toBeGreaterThanOrEqual(3);
+  for (const zombie of night.spawned) {
+    expect(zombie).toMatchObject({ dark: true, blockLight: 0 });
+    expect(zombie.skyLight).toBeLessThanOrEqual(ZOMBIE_SPAWN_MAX_SKY_LIGHT);
+    expect(zombie.distance).toBeGreaterThanOrEqual(ZOMBIE_SPAWN_MIN_DISTANCE);
+    expect(zombie.distance).toBeLessThanOrEqual(ZOMBIE_SPAWN_MAX_DISTANCE);
+  }
+  expect(night.dead).toBe(false);
+
+  // 第五段：拨回白天。露天的僵尸一直烧到死；走进矿道或树冠底下的不在露天，不烧。等到露天的一只都不剩
+  const dawn = await page.evaluate(
+    ({ limit, burnDamage }) => {
+      const core = window.__VOXEL__!.core;
+      const openSky = ({ x, y, z }: Vec3) => core.skyLightAt(Math.floor(x), Math.floor(y), Math.floor(z)) === 15;
+      core.setTimeOfDay(0);
+      const last = new Map<number, { health: number; burning: boolean }>();
+      const remember = () => {
+        for (const zombie of core.zombies.all()) last.set(zombie.id, { health: zombie.health, burning: zombie.burning });
+      };
+      remember();
+      const before = core.zombies.count;
+      let ticks = 0;
+      for (; ticks < limit && core.zombies.all().some((zombie) => openSky(zombie.position)); ticks++) {
+        core.tick();
+        remember();
+      }
+      const alive = new Set(core.zombies.all().map((zombie) => zombie.id));
+      const gone = [...last.entries()].filter(([id]) => !alive.has(id)).map(([, seen]) => seen);
+      return JSON.stringify({
+        before,
+        ticks,
+        gone: gone.length,
+        goneBurning: gone.filter((seen) => seen.burning).length,
+        burnedToDeath: gone.filter((seen) => seen.burning && seen.health <= burnDamage).length,
+        leftInOpenSky: core.zombies.all().filter((zombie) => openSky(zombie.position)).length,
+        dead: core.health.dead,
+      });
+    },
+    { limit: 2 * BURN_WAIT_TICKS, burnDamage: ZOMBIE_BURN_DAMAGE },
+  );
+  const day = JSON.parse(dawn);
+  // 露天的那些全部烧死；剩下的都不在露天。消失的每一只最后都在烧：有的从台阶口掉进矿道，摔落伤害与燃烧一起
+  // 扣血，最后一下不一定是燃烧那 1 点。玩家在石墙里，一下都没挨打
+  expect(day.ticks).toBeLessThan(2 * BURN_WAIT_TICKS);
+  expect(day.leftInOpenSky).toBe(0);
+  expect(day.gone).toBeGreaterThan(0);
+  expect(day.goneBurning).toBe(day.gone);
+  expect(day.burnedToDeath).toBeGreaterThan(0);
+  expect(day.dead).toBe(false);
   expect(errors).toEqual([]);
 });
 

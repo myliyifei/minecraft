@@ -67,6 +67,8 @@ export interface PlayerControls {
    * 死亡画面的重生按钮走这里，与关掉背包界面时抓回锁定是同一条路。
    */
   grabPointer(): void;
+  /** 此刻鼠标是否锁定在画布上。界面层的进入提示读它。 */
+  readonly locked: boolean;
   /** 卸下全部监听器。 */
   remove(): void;
 }
@@ -290,6 +292,9 @@ export function installPlayerControls(
       shownUiOpen = open;
     },
     grabPointer,
+    get locked(): boolean {
+      return locked();
+    },
     remove(): void {
       canvas.removeEventListener('click', onClick);
       document.removeEventListener('pointerlockchange', onLockChange);

@@ -611,8 +611,8 @@ export class WorldRenderer {
    */
   syncChunkMeshes(budget = MESH_BUDGET_PER_FRAME): void {
     // 过期的网格当帧重建、不占预算；缺邻居的丢掉等邻居回来。两者都由 planChunkMeshes 定，
-    // 首次建与重建因此走同一条「8 个邻居都在」的规则。一次改动最多牵动四个区块（自己、两个侧向
-    // 邻居与光照变过的斜对角），远小于铺开视距时的积压。
+    // 首次建与重建因此走同一条「8 个邻居都在」的规则。一次改动最多牵动 3×3 个区块（火把的光可能跨到
+    // 两侧的邻区块，边缘格还要让含对角在内的邻区块一起过期，见 ADR-0016），远小于铺开视距时的积压。
     const plan = planChunkMeshes({
       world: this.core,
       meshed: this.meshes.values(),

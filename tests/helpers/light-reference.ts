@@ -17,7 +17,7 @@ for (const [id, def] of Object.entries(BLOCKS)) {
 }
 
 /**
- * 已加载区块的包围盒铺成的一张大数组：每格的透光方式（没加载的区块那一块记作不在世界里）与
+ * 已加载区块所在的那个矩形范围铺成的一张大数组：每格的透光方式（没加载的区块那一块记作不在世界里）与
  * 发光等级，以及平铺下标与区块内下标之间的换算。
  */
 interface Flat {
@@ -40,7 +40,7 @@ function flatten(world: World): Flat {
   const layer = sizeX * sizeZ;
   const cells = layer * WORLD_HEIGHT;
   const at = (x: number, y: number, z: number): number => y * layer + z * sizeX + x;
-  /** 包围盒里第 (ox, oz) 个区块的每一格：区块内的下标与平铺数组里的下标。 */
+  /** 那个矩形范围里第 (ox, oz) 个区块的每一格：区块内的下标与平铺数组里的下标。 */
   const eachCell = (ox: number, oz: number, visit: (local: number, flat: number) => void): void => {
     let local = 0;
     for (let y = 0; y < WORLD_HEIGHT; y++) {
@@ -105,7 +105,7 @@ function relaxAll(flat: Flat, level: Uint8Array, queue: Int32Array, tail: number
 /**
  * 「清零后从头算」的天光：只按已加载区块里的方块，用最直接的办法算一遍，与核心的增量结果比较。
  *
- * 故意不复用 `src/core/light.ts` 的任何做法：把已加载区块的包围盒铺成一张大数组，每一列从顶往下
+ * 故意不复用 `src/core/light.ts` 的任何做法：把已加载区块所在的那个矩形范围铺成一张大数组，每一列从顶往下
  * 填竖直部分，然后把所有亮着的格子都当光源，按先进先出反复松弛到不再变化。每一步都对着
  * CONTEXT.md 的「天光」写，是独立的参照。
  *

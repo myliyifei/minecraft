@@ -151,7 +151,7 @@ export function poseZombieModel(group: THREE.Group, zombie: ZombieView, alpha: n
 
   const moving = position.x !== previousPosition.x || position.z !== previousPosition.z;
   const swing = moving ? limbSwing(zombie.age + alpha) : 0;
-  // 右臂与左腿同向、左臂与右腿同向，与人走路时一样。绕 x 轴转正角是往 −Z（前方）抬。
+  // 右臂与左腿同向、左臂与右腿同向，与人迈步时一样。绕 x 轴转正角是往 −Z（前方）抬。
   const [rightArm, leftArm, rightLeg, leftLeg] = ZOMBIE_LIMBS.map((name) => group.getObjectByName(name)!);
   rightArm!.rotation.x = swing;
   leftArm!.rotation.x = -swing;

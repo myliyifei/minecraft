@@ -9,9 +9,11 @@ import { ItemType } from '../core/item.ts';
  */
 export const STRINGS = {
   gameTitle: '体素世界',
-  // 省略号交给加载屏上那个闪动的方块光标，文案本身不带标点。
+  // 省略号交给加载屏上那个一明一灭的方块光标，文案本身不带标点。
   loadingWorld: '正在生成世界',
   crosshair: '十字准星',
+  // 进入提示：没锁定鼠标、又没开界面时显示在准星正下方，告诉玩家先点一下画面才能操作。
+  clickToStart: '点击画面开始',
   hotbar: '快捷栏',
   // 等级条上方那一排心。读屏软件报它时缀上当前点数。
   health: '生命值',

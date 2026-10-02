@@ -47,7 +47,12 @@ async function main(): Promise<void> {
   loading.remove();
   const controls = installPlayerControls(canvas, core);
   // 重生按钮按下那一刻抓回指针锁定：锁定只在用户手势里放行，所以由按钮的 click 直接调，不等下一帧。
-  const hud = installHud(document.body, core, () => controls.grabPointer());
+  const hud = installHud(
+    document.body,
+    core,
+    () => controls.grabPointer(),
+    () => controls.locked,
+  );
   hud.update();
   installDebugHandle({ core, renderer, hud, chunks });
   startGameLoop(

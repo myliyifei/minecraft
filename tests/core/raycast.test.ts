@@ -78,7 +78,7 @@ describe('体素射线检测的命中', () => {
     }
   });
 
-  it('树叶挡得住视线：非空气就是目标，不看透不透光', () => {
+  it('树叶挡得住视线：非空气就是目标，不看是不是不透明', () => {
     const world = flatTestWorld();
     world.setBlock(3, LAYER_Y, 0, BlockType.OakLeaves);
     world.setBlock(5, LAYER_Y, 0, BlockType.Stone);

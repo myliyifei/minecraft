@@ -109,7 +109,7 @@ function digUnderfoot(core: GameCore, block: BlockType): void {
 /**
  * 手上有一个泥土、站在一格深的坑里斜着看着旁边那块草的核心。
  *
- * 东西只能挖来——核心没有「往背包里塞物品」的入口，也不该为测试开一个。
+ * 泥土挖来而不是用 `giveItem` 给：挖穿脚下那一格，玩家才站进坑里，放置的落点才在坑外。
  * 传进来的核心决定视距那类设定，默认是采样视距的平地核心。
  */
 function holdingDirt(core: GameCore = coreOnFlatGround()): GameCore {
@@ -1188,7 +1188,7 @@ describe('GameCore 的拆堆点击', () => {
 
   /**
    * 背包界面开着、光标上拿着 4 块木板的核心：脚下那块草换成原木挖来，原木进网格，点输出格。
-   * 东西只能挖来与合成出来（理由见 `holdingDirt`）。
+   * 原木挖来而不是用 `giveItem` 给：这一节写在 `giveItem` 之前，保留挖掘进背包那条路。
    */
   function holdingFourPlanks(): GameCore {
     const core = coreOnFlatGround();
@@ -1696,6 +1696,52 @@ describe('GameCore 的工作台', () => {
     core.tick();
     expect(core.inventory.held).toEqual({ item: ItemType.OakPlanks, count: 4 });
   });
+
+  it('1 个原木在背包界面的 2x2 里做出木板、再拆堆做出工作台，放到世界里，使用键打开工作台界面', () => {
+    const core = coreOnFlatGround();
+    expect(core.giveItem(ItemType.OakLog, 1)).toBe(0);
+    core.toggleInventory();
+    core.tick();
+    expect(core.inventoryScreen.open).toBe(true);
+
+    // 原木放进 2x2 的第一格，取出 4 块木板放回第 0 格
+    const grid = INVENTORY_SIZE;
+    core.clickSlot(0);
+    core.clickSlot(grid);
+    core.clickCraftingOutput();
+    core.clickSlot(0);
+    core.tick();
+    expect(core.inventory.slot(0)).toEqual({ item: ItemType.OakPlanks, count: 4 });
+
+    // 拿起 4 块木板，右键逐格放下 1 块，铺满 2x2
+    core.clickSlot(0);
+    for (let cell = 0; cell < 4; cell++) core.splitSlot(grid + cell);
+    core.tick();
+    expect(core.inventoryScreen.cursor).toBeUndefined();
+    expect(core.inventoryScreen.crafting!.output).toEqual(TABLE_X1);
+    core.clickCraftingOutput();
+    core.clickSlot(0);
+    core.toggleInventory();
+    core.tick();
+    expect(core.uiMode).toBe(false);
+    expect(core.inventory.held).toEqual(TABLE_X1);
+
+    // 斜着往下看前方的地面，放到它顶上那一格
+    look(core, 0, -Math.PI / 4);
+    core.tick();
+    const ground = core.mining.target!;
+    expect(ground).toMatchObject({ y: FLAT_GROUND_Y, normal: { x: 0, y: 1, z: 0 } });
+    const placed: [number, number, number] = [ground.x, ground.y + 1, ground.z];
+    useOnce(core);
+    expect(core.getBlock(...placed)).toBe(BlockType.CraftingTable);
+    expect(core.inventory.held).toBeUndefined();
+
+    // 下一 tick 目标重算，落到刚放下的工作台上；再按一次使用键打开它的界面
+    core.tick();
+    expect(core.mining.target).toMatchObject(toVec(placed));
+    useOnce(core);
+    expect(core.craftingTableScreen.open).toBe(true);
+  });
 });
 
 describe('GameCore 的熔炉界面（issue #33）', () => {
@@ -1893,13 +1939,7 @@ describe('GameCore 的熔炉界面（issue #33）', () => {
     const core = facingFurnace();
     const state = core.blockStateAt(...AHEAD)!;
     useOnce(core);
-    // 核心没有往背包里放入物品的入口：借原料格一格一格地把 36 格填满粗铁
-    for (let i = 0; i < INVENTORY_SIZE; i++) {
-      state.input = { item: ItemType.RawIron, count: 64 };
-      core.clickSlot(INPUT);
-      core.clickSlot(i);
-      core.tick();
-    }
+    expect(core.giveItem(ItemType.RawIron, INVENTORY_SIZE * 64)).toBe(0);
     for (let i = 0; i < INVENTORY_SIZE; i++) {
       expect(core.inventory.slot(i)).toEqual({ item: ItemType.RawIron, count: 64 });
     }
@@ -2075,7 +2115,7 @@ describe('GameCore 的熔炼（issue #34）', () => {
     const { core, state } = smeltingAhead(3);
     core.tick(3 * SMELT);
     openFurnace(core);
-    // 核心没有往背包放物品的入口：借原料格把 63 个铁锭拿到光标上（调试路径，原料格在游戏里不收铁锭）
+    // 借原料格把 63 个铁锭拿到光标上（调试路径，原料格在游戏里不收铁锭）
     state.input = { item: ItemType.IronIngot, count: 63 };
     core.clickSlot(INPUT);
     core.clickSlot(RESULT);
@@ -2130,7 +2170,7 @@ describe('GameCore 的木石两档工具', () => {
   /**
    * 手上有两根原木、站在一格深的坑里、正前方两格摆着工作台并对准它的核心。
    *
-   * 原木只能挖来（理由见 `holdingDirt`）：脚下那块换成原木挖穿，再在眼前那一格摆一根挖掉，
+   * 原木挖来（理由见 `holdingFourPlanks`）：脚下那块换成原木挖穿，再在眼前那一格摆一根挖掉，
    * 掉落物落在脚边拾起。工作台由 `setBlock` 摆进世界，理由见「GameCore 的工作台」那一节。
    */
   function withTwoLogsFacingTable(): GameCore {

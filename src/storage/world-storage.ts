@@ -26,6 +26,12 @@ const BLOCK_STATES = 'blockStates';
 export const CHUNKS = 'chunks';
 const ALL_STORES = [WORLDS, STATES, BLOCK_STATES, CHUNKS];
 
+/**
+ * 写盘时一批发几个区块的写。一批发完等最后一个写成功再发下一批，批与批之间页面照常渲染：1000 个区块的写在同一个
+ * 任务里发出，序列化要 5 到 8 ms，暂停菜单底下的画面因此掉一帧（#71）。导出给测试。
+ */
+export const CHUNK_PUT_BATCH = 100;
+
 /** 世界名称最多几个字符（见 CONTEXT.md「世界列表」）。按 UTF-16 码元数，与输入框的 `maxLength` 同一种数法。 */
 export const WORLD_NAME_MAX_LENGTH = 32;
 
@@ -92,6 +98,9 @@ export interface PackedChunk extends ChunkCoord {
   readonly data: Uint8Array<ArrayBuffer>;
 }
 
+/** 压一个已改区块的方块数组，返回 gzip 字节（`WorldStorageOptions.gzip`）。 */
+export type ChunkCompressor = (blocks: ChunkBlocks) => Promise<Uint8Array<ArrayBuffer>>;
+
 export interface WorldStorageOptions {
   /** 默认是浏览器的 `indexedDB`；Node 下的测试传 fake-indexeddb 的。 */
   readonly indexedDB: IDBFactory;
@@ -99,6 +108,12 @@ export interface WorldStorageOptions {
   readonly now: () => number;
   /** 默认是 `CURRENT_VERSIONS`。 */
   readonly versions: StorageVersions;
+  /**
+   * 写盘时压一个已改区块。默认在当前线程上压（`gzipChunk`）；浏览器里传压缩 Worker 的（`createGzipClient`），
+   * 主线程上压会拖慢写盘期间的帧（#71）。它可以接管传进去的方块数组，转移给 Worker：那是取快照时复制出来的，
+   * 归这次写盘所有。
+   */
+  readonly gzip: ChunkCompressor;
 }
 
 /** 打开存储模块的库，第一次打开时建四张表。 */
@@ -115,7 +130,7 @@ export async function openWorldStorage(options: Partial<WorldStorageOptions> = {
   const db = await result(request);
   // 另一个标签页要升级库时关闭这个连接，否则它的升级一直被阻塞。
   db.onversionchange = () => db.close();
-  return new WorldStorage(db, options.now ?? Date.now, options.versions ?? CURRENT_VERSIONS);
+  return new WorldStorage(db, options.now ?? Date.now, options.versions ?? CURRENT_VERSIONS, options.gzip ?? gzipChunk);
 }
 
 export class WorldStorage {
@@ -126,6 +141,7 @@ export class WorldStorage {
     private readonly db: IDBDatabase,
     private readonly now: () => number,
     private readonly versions: StorageVersions,
+    private readonly gzip: ChunkCompressor,
   ) {}
 
   /** 全部世界，按上次游玩时间倒序。 */
@@ -167,9 +183,9 @@ export class WorldStorage {
    */
   importWorld(id: string, file: WorldFile): Promise<void> {
     return this.inOrder(id, () =>
-      this.readWrite((tx) => {
-        putBody(tx, id, file.state, file.blockStates, file.chunks);
+      this.readWrite(async (tx) => {
         tx.objectStore(WORLDS).put({ ...file.meta, id, lastPlayedAt: this.now() } satisfies WorldMeta);
+        await putBody(tx, id, file.state, file.blockStates, file.chunks);
       }),
     );
   }
@@ -184,9 +200,10 @@ export class WorldStorage {
   saveWorld(id: string, name: string, snapshot: Snapshot): Promise<SaveResult> {
     return this.inOrder(id, async (): Promise<SaveResult> => {
       try {
-        const chunks = await Promise.all(
-          snapshot.editedChunks.map(async ({ cx, cz, blocks }) => ({ cx, cz, data: await gzipChunk(blocks) })),
-        );
+        // 一个压完再压下一个。在主线程上压（默认的压缩函数）时一起开始，把方块数组复制进 Blob 的工作都在同一个任务里，
+        // 暂停的那一帧明显变长（#71）。经 Worker 压时逐个压，总耗时与一起压相近。
+        const chunks: PackedChunk[] = [];
+        for (const { cx, cz, blocks } of snapshot.editedChunks) chunks.push({ cx, cz, data: await this.gzip(blocks) });
         await this.write(id, name, snapshot, chunks);
         return { ok: true };
       } catch (error) {
@@ -229,11 +246,10 @@ export class WorldStorage {
 
   private write(id: string, name: string, snapshot: Snapshot, chunks: readonly PackedChunk[]): Promise<void> {
     return this.readWrite(async (tx) => {
-      // 先等这一个读完成。之后的写不转成 Promise，写到一半出错时就不会有未处理的 Promise 拒绝。
+      // 先等这一个读完成。之后的写只在分批时等（`putBody`），写到一半出错时就不会有未处理的 Promise 拒绝。
       const worlds = tx.objectStore(WORLDS);
       const previous = await result<WorldMeta | undefined>(worlds.get(id));
       const { blockStates, editedChunks: _, ...state } = snapshot;
-      putBody(tx, id, state, blockStates, chunks);
 
       const now = this.now();
       const meta: WorldMeta = {
@@ -248,6 +264,7 @@ export class WorldStorage {
         hardcoreDead: snapshot.hardcoreDead,
       };
       worlds.put(meta);
+      await putBody(tx, id, state, blockStates, chunks);
     });
   }
 
@@ -294,18 +311,28 @@ async function readBody(tx: IDBTransaction, id: string): Promise<WorldBody> {
   };
 }
 
-/** 在 tx 里写这个世界在 `states`、`blockStates` 两张表里的记录与给出的这些区块。请求不转成 Promise。 */
-function putBody(
+/**
+ * 在 tx 里写这个世界在 `states`、`blockStates` 两张表里的记录与给出的这些区块。区块按 `CHUNK_PUT_BATCH` 分批发出，
+ * 每批等上一批的最后一个写成功：等的是 IndexedDB 自己的请求，事务不会提前提交。只有要等的那个请求转成 Promise，
+ * 写到一半出错时就不会有未处理的 Promise 拒绝。
+ */
+async function putBody(
   tx: IDBTransaction,
   id: string,
   state: WorldState,
   blockStates: readonly BlockStateRecord[],
   chunks: readonly PackedChunk[],
-): void {
+): Promise<void> {
   tx.objectStore(STATES).put(state, id);
   tx.objectStore(BLOCK_STATES).put(blockStates, id);
   const chunkStore = tx.objectStore(CHUNKS);
-  for (const { cx, cz, data } of chunks) chunkStore.put(data, [id, cx, cz] satisfies ChunkKey);
+  let last: IDBRequest | undefined;
+  for (let start = 0; start < chunks.length; start += CHUNK_PUT_BATCH) {
+    if (last) await result(last);
+    for (const { cx, cz, data } of chunks.slice(start, start + CHUNK_PUT_BATCH)) {
+      last = chunkStore.put(data, [id, cx, cz] satisfies ChunkKey);
+    }
+  }
 }
 
 /** `chunks` 表的键。 */

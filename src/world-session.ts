@@ -57,11 +57,11 @@ export async function startWorldSession({
   settings,
   settingsScreen,
 }: WorldSessionOptions): Promise<WorldSession> {
-  // 每个世界一块新画布：退出时连同上面的监听器一起丢掉，下一个世界的渲染器拿到的是干净的 WebGL 上下文。
+  // 每个世界一块新画布：退出时连同上面的监听器一起丢掉，下一个世界的渲染器拿到的是全新的 WebGL 上下文。
   const canvas = document.createElement('canvas');
   canvas.id = 'game';
   document.body.prepend(canvas);
-  // 地形生成搬进 Worker：铺满视距要生成几百个区块，放在主线程上会连续掉帧。
+  // 地形生成放在 Worker 里：铺满视距要生成几百个区块，放在主线程上会连续掉帧。
   const worker = new Worker(new URL('./worker/chunk-worker.ts', import.meta.url), { type: 'module' });
   // 进入的半路出错时也要退订，否则这个没进去的世界还挂在设置上。
   let unsubscribe = (): void => {};

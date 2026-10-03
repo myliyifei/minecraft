@@ -422,7 +422,7 @@ describe('World 记下网格过期的区块', () => {
     expect(stale.light).toContain('-1,0');
   });
 
-  it('区块边上放一块树叶：隔壁的树叶与它同种，贴着的那两个面不画了，邻居也算方块变了', () => {
+  it('区块边上放一块树叶：隔壁的树叶与它是同一种方块，贴着的那两个面不画了，邻居也算方块变了', () => {
     const world = loadedWorld();
     world.setBlock(0, FLAT_GROUND_Y + 1, 7, BlockType.OakLeaves);
     expect(take(world).blocks).toEqual(['0,0', '-1,0']);

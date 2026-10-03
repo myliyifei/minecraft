@@ -67,7 +67,7 @@ function integerIn(value: unknown, { min, max }: { readonly min: number; readonl
 
 /**
  * 能不能绑到一个动作上：形如 `KeyboardEvent.code` 的串（大写字母开头、只有字母与数字），Esc 除外（固定用于
- * 关闭界面）。localStorage 里被改坏的值因此不会顶掉默认键、让那个动作再也按不出来。
+ * 关闭界面）。localStorage 里被改坏的值因此不会取代默认键、让那个动作再也按不出来。
  */
 export function bindableCode(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Z][A-Za-z0-9]*$/.test(value) && value !== INVENTORY_CLOSE_KEY;

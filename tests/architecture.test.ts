@@ -105,6 +105,21 @@ describe('区块 Worker 的隔离（ADR-0003：Worker 只是适配器）', () =>
   });
 });
 
+describe('压缩 Worker 的隔离（ADR-0018 补记：区块在 Worker 里 gzip）', () => {
+  const worker = join(SRC, 'worker/gzip-worker.ts');
+
+  it('压缩 Worker 只从存储模块与协议里引入模块', () => {
+    for (const specifier of importedModules(readFileSync(worker, 'utf8'))) {
+      expect(specifier).toMatch(/^\.\.\/storage\/|^\.\//);
+    }
+  });
+
+  it('压缩 Worker 不碰 DOM', () => {
+    const forbidden = /\b(window|document|navigator|requestAnimationFrame|localStorage|indexedDB)\b/;
+    expect(codeOf(worker)).not.toMatch(forbidden);
+  });
+});
+
 describe('存储模块的边界（ADR-0018：核心只进出快照）', () => {
   const storageFiles = tsFilesIn(join(SRC, 'storage'));
 

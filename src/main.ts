@@ -7,6 +7,7 @@ import { openWorldStorage } from './storage/world-storage';
 import { installSettingsScreen } from './ui/settings-screen';
 import { STRINGS } from './ui/strings';
 import { installWorldList, type NewWorld } from './ui/world-list';
+import { createGzipClient } from './worker/gzip-client';
 import { startWorldSession, type WorldStart } from './world-session';
 
 /** 进入世界之前要备好的：名称与起点。备不出来时是没进去的原因。 */
@@ -28,7 +29,9 @@ async function main(): Promise<void> {
   // 页面打开时先读设置（ADR-0020），再显示世界列表。设置界面只有一个，世界列表与暂停菜单都打开它。
   const settings = loadSettings();
   const settingsScreen = installSettingsScreen(document.body, settings);
-  const storage = await openWorldStorage();
+  // 写盘时区块在 Worker 里压缩，暂停菜单底下的画面不因写盘掉帧（ADR-0018 补记）。整个页面一个，不随世界销毁。
+  const gzipWorker = new Worker(new URL('./worker/gzip-worker.ts', import.meta.url), { type: 'module' });
+  const storage = await openWorldStorage({ gzip: createGzipClient(gzipWorker) });
   let busy = false;
 
   /**

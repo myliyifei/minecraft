@@ -32,3 +32,25 @@ export interface ChunkWorkerPort {
   postMessage(request: ChunkRequest): void;
   onmessage: ((event: MessageEvent<ChunkResponse>) => void) | null;
 }
+
+/**
+ * 主线程请压缩 Worker 压一个已改区块（ADR-0018 补记）。`blocks` 的 ArrayBuffer 是转移过去的：取快照时已经复制
+ * 过一份，归这次写盘所有，转移之后主线程不再用它。`id` 由主线程编号，回复按它对上。
+ */
+export interface GzipRequest {
+  readonly id: number;
+  readonly blocks: ChunkBlocks;
+}
+
+/** 压缩 Worker 的回复：压好的 gzip（同样是转移回来的），或压缩出错的原因。 */
+export type GzipResponse =
+  | { readonly id: number; readonly data: Uint8Array<ArrayBuffer> }
+  | { readonly id: number; readonly error: string };
+
+/** 压缩 Worker 端口上主线程用到的那部分，与 `ChunkWorkerPort` 同理，Node 里用假端口测试。 */
+export interface GzipWorkerPort {
+  postMessage(request: GzipRequest, transfer: Transferable[]): void;
+  onmessage: ((event: MessageEvent<GzipResponse>) => void) | null;
+  /** Worker 脚本加载失败之类的错误。压缩本身出的错由回复带回来，不走这里。 */
+  onerror: ((event: ErrorEvent) => void) | null;
+}

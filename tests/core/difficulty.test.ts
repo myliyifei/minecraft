@@ -15,7 +15,7 @@ function core(difficulty: Difficulty, viewRadius = 1): GameCore {
   return new GameCore({ difficulty, viewRadius, chunkSource: () => flatTestTerrain });
 }
 
-/** 挖空玩家脚下 24 格，推进到摔死为止：落地摔 21 点。 */
+/** 挖空玩家脚下 24 格，推进到摔死为止：着地时摔掉 21 点。 */
 function fallToDeath(game: GameCore): void {
   const { x, z } = game.player.position;
   const [bx, bz] = [Math.floor(x), Math.floor(z)];

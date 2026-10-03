@@ -1,7 +1,8 @@
 import { CHUNK_BLOCK_COUNT, type ChunkBlocks } from '../core/chunk';
 
 /*
- * 已改区块的方块数组整块 gzip（ADR-0018）。用浏览器的 `CompressionStream`，读写都是异步，不阻塞渲染。
+ * 已改区块的方块数组整块 gzip（ADR-0018）。用浏览器的 `CompressionStream`，压缩与解压都是异步的；只有开始时把
+ * 数组复制进 Blob 是同步的，一个区块不到 1 ms，所以很多个区块要一个接一个压，不要同时开始（见 `saveWorld`）。
  * IndexedDB 里的记录与导出文件里的区块段是同一份字节。
  */
 

@@ -237,7 +237,7 @@ describe('快照往返的确定性（ADR-0018）', () => {
     expect(b.player.onGround).toBe(true);
     expect(b.health.points).toBe(healthBefore - 3);
 
-    // 之后的操作：挖坑壁、放一块、在背包界面里挪一格，再推进到僵尸开始生成之后。
+    // 之后的操作：挖坑壁、放一块、在背包界面里移动一格，再推进到僵尸开始生成之后。
     for (let i = 0; i < 2400; i++) {
       if (i === 0) {
         for (const game of [a, b]) {

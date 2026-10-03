@@ -267,7 +267,7 @@ describe('导入校验：任一不符返回失败，不抛出', () => {
     const [furnace] = file.blockStates;
     const withoutFurnaceChunk = file.chunks.filter(({ cx, cz }) => !(cx === -1 && cz === 2));
     expect(withoutFurnaceChunk).toHaveLength(2);
-    // 状态那一格挪到同一区块里的旁边一格：那里是草
+    // 状态那一格移到同一区块里的旁边一格：那里是草
     const moved = [{ ...furnace!, x: furnace!.x + 1 }];
     for (const variant of [
       { ...file, chunks: withoutFurnaceChunk },

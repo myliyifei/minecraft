@@ -2,14 +2,15 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BlockType } from '../../src/core/block';
+import { CHUNK_BLOCK_COUNT } from '../../src/core/chunk';
 import { CHUNK_SIZE } from '../../src/core/constants';
 import { Difficulty } from '../../src/core/difficulty';
 import { GameCore } from '../../src/core/game';
 import { ItemType } from '../../src/core/item';
 import { SNAPSHOT_FORMAT_VERSION, TERRAIN_VERSION, type Snapshot } from '../../src/core/snapshot';
-import { gunzipChunk } from '../../src/storage/chunk-codec';
+import { gunzipChunk, gzipChunk } from '../../src/storage/chunk-codec';
 import { decodeWorldFile, encodeWorldFile, type WorldFile } from '../../src/storage/world-file';
-import { openWorldStorage, type WorldStorage, type WorldStorageOptions } from '../../src/storage/world-storage';
+import { CHUNK_PUT_BATCH, openWorldStorage, type WorldStorage, type WorldStorageOptions } from '../../src/storage/world-storage';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 
 const G = FLAT_GROUND_Y;
@@ -111,6 +112,71 @@ describe('存档的写与读（ADR-0018）', () => {
     expect(restored.getBlock(-5, G, 2 * CHUNK_SIZE + 5)).toBe(BlockType.Furnace);
     expect(restored.inventory.slot(0)).toEqual({ item: ItemType.Cobblestone, count: 5 });
     expect(restored.tickCount).toBe(game.tickCount);
+  });
+
+  it('区块经注入的压缩函数压缩，库里存的就是它返回的字节；压完一个再压下一个，同一时刻最多一个在压', async () => {
+    // 浏览器里注入的是压缩 Worker，Node 里默认直接压。逐个压：压缩之前要把方块数组复制进 Blob，在主线程上压时
+    // 一起开始的话，所有复制都在暂停的那一帧里（#71，ADR-0018 补记）。
+    const { open } = fixture();
+    const given: Uint8Array[] = [];
+    const returned: Uint8Array[] = [];
+    let active = 0;
+    let peak = 0;
+    const storage = await open({
+      gzip: async (blocks) => {
+        given.push(blocks);
+        peak = Math.max(peak, ++active);
+        const data = await gzipChunk(blocks);
+        active--;
+        returned.push(data);
+        return data;
+      },
+    });
+    const snapshot = editedGame().snapshot();
+    expect(snapshot.editedChunks).toHaveLength(3);
+
+    expect(await storage.saveWorld('a', '洞', snapshot)).toEqual({ ok: true });
+    expect(peak).toBe(1);
+    expect(given).toEqual(snapshot.editedChunks.map(({ blocks }) => blocks));
+    const records = await storage.readRecords('a');
+    expect(new Set(records!.chunks.map(({ data }) => Buffer.from(data).toString('hex')))).toEqual(
+      new Set(returned.map((data) => Buffer.from(data).toString('hex'))),
+    );
+  });
+
+  it('区块的写分批发出：一批写完才发下一批，全部在同一个事务里，读回来一个不少', async () => {
+    // 理由见 `CHUNK_PUT_BATCH`。
+    // 压缩不是这里要测的：每个区块都是同一块全零，压缩函数直接给预先压好的那份
+    const packed = await gzipChunk(new Uint8Array(CHUNK_BLOCK_COUNT));
+    const { open } = fixture();
+    const storage = await open({ gzip: async () => packed.slice() });
+    const base = editedGame().snapshot();
+    const count = 2 * CHUNK_PUT_BATCH + 1;
+    const editedChunks = Array.from({ length: count }, (_, i) => ({ cx: i, cz: -i, blocks: new Uint8Array(CHUNK_BLOCK_COUNT) }));
+    const snapshot: Snapshot = { ...base, blockStates: [], editedChunks };
+
+    // 每个区块的写发出时，之前发出的区块写有几个已经完成
+    const issued: IDBRequest[] = [];
+    const doneBefore: number[] = [];
+    const original = IDBObjectStore.prototype.put;
+    vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['put']>) {
+      const request = original.apply(this, args);
+      if (isChunkStore(this)) {
+        doneBefore.push(issued.filter(({ readyState }) => readyState === 'done').length);
+        issued.push(request);
+      }
+      return request;
+    });
+    expect(await storage.saveWorld('a', '洞', snapshot)).toEqual({ ok: true });
+    vi.restoreAllMocks();
+
+    expect(doneBefore).toHaveLength(count);
+    // 第一批一起发出；第二批、第三批的第一个发出时，前面那一批已经全部写完
+    expect(doneBefore.slice(0, CHUNK_PUT_BATCH).every((done) => done === 0)).toBe(true);
+    expect(doneBefore[CHUNK_PUT_BATCH]).toBe(CHUNK_PUT_BATCH);
+    expect(doneBefore[2 * CHUNK_PUT_BATCH]).toBe(2 * CHUNK_PUT_BATCH);
+    const records = await storage.readRecords('a');
+    expect(records!.chunks.map(({ cx, cz }) => `${cx},${cz}`).sort()).toEqual(editedChunks.map(({ cx, cz }) => `${cx},${cz}`).sort());
   });
 
   it('第二次只改了 1 个区块，区块表只写那一条；其余两条还是第一次写的', async () => {
@@ -298,6 +364,15 @@ describe('写盘失败整次回滚（ADR-0018）', () => {
     expect(sorted(await loaded(storage, 'a'))).toEqual(sorted(first));
     expect(await storage.listWorlds()).toEqual(listed);
   }
+
+  it('压缩函数拒绝时写盘失败、整次回滚，返回这次的区块坐标', async () => {
+    const { open } = fixture();
+    const storage = await open({ gzip: () => Promise.reject(new Error('Worker 出错')) });
+    const snapshot = editedGame().snapshot();
+    const result = await storage.saveWorld('a', '洞', snapshot);
+    expect(result).toMatchObject({ ok: false, chunks: coordsOf(snapshot) });
+    expect(await storage.listWorlds()).toEqual([]);
+  });
 
   it('第二条区块的 put 同步抛出配额不足', async () => {
     let chunkPuts = 0;

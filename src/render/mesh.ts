@@ -237,7 +237,7 @@ function scanChunk(chunk: ChunkView, view: MeshView, cornerSamples: readonly Int
           }
 
           if (OPAQUE[neighbor]) continue;
-          // 走到这里说明邻居不遮挡视线（空气或树叶）。同种方块相邻时两个面完全重合：
+          // 走到这里说明邻居不遮挡视线（空气或树叶）。同一种方块相邻时两个面完全重合：
           // 留着只会 z-fighting、还让树冠内部的几何翻倍。整片树叶因此只保留最外层的面。
           if (neighbor === block) continue;
 
@@ -310,7 +310,7 @@ function cellOf(i: number): { lx: number; y: number; lz: number } {
 
 /**
  * 一串区块数据下标，模块共用一份，不够就翻倍。扫区块的循环遇到发光方块与火把只往这里记一个整数，建火把细杆、
- * 建发光方块的对象挪到循环之后的两个函数里（`emitTorches`、`glowingBlocksIn`），扫描循环本身不必为它们走别的
+ * 建发光方块的对象移到循环之后的两个函数里（`emitTorches`、`glowingBlocksIn`），扫描循环本身不必为它们走别的
  * 分支（见 `warmUpChunkMeshes`）。两个函数每次都调，没有火把时只是循环一次都不走。
  */
 class IndexList {

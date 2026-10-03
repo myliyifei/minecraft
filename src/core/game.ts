@@ -271,6 +271,13 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.world.returnUnsavedChunks(coords);
   }
 
+  /**
+   * 上次写盘之后改过的区块有几个（取快照时清零，写盘失败放回时加回来）。外层据此判断离开页面时要不要确认。
+   */
+  get unsavedChunkCount(): number {
+    return this.world.unsavedChunkCount;
+  }
+
   /** 本世界的难度。新建时定，之后不变。死亡画面按它决定给重生还是删除世界。 */
   get difficulty(): Difficulty {
     return this.worldDifficulty;

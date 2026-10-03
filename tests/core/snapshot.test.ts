@@ -54,6 +54,19 @@ describe('上次写盘之后改过的区块（ADR-0018）', () => {
     game.setBlock(-1, G, 3, BlockType.Air);
     expect(editedKeys(game.snapshot())).toEqual(['-1,0', '0,0']);
   });
+
+  it('改过几个区块报得出来：离开页面要不要确认看它', () => {
+    const game = core();
+    expect(game.unsavedChunkCount).toBe(0);
+    game.setBlock(3, G, 3, BlockType.Air);
+    game.setBlock(4, G, 4, BlockType.Air);
+    game.setBlock(-1, G, 3, BlockType.Air);
+    expect(game.unsavedChunkCount).toBe(2);
+    const taken = game.snapshot().editedChunks;
+    expect(game.unsavedChunkCount).toBe(0);
+    game.returnUnsavedChunks(taken);
+    expect(game.unsavedChunkCount).toBe(2);
+  });
 });
 
 /** 对着 (x, y, z) 那一格挖到它碎掉为止。瞄的是格内偏移 at 那一点，默认顶面中心附近。 */

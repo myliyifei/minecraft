@@ -2,7 +2,6 @@ import type { GameCore } from '../core/game';
 import type { InventoryScreenView } from '../core/inventory-screen';
 import { installCrosshair } from './crosshair';
 import { installDeathScreen, type DeathScreenActions } from './death-screen';
-import { installEnterHint } from './enter-hint';
 import { installHealthBar } from './health-bar';
 import { installHotbar } from './hotbar';
 import { installHurtFlash } from './hurt-flash';
@@ -14,15 +13,16 @@ import {
   type InventoryScreenSource,
 } from './inventory-screen';
 import { installLevelBar } from './level-bar';
+import { installPauseMenu, type PauseMenuActions, type PauseMenuSource } from './pause-menu';
 
 /**
- * 屏幕上那一整套界面：十字准星在正中，没锁定鼠标时准星正下方有进入提示，底部自上而下是生命值
+ * 屏幕上那一整套界面：十字准星在正中，底部自上而下是生命值
  * 那一排心、等级条、快捷栏，再加受伤时的红闪、三层覆盖层——按 E 打开的背包界面，与使用键对着
- * 工作台、熔炉打开的工作台界面、熔炉界面——与生命归零时的死亡画面。
+ * 工作台、熔炉打开的工作台界面、熔炉界面——生命归零时的死亡画面，与暂停时的暂停菜单。
  *
  * 合成一个句柄，接线层与调试句柄因此不必知道界面由几个部件组成——加一块显示（饥饿值）
  * 只改这个文件。心、等级条与快捷栏装在同一个 `#hud` 容器里，等级条的宽度因此自动跟
- * 快捷栏一样宽，不必把 9 格的宽度算式在 CSS 里写第二遍；十字准星、进入提示、红闪与背包界面各自
+ * 快捷栏一样宽，不必把 9 格的宽度算式在 CSS 里写第二遍；十字准星、红闪与背包界面各自
  * 贴着视口定位，不在那个容器里。
  */
 export interface Hud {
@@ -66,14 +66,15 @@ function screenSource(source: HudSource, screen: InventoryScreenView): Inventory
 /**
  * 把 HUD 挂到页面上。返回的句柄要每帧 `update()`。
  *
- * `deathScreenActions` 是死亡画面那颗按钮按下之后交给接线层的事：重生之后抓回指针锁定，极限难度下删除世界
- * （见 `installDeathScreen`）。`pointerLocked` 报此刻鼠标是否锁定在画布上，进入提示按它显示与隐藏。
+ * `actions` 是死亡画面与暂停菜单上的按钮按下之后交给接线层的事：重生之后抓回指针锁定，极限难度下删除世界
+ * （见 `installDeathScreen`）；回到游戏、保存并退出（见 `installPauseMenu`）。`pauseState` 报暂停状态，暂停菜单
+ * 按它显示与隐藏。
  */
 export function installHud(
   parent: HTMLElement,
   source: HudSource,
-  deathScreenActions: DeathScreenActions,
-  pointerLocked: () => boolean,
+  actions: DeathScreenActions & PauseMenuActions,
+  pauseState: PauseMenuSource,
 ): Hud {
   // 红闪挂在最前面：后挂的元素画在它上面，心、快捷栏、准星与三层界面因此都不被染红，
   // 受伤那一下照样看得清剩几颗心。它挂在 `parent` 而不是 `#hud` 里，理由见下面准星那一段，
@@ -93,8 +94,6 @@ export function installHud(
   // （pointer-events: none），装进去的覆盖层既铺不满屏幕，格子也点不着；准星装进去连
   // 位置都对不上，理由在 style.css 的 `.crosshair` 那一段。
   const crosshair = installCrosshair(parent, source);
-  // 进入提示在准星正下方，与准星一样直接贴着视口定位。
-  const enterHint = installEnterHint(parent, source, pointerLocked);
   const screen = installInventoryScreen(
     parent,
     screenSource(source, source.inventoryScreen),
@@ -110,9 +109,11 @@ export function installHud(
     screenSource(source, source.furnaceScreen),
     FURNACE_SCREEN_LABEL,
   );
-  // 死亡画面挂在最后，压在其余一切之上。死亡时核心已经关掉了三层界面，准星与底部那一栏
+  // 死亡画面挂在三层界面之后，压在它们之上。死亡时核心已经关掉了三层界面，准星与底部那一栏
   // 也因为界面模式收起了，这里只是保证叠放的先后。
-  const deathScreen = installDeathScreen(parent, source, deathScreenActions);
+  const deathScreen = installDeathScreen(parent, source, actions);
+  // 暂停菜单挂在最后：死亡画面上切走标签页，回来时先看到的是它。
+  const pauseMenu = installPauseMenu(parent, pauseState, actions);
 
   /** 上一次画的是收起还是展开。与当前相同就不碰 DOM。 */
   let shownOpen: boolean | undefined;
@@ -130,21 +131,23 @@ export function installHud(
       hotbar.update();
       hurtFlash.update();
       crosshair.update();
-      enterHint.update();
       screen.update();
       craftingTable.update();
       furnace.update();
       deathScreen.update();
+      // 死亡画面上切走标签页：暂停菜单盖在它上面，它的按钮不能再经键盘按下。
+      deathScreen.setInert(pauseState.paused);
+      pauseMenu.update();
     },
     remove(): void {
       root.remove();
       hurtFlash.remove();
       crosshair.remove();
-      enterHint.remove();
       screen.remove();
       craftingTable.remove();
       furnace.remove();
       deathScreen.remove();
+      pauseMenu.remove();
     },
   };
 }

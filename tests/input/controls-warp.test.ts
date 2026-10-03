@@ -57,10 +57,11 @@ beforeEach(() => {
     selectHotbarSlot: () => {},
     scrollHotbar: () => {},
     toggleInventory: () => {},
+    closeAllScreens: () => {},
     uiMode: false,
     health: { dead: false },
   } as unknown as PlayerInputTarget;
-  controls = installPlayerControls(canvas as unknown as HTMLCanvasElement, target);
+  controls = installPlayerControls(canvas as unknown as HTMLCanvasElement, target, { onPause: () => {} });
 });
 
 afterEach(() => {

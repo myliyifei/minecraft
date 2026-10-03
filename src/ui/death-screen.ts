@@ -24,6 +24,11 @@ export function deathScreenAction(difficulty: Difficulty): DeathScreenAction {
 export interface DeathScreenHud {
   /** 按核心状态刷新画面。每帧调一次；显示与否没变就不碰 DOM。 */
   update(): void;
+  /**
+   * 被暂停菜单盖住时设成 inert：鼠标点不到它，键盘也不行，Tab 进不去、Enter 按不下那颗按钮。没设的话，从暂停
+   * 菜单按 Shift+Tab 能聚焦到被盖住的按钮，极限难度下一按就删除了世界。没变就不碰 DOM。
+   */
+  setInert(inert: boolean): void;
   /** 卸下死亡画面。 */
   remove(): void;
 }
@@ -81,8 +86,9 @@ export function installDeathScreen(
   root.append(title, button);
   parent.append(root);
 
-  /** 上一次画的是显示还是藏着。与当前相同就不碰 DOM。 */
+  /** 上一次画的是显示还是藏着、设没设 inert。与当前相同就不碰 DOM。 */
   let shownVisible = false;
+  let shownInert = false;
 
   return {
     update(): void {
@@ -90,6 +96,11 @@ export function installDeathScreen(
       if (visible === shownVisible) return;
       shownVisible = visible;
       root.hidden = !visible;
+    },
+    setInert(inert: boolean): void {
+      if (inert === shownInert) return;
+      shownInert = inert;
+      root.inert = inert;
     },
     remove(): void {
       root.remove();

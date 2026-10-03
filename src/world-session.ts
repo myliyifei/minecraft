@@ -40,8 +40,8 @@ export interface WorldSession {
  * 进入一个世界（见 CONTEXT.md「加载画面」）：造 Worker 与核心，等以玩家所在区块为中心的 3×3 个区块加载完、
  * 网格建好，画完首帧之后兑现。调用方在兑现时撤掉加载画面。新建与读档走同一条路。
  *
- * 兑现之后世界仍不推进，玩家第一次锁定指针才开始。进入之后马上写一次盘：新建的世界从此出现在世界列表里，
- * 读档的世界更新上次游玩时间。
+ * 兑现时处于暂停，显示暂停菜单（ADR-0019）：玩家点回到游戏、锁定生效才开始推进。进入之后马上写一次盘：
+ * 新建的世界从此出现在世界列表里，读档的世界更新上次游玩时间。
  */
 export async function startWorldSession({ storage, id, name, start }: WorldSessionOptions): Promise<WorldSession> {
   // 每个世界一块新画布：退出时连同上面的监听器一起丢掉，下一个世界的渲染器拿到的是干净的 WebGL 上下文。
@@ -77,21 +77,74 @@ export async function startWorldSession({ storage, id, name, start }: WorldSessi
     renderer.syncChunkMeshes(Infinity);
     renderer.render();
 
-    /** 写一次盘，返回成没成。失败时把这次取走的已改区块放回核心，下次写盘再写。 */
-    const save = async (): Promise<boolean> => {
+    // 上次写盘成功时快照里的 tick 计数，与上次写盘失败了没有（暂停菜单上提示）。
+    let savedTicks = core.tickCount;
+    let saveFailed = false;
+    /** 自上次写盘以来推进过 tick，或有改过的区块：这时离开页面会丢进度。 */
+    const unsaved = (): boolean => core.tickCount !== savedTicks || core.unsavedChunkCount > 0;
+
+    // 世界已经销毁（退出写完盘、开始删除）：之后不再写盘。排着的那一次也作废，不然删除之后它会把世界写回来。
+    let closed = false;
+
+    /**
+     * 当场取快照写一次盘，返回成没成。失败时把这次取走的已改区块放回核心，下次写盘再写。
+     *
+     * 取快照之前先关掉全部界面：光标物品与合成网格不进快照（ADR-0018）。排着的那一次到写的时候玩家可能已经回到
+     * 游戏、又打开了背包，所以关界面与取快照放在同一步，不靠进入暂停时关的那一次。
+     */
+    const writeNow = async (): Promise<boolean> => {
+      if (closed) return false;
+      core.closeAllScreens();
+      const ticks = core.tickCount;
       const result = await storage.saveWorld(id, name, core.snapshot());
-      if (result.ok) return true;
+      if (result.ok) {
+        savedTicks = ticks;
+        saveFailed = false;
+        return true;
+      }
       core.returnUnsavedChunks(result.chunks);
+      saveFailed = true;
       console.error('写盘失败', result.error);
       return false;
+    };
+    /** 正在写的那一次，与排在它后面的那一次。 */
+    let writing: Promise<boolean> | undefined;
+    let queued: Promise<boolean> | undefined;
+    /**
+     * 写一次盘。正在写时排到它后面，等它写完再取快照；已经排着一次就并进那一次，拿到的是同一个 Promise：
+     * 连按几次 Esc 只多写一次，而排着的那一次写的是最新的世界。
+     */
+    const save = (): Promise<boolean> => {
+      if (queued) return queued;
+      if (!writing) {
+        writing = writeNow().finally(() => (writing = undefined));
+        return writing;
+      }
+      const next = (): Promise<boolean> => {
+        queued = undefined;
+        return save();
+      };
+      queued = writing.then(next, next);
+      return queued;
     };
 
     let endSession = (): void => {};
     const ended = new Promise<void>((resolve) => (endSession = resolve));
     /** 正在进行的退出或删除。退出写盘失败时清掉，可以再退一次。 */
     let ending: Promise<void> | undefined;
+    // 退出写盘期间不推进 tick，暂停也不另写：退出那一次写的就是最后的世界。
+    let exiting = false;
 
-    const controls = installPlayerControls(canvas, core);
+    // 端到端冒烟测试经调试句柄打开它：暂停时照样推进、不显示暂停菜单，见 `DebugHandle.setIgnorePause`。
+    let ignorePause = false;
+    /** 世界此刻算不算暂停：循环推不推进、暂停菜单显不显示都看它。 */
+    const paused = (): boolean => controls.paused && !ignorePause;
+    // 进入暂停的那一刻写盘（ADR-0019）。
+    const controls = installPlayerControls(canvas, core, {
+      onPause: () => {
+        if (!exiting) void save();
+      },
+    });
     const hud = installHud(
       document.body,
       core,
@@ -99,18 +152,31 @@ export async function startWorldSession({ storage, id, name, start }: WorldSessi
         // 重生按钮按下那一刻抓回指针锁定：锁定只在用户手势里放行，所以由按钮的 click 直接调，不等下一帧。
         afterRespawn: () => controls.grabPointer(),
         deleteWorld: () => void deleteWorld(),
+        // 回到游戏同理，暂停在锁定生效时由输入层解除。退出写盘期间不理会：世界写完就销毁。
+        resume: () => {
+          if (!exiting) controls.resume();
+        },
+        // 写盘失败时世界不退出，暂停菜单上提示写盘失败，可以再点一次。
+        saveAndExit: () => void exit().catch(() => {}),
       },
-      () => controls.locked,
+      {
+        get paused() {
+          return paused();
+        },
+        get resumeRejected() {
+          return controls.resumeRejected;
+        },
+        get saveFailed() {
+          return saveFailed;
+        },
+      },
     );
     hud.update();
 
-    // 加载画面之后世界不推进，玩家第一次锁定指针才开始。暂停（#68）会在这一状态下显示暂停菜单。退出写盘期间
-    // 也不推进。
-    let started = false;
-    let exiting = false;
     // 极限下死亡那一 tick 核心置已死亡标记，这里在那一帧写一次盘：之后关掉页面，世界列表里也只剩删除。每帧而不是
     // 每 tick 查，调试句柄在循环之外推进的 tick 也查得到。
     let deathSaved = core.hardcoreDead;
+    // 加载画面之后处于暂停，玩家点回到游戏、锁定生效才开始推进（输入层的 `paused`）。
     const stopLoop = startGameLoop(
       core,
       (alpha) => {
@@ -124,15 +190,31 @@ export async function startWorldSession({ storage, id, name, start }: WorldSessi
         controls.sync();
       },
       () => renderer.afterTick(),
-      () => {
-        if (controls.locked) started = true;
-        return started && !exiting;
-      },
+      () => !paused() && !exiting,
     );
+
+    // 只在暂停与退出时写盘，回到游戏之后的改动不在盘上：这时关掉页面先弹浏览器的离开确认。
+    const onBeforeUnload = (event: BeforeUnloadEvent): void => {
+      if (!unsaved()) return;
+      event.preventDefault();
+      // 老一些的浏览器只认 returnValue。
+      event.returnValue = '';
+    };
+    // 确认离开之后尽力再写一次。页面隐藏时已经暂停写过一次，那一次还没提交的话这一次排在它后面（存储模块
+    // 按调用顺序提交），不走 `save` 的排队：排队要等前一次写完才取快照，页面等不到那时候。
+    const onPageHide = (): void => {
+      if (exiting || !unsaved()) return;
+      void writeNow();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    window.addEventListener('pagehide', onPageHide);
 
     /** 卸下这一个世界挂的全部东西。存档不在这里处理。 */
     const teardown = (): void => {
+      closed = true;
       stopLoop();
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('pagehide', onPageHide);
       if (document.pointerLockElement === canvas) document.exitPointerLock();
       controls.remove();
       hud.remove();
@@ -143,12 +225,10 @@ export async function startWorldSession({ storage, id, name, start }: WorldSessi
     };
     /**
      * 写盘成功之后才销毁、释放锁：写盘失败时世界留着，改动还在核心里，可以再退一次。写盘期间不推进 tick，
-     * 写进去的就是退出那一刻的世界。
+     * 写进去的就是退出那一刻的世界：正在写的那一次是暂停时取的快照，退出这一次排在它后面。
      */
     const exit = (): Promise<void> =>
       (ending ??= (async () => {
-        // 光标物品与合成网格不进快照，先按背包键关闭的规则把东西退回去。
-        core.closeAllScreens();
         exiting = true;
         if (!(await save())) {
           exiting = false;
@@ -174,7 +254,14 @@ export async function startWorldSession({ storage, id, name, start }: WorldSessi
         }
       })());
 
-    installDebugHandle({ core, renderer, hud, chunks, exitToList: exit });
+    installDebugHandle({
+      core,
+      renderer,
+      hud,
+      chunks,
+      exitToList: exit,
+      setIgnorePause: (on) => (ignorePause = on),
+    });
     // 进入时这一次写盘失败不影响进入：改过的区块已经放回，下次写盘再写。
     void save();
     return { exit, ended };

@@ -300,6 +300,11 @@ export class World implements BlockEdit, BlockStateView {
     return records;
   }
 
+  /** 上次写盘之后改过的区块有几个。 */
+  get unsavedChunkCount(): number {
+    return this.unsavedChunks.size;
+  }
+
   /** 写盘失败时把那次取走的区块放回去，下次写盘再写。不是已改区块的坐标不登记。 */
   returnUnsavedChunks(coords: readonly ChunkCoord[]): void {
     for (const { cx, cz } of coords) {

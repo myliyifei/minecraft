@@ -297,6 +297,8 @@ body {
 .hud[hidden],
 .invscreen[hidden],
 .death-screen[hidden],
+.pause-menu[hidden],
+.pause-menu [hidden],
 .invscreen__cursor[hidden] {
   display: none;
 }
@@ -348,38 +350,6 @@ body {
     var(--crosshair-span) var(--crosshair-line),
     calc(var(--crosshair-line) + var(--crosshair-edge) * 2) 100%,
     100% calc(var(--crosshair-line) + var(--crosshair-edge) * 2);
-}
-
-/*
- * 进入提示：没锁定鼠标、又没开界面时画面正中、准星正下方的一行字（enter-hint.ts）。
- *
- * 位置与准星同一套做法，只是往下让出一格半：不压住准星，玩家仍看得见点下去瞄的是哪一点。
- * pointer-events: none 的理由与准星一样：它离玩家点的那一点很近，点击要落到画布上才锁得上。
- * 关掉界面时锁定是异步抓回的，中间可能有一两帧既没界面也没锁定；淡入从透明开始，那一两帧
- * 看不出闪了一下。与准星一样不给 display，hidden 属性直接生效。
- */
-.enter-hint {
-  position: fixed;
-  left: 50%;
-  top: calc(50% + var(--tile) * 1.5);
-  transform: translateX(-50%);
-  padding: calc(var(--tile) / 2) var(--tile);
-  background: rgb(0 0 0 / 40%);
-  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 35%);
-  font-family: var(--font-ui);
-  font-size: var(--text);
-  letter-spacing: 0.1em;
-  color: #fff;
-  text-shadow: 1px 1px 0 var(--ink);
-  white-space: nowrap;
-  pointer-events: none;
-  animation: enter-hint-fade 0.2s ease-in;
-}
-
-@keyframes enter-hint-fade {
-  from {
-    opacity: 0;
-  }
 }
 
 /*
@@ -910,4 +880,68 @@ body {
   background: rgb(0 0 0 / 60%);
   box-shadow: inset 0 0 0 2px #fff;
   outline: none;
+}
+
+/*
+ * 暂停菜单：铺满视口的一层暗色，正中是标题、三颗按钮与提示行（pause-menu.ts）。
+ *
+ * 底下的世界仍看得见、画面照常画，只是压暗了：暂停时 tick 停住，渲染不停。它挂在死亡画面之后，叠在最上面：
+ * 死亡画面上切走标签页时，回来先看到的是它。按钮与死亡画面那一颗同一种样式。显式给了 display，
+ * 所以上面 [hidden] 那一处要把它写回去。
+ */
+.pause-menu {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: stretch;
+  gap: calc(var(--tile) / 2);
+  background: rgb(0 0 0 / 55%);
+  font-family: var(--font-ui);
+}
+
+.pause-menu__title {
+  margin-bottom: var(--tile);
+  font-size: calc(var(--text) * 2);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.1em;
+  text-align: center;
+  color: #fff;
+  text-shadow: calc(var(--tile) / 6) calc(var(--tile) / 6) 0 var(--ink);
+}
+
+.pause-menu__button {
+  min-width: calc(var(--tile) * 14);
+  padding: calc(var(--tile) / 2) var(--tile);
+  border: 0;
+  background: rgb(0 0 0 / 40%);
+  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 35%);
+  font: inherit;
+  font-size: var(--text);
+  color: #fff;
+  text-shadow: 1px 1px 0 var(--ink);
+  cursor: pointer;
+}
+
+.pause-menu__button:hover:not(:disabled),
+.pause-menu__button:focus-visible {
+  background: rgb(0 0 0 / 60%);
+  box-shadow: inset 0 0 0 2px #fff;
+  outline: none;
+}
+
+.pause-menu__button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 锁定被拒与写盘失败那两行：与世界列表的提示行同一种红底。 */
+.pause-menu__notice {
+  max-width: calc(var(--tile) * 14);
+  padding: calc(var(--tile) / 4) calc(var(--tile) / 2);
+  background: color-mix(in srgb, var(--health) 80%, transparent);
+  font-size: var(--text);
+  text-align: center;
+  color: #fff;
 }

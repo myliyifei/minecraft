@@ -32,6 +32,7 @@ export type PlayerInputTarget = Pick<
   | 'selectHotbarSlot'
   | 'scrollHotbar'
   | 'toggleInventory'
+  | 'closeAllScreens'
   | 'uiMode'
   | 'health'
 >;
@@ -68,15 +69,33 @@ export interface PlayerControls {
    * 死亡画面的重生按钮走这里，与关掉背包界面时抓回锁定是同一条路。
    */
   grabPointer(): void;
-  /** 此刻鼠标是否锁定在画布上。界面层的进入提示读它。 */
-  readonly locked: boolean;
+  /**
+   * 暂停菜单的「回到游戏」，在按钮的 click 里同步调。平时就是 `grabPointer`，暂停在锁定生效时才解除。死亡画面
+   * 开着时例外：那时鼠标本来就该交还给页面，当场解除暂停，不请求锁定（请求了也会在同一帧被每帧同步放掉）。
+   * 暂停时开着的界面只可能是死亡画面，别的在进入暂停时已经关掉。
+   */
+  resume(): void;
+  /**
+   * 此刻是否处于暂停（见 CONTEXT.md「暂停」）。装上时就是暂停：加载画面结束之后玩家点「回到游戏」才进入
+   * 第一人称。锁定真正生效时解除。游戏循环按它决定推不推进 tick。
+   */
+  readonly paused: boolean;
+  /** 暂停时点「回到游戏」请求的锁定被浏览器拒了（刚用 Esc 退出锁定后的冷却）。锁定生效时变回假。 */
+  readonly resumeRejected: boolean;
   /** 卸下全部监听器。 */
   remove(): void;
+}
+
+/** 暂停状态变化时交给接线层的事。 */
+export interface PauseHooks {
+  /** 进入暂停的那一刻调一次：接线层在这里写盘。装上时的那一次暂停不调，进入世界时接线层自己写。 */
+  readonly onPause: () => void;
 }
 
 export function installPlayerControls(
   canvas: HTMLCanvasElement,
   target: PlayerInputTarget,
+  hooks: PauseHooks,
 ): PlayerControls {
   const pressed = new Set<MoveAction>();
   const locked = (): boolean => document.pointerLockElement === canvas;
@@ -95,27 +114,45 @@ export function installPlayerControls(
   // 否则下一发会拿一个过时的时刻算出偏小的速度。
   let lastMoveAt = 0;
 
+  // 暂停（ADR-0019）。装上时就是暂停，理由见 `PlayerControls.paused`。
+  let paused = true;
+  // 「这次锁定是自己释放的」：输入层为界面模式调 exitPointerLock 之前立起，锁定变更事件到达时清除。判据不读
+  // 核心的界面标志：按背包键时开合下一 tick 才生效，锁定当即释放，事件到达时界面标志多半还是假。
+  let releasing = false;
+  // 暂停菜单上「回到游戏」的锁定请求被浏览器拒了，菜单提示再点一次。锁定生效时清掉。
+  let resumeRejected = false;
+  // 有一次锁定请求还没有结果。失败可能经 Promise 被拒与 pointerlockerror 两条路各报一次，只处理第一次。
+  let grabPending = false;
+
   /**
    * 抓回指针锁定：进第一人称，网页鼠标随即消失。
    *
-   * 三处入口都走这里——点画布、关掉背包界面、按死亡画面的重生按钮。合成一个函数是因为锁定
-   * 生效后有的浏览器会补投一发光标归位的 mousemove（见 `dropWarpMove`），漏认那一发视角就会被甩一下。
+   * 四处入口都走这里——暂停菜单的回到游戏、点画布、关掉背包界面、按死亡画面的重生按钮。合成一个函数是因为
+   * 锁定生效后有的浏览器会补投一发光标归位的 mousemove（见 `dropWarpMove`），漏认那一发视角就会被甩一下。
    *
-   * 请求可能被浏览器拒：它只在用户手势里放行。拒了就退回「玩家点一下画面」，但那个
-   * rejection 必须接住，否则会变成控制台里一条未处理的错误。
+   * 请求可能被浏览器拒：它只在用户手势里放行，刚用 Esc 退出锁定后还有一段冷却。拒了就停在暂停菜单上，
+   * 那个 rejection 也必须接住，否则会变成控制台里一条未处理的错误。
    */
   const grabPointer = (): void => {
     // 标记要在这里而不是在 pointerlockchange 里立：那发归位事件可能比锁定变更事件先到。
     dropWarpMove = true;
     lockedAt = undefined;
-    // 老浏览器这个方法返回 void，新的返回 Promise，所以先收成 unknown 再认。
+    grabPending = true;
+    // 老浏览器这个方法返回 void、失败只发 pointerlockerror，新的返回 Promise，所以先收成 unknown 再认。
     const request: unknown = canvas.requestPointerLock();
-    if (request instanceof Promise) {
-      request.catch(() => {
-        // 没锁上，那发归位事件也就不会来。
-        dropWarpMove = false;
-      });
-    }
+    if (request instanceof Promise) request.catch(onLockFailed);
+  };
+
+  /** 锁定请求失败。 */
+  const onLockFailed = (): void => {
+    if (!grabPending) return;
+    grabPending = false;
+    // 没锁上，那发归位事件也就不会来。
+    dropWarpMove = false;
+    // 暂停菜单上点的：留在菜单，提示再点一次。关掉界面、重生时抓的：鼠标没锁着、界面也关了，世界不该在
+    // 玩家操作不了的时候接着推进，算作暂停（ADR-0019 补记）。
+    if (paused) resumeRejected = true;
+    else if (!locked()) pause();
   };
 
   const onClick = (): void => {
@@ -126,18 +163,61 @@ export function installPlayerControls(
     grabPointer();
   };
 
-  const onLockChange = (event: Event): void => {
-    if (locked()) {
-      lockedAt = event.timeStamp;
-      return;
-    }
-    // 释放锁定时清掉按键状态：Esc 之后玩家不该还朝原方向走下去，也不该还在挖。
+  /** 为界面模式交还鼠标。没锁着时不立记号：不会有锁定变更事件来清除它，留着会把下一次 Esc 认成自己释放的。 */
+  const releasePointer = (): void => {
+    if (!locked()) return;
+    releasing = true;
+    document.exitPointerLock();
+  };
+
+  /**
+   * 进入暂停。已经暂停时什么都不做，接线层因此不会为同一次暂停写两次盘。
+   *
+   * 开着的界面当场关掉（`closeAllScreens` 立即生效）：暂停之后不再有 tick，走背包键那条排队的路关不掉它，
+   * 光标物品与合成网格里的东西也进不了快照。
+   */
+  const pause = (): void => {
+    if (paused) return;
+    paused = true;
+    target.closeAllScreens();
+    hooks.onPause();
+  };
+
+  /** 放掉按住的键、挖掘与连锁键。 */
+  const releaseKeys = (): void => {
     pressed.clear();
     sendIntent();
     target.setMining(false);
     // 连锁键也要放掉：Esc 之后它的 keyup 未必还投得到页面上，卡住的话下一次开始挖掘
     // 会莫名其妙地连锁。
     target.setChainMining(false);
+  };
+
+  const onLockChange = (event: Event): void => {
+    if (locked()) {
+      lockedAt = event.timeStamp;
+      grabPending = false;
+      // 暂停在锁定真正生效时才解除，不在点按钮的那一刻：请求可能被拒。暂停期间按下的键（点按钮那一下的
+      // 左键）再清一次，不带进第一人称。
+      if (paused) {
+        paused = false;
+        resumeRejected = false;
+        releaseKeys();
+      }
+      return;
+    }
+    if (releasing) releasing = false;
+    else pause();
+    // 释放锁定时清掉按键状态：Esc 之后玩家不该还朝原方向走下去，也不该还在挖。
+    releaseKeys();
+  };
+
+  // 切走标签页、最小化窗口：页面隐藏时暂停。浏览器这时也会退出锁定，但事件的先后不定，这里不等它；还锁着就
+  // 自己释放，之后到的锁定变更事件清除记号，不再暂停第二次。
+  const onVisibilityChange = (): void => {
+    if (document.visibilityState !== 'hidden') return;
+    pause();
+    releasePointer();
   };
 
   const onMouseDown = (event: MouseEvent): void => {
@@ -206,7 +286,7 @@ export function installPlayerControls(
       // 打开就把鼠标交还给页面，玩家拿它点格子；关上就抓回来，玩家不必再点一下画面。
       // 释放锁定顺带清掉按住的键与挖掘状态（见 onLockChange），所以这里不必再清一遍。
       if (closing) grabPointer();
-      else document.exitPointerLock();
+      else releasePointer();
       return;
     }
 
@@ -266,6 +346,8 @@ export function installPlayerControls(
 
   canvas.addEventListener('click', onClick);
   document.addEventListener('pointerlockchange', onLockChange);
+  document.addEventListener('pointerlockerror', onLockFailed);
+  document.addEventListener('visibilitychange', onVisibilityChange);
   document.addEventListener('mousemove', onMouseMove);
   // 鼠标按钮挂在 document 而不是画布上：锁定期间事件本来就投给锁定的元素，而松开有可能
   // 发生在画布之外，漏掉它按钮就卡住了。
@@ -296,16 +378,29 @@ export function installPlayerControls(
       // （背包关了、死亡画面开了），鼠标于是一直锁着，点不到重生按钮。死亡画面上只有重生按钮会抓回
       // 锁定，它先让核心重生再抓（`GameCore.respawn` 立即生效），所以每帧判不会放掉那一下。
       const open = uiOpen();
-      if (locked() && ((open && !shownUiOpen) || target.health.dead)) document.exitPointerLock();
+      if (locked() && ((open && !shownUiOpen) || target.health.dead)) releasePointer();
       shownUiOpen = open;
     },
     grabPointer,
-    get locked(): boolean {
-      return locked();
+    resume(): void {
+      if (!uiOpen()) {
+        grabPointer();
+        return;
+      }
+      paused = false;
+      resumeRejected = false;
+    },
+    get paused(): boolean {
+      return paused;
+    },
+    get resumeRejected(): boolean {
+      return resumeRejected;
     },
     remove(): void {
       canvas.removeEventListener('click', onClick);
       document.removeEventListener('pointerlockchange', onLockChange);
+      document.removeEventListener('pointerlockerror', onLockFailed);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mousedown', onMouseDown);
       document.removeEventListener('mouseup', onMouseUp);

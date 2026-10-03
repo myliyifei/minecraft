@@ -16,13 +16,13 @@ import { gunzipChunk, gzipChunk } from './chunk-codec';
  * 不另造结构；导出文件的各段与这里的记录相同。
  */
 
-/** 库名与元数据表名。导出给端到端测试：它直接往库里写一条版本不同的元数据。 */
+/** 库名与元数据表名、已改区块表名。导出给端到端测试：它直接往库里写一条版本不同的元数据，读暂停时写进去的区块。 */
 export const DB_NAME = 'voxel-worlds';
 const DB_VERSION = 1;
 export const WORLDS = 'worlds';
 const STATES = 'states';
 const BLOCK_STATES = 'blockStates';
-const CHUNKS = 'chunks';
+export const CHUNKS = 'chunks';
 const ALL_STORES = [WORLDS, STATES, BLOCK_STATES, CHUNKS];
 
 /** 世界列表显示的与读档前比对的字段。种子、难度、已死亡标记以快照为准，这里的副本每次写盘时从快照复制。 */

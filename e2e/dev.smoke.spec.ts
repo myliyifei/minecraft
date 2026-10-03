@@ -77,7 +77,7 @@ import {
   installPixelProbe,
   readElementPixels,
 } from './canvas';
-import { enterDefaultWorld, reloadAndEnter, startTicking } from './world-list';
+import { enterDefaultWorld, ignorePause, reloadAndEnter } from './world-list';
 
 /** 熔炉三格各自的下标与读屏名字。 */
 const FURNACE_SLOTS: ReadonlyArray<readonly [number, string]> = [
@@ -244,7 +244,7 @@ async function readLockedElementId(page: Page): Promise<string | null> {
 }
 
 /**
- * 点画布进入第一人称：之后按键才生效。
+ * 点画布进入第一人称：之后按键才生效。beforeEach 让世界不理会暂停，画面上没有暂停菜单，点得到画布。
  * 锁定之后浏览器会补投一发光标归位的 mousemove，这里等它到达，好让后面的断言看到
  * 稳定的视角。
  */
@@ -443,7 +443,7 @@ test('同一种子每次进入地形相同', async ({ page }) => {
   const before = await readTopBlockProfile(page);
   // 重新打开页面，从世界列表再进入这个世界
   await reloadAndEnter(page);
-  await startTicking(page);
+  await ignorePause(page);
   await waitForFullViewDistance(page);
   expect(await readTopBlockProfile(page)).toEqual(before);
 });
@@ -455,7 +455,7 @@ test('地形生成在 Worker 里进行，视距内的区块陆续送到', async 
   const atFirstFrame = await page.evaluate(() => window.__VOXEL__!.core.loadedChunkCount);
   expect(atFirstFrame).toBeLessThan(CHUNKS_IN_VIEW);
 
-  await startTicking(page);
+  await ignorePause(page);
   await waitForFullViewDistance(page);
 
   const state = await page.evaluate(() => ({
@@ -2818,39 +2818,6 @@ test('背包界面开着时不显示十字准星', async ({ page }) => {
   await page.keyboard.press(KEY_BINDINGS.inventory);
   await expect(screen).toBeHidden();
   await expect(crosshair).toBeVisible();
-  expect(errors).toEqual([]);
-});
-
-test('没锁定鼠标又没开界面时准星正下方显示进入提示，点画布锁定后隐藏，Esc 退出锁定后再出现', async ({
-  page,
-}) => {
-  const hint = page.locator('#enter-hint');
-  await expect(hint).toBeVisible();
-  await expect(hint).toHaveText(STRINGS.clickToStart);
-  // 左右居中，紧挨在准星下面，不压住准星
-  const box = (await hint.boundingBox())!;
-  const crosshairBox = (await page.locator('#crosshair').boundingBox())!;
-  const viewport = page.viewportSize()!;
-  expect(Math.abs(box.x + box.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(CENTER_TOLERANCE_PX);
-  expect(box.y).toBeGreaterThan(crosshairBox.y + crosshairBox.height);
-  expect(box.y).toBeLessThan(viewport.height * 0.65);
-
-  // 玩家照着提示点，点的就是提示那几个字：点击要穿过它落到画布上，否则锁不上
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await expect.poll(() => readLockedElementId(page)).toBe('game');
-  await expect(hint).toBeHidden();
-
-  // 背包界面开着时鼠标交还给页面，但玩家在摆物品，不该提示点画面
-  await page.keyboard.press(KEY_BINDINGS.inventory);
-  await expect(page.locator('#inventory-screen')).toBeVisible();
-  expect(await readLockedElementId(page)).toBe(null);
-  await expect(hint).toBeHidden();
-  await page.keyboard.press(KEY_BINDINGS.inventory);
-  await expect.poll(() => readLockedElementId(page)).toBe('game');
-  await expect(hint).toBeHidden();
-
-  await releasePointer(page);
-  await expect(hint).toBeVisible();
   expect(errors).toEqual([]);
 });
 

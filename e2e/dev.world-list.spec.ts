@@ -5,7 +5,7 @@ import { SNAPSHOT_FORMAT_VERSION, TERRAIN_VERSION } from '../src/core/snapshot';
 import { seedFromText } from '../src/core/world-seed';
 import { DB_NAME, WORLDS, type WorldMeta } from '../src/storage/world-storage';
 import { DIFFICULTY_NAMES, STRINGS } from '../src/ui/strings';
-import { createWorld, startTicking, waitForWorld, waitForWorldList } from './world-list';
+import { createWorld, resumeGame, waitForWorld, waitForWorldList } from './world-list';
 
 /*
  * 世界列表与进入世界（#67）。每条测试的浏览器上下文都是新的，IndexedDB 一开始是空的。
@@ -144,10 +144,10 @@ test('首次打开列表为空；新建世界的加载画面消失后世界时�
   expect(entered.ticks).toBe(0);
   expect(entered.timeOfDay).toBe(0);
   expect(entered.position).toEqual(entered.spawn);
-  // 加载画面消失后世界仍不推进，等玩家点画布锁定指针
+  // 加载画面消失后世界处于暂停，等玩家点回到游戏
   await page.waitForTimeout(500);
   expect(await page.evaluate(() => window.__VOXEL__!.core.tickCount)).toBe(0);
-  await startTicking(page);
+  await resumeGame(page);
 
   const exited = await page.evaluate(async () => {
     const handle = window.__VOXEL__!;
@@ -351,7 +351,9 @@ test('极限世界摔死：已死亡标记当场写盘，重新打开页面列�
   expect(await page.evaluate((id) => window.__VOXEL_LIST__!.enterWorld(id), id!)).toBe('hardcoreDead');
   await waitForWorldList(page);
 
+  // 这一次回到游戏再摔：暂停时死亡画面压在暂停菜单底下，点不到
   await createWorld(page, { name: '世界乙', difficulty: Difficulty.Hardcore });
+  await resumeGame(page);
   await fallToDeath(page);
   const button = page.locator('#death-screen button');
   await expect(button).toHaveText(STRINGS.deleteWorld);

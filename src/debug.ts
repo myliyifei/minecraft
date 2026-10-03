@@ -24,6 +24,12 @@ export interface DebugHandle {
    * 世界列表随后刷新。
    */
   exitToList(): Promise<void>;
+  /**
+   * 打开之后暂停时游戏循环照样推进 tick，也不显示暂停菜单；暂停本身照旧发生，照旧写盘。冒烟测试用：无头
+   * Chromium 锁定指针几秒之后帧率越来越低，测试不能一直锁着，而大多数测试要世界在推进、画面上没有遮挡，
+   * 与第六切片之前「没锁定也在推进」的状态一样。暂停本身的测试不开它。
+   */
+  setIgnorePause(on: boolean): void;
 }
 
 /**

@@ -40,16 +40,19 @@ export async function createWorld(page: Page, form: NewWorldForm = {}): Promise<
 }
 
 /**
- * 让刚进入的世界开始推进：加载画面消失后世界不推进，第一次锁定指针才开始。锁定一次再释放，之后的状态与
- * 第六切片之前打开页面时一样：世界在推进，鼠标没锁定。
- *
- * 要等世界推进了一个 tick 再释放：循环每帧看一次锁没锁，锁上又在下一帧之前释放的话它看不到。只在开发构建里用，
- * 读的是调试句柄。
+ * 在暂停菜单上点「回到游戏」，等指针锁定生效、世界推进了一个 tick：加载画面消失后世界处于暂停。之后鼠标一直
+ * 锁着，释放锁定就是暂停（ADR-0019）。无头 Chromium 锁着几秒之后帧率越来越低，锁上之后别停留太久。只在
+ * 开发构建里用，读的是调试句柄。
  */
-export async function startTicking(page: Page): Promise<void> {
-  await page.locator('#game').click();
+export async function resumeGame(page: Page): Promise<void> {
+  const start = await page.evaluate(() => window.__VOXEL__!.core.tickCount);
+  await page.getByRole('button', { name: STRINGS.backToGame }).click();
   await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id ?? null)).toBe('game');
-  await page.waitForFunction(() => window.__VOXEL__!.core.tickCount > 0);
+  await page.waitForFunction((start) => window.__VOXEL__!.core.tickCount > start, start);
+}
+
+/** 退出指针锁定，等锁定变更事件到达：世界随之暂停。真人按 Esc 时由浏览器退出，CDP 合成的 Esc 做不到这一步。 */
+export async function pressEscape(page: Page): Promise<void> {
   await page.evaluate(
     async () =>
       new Promise<void>((resolve) => {
@@ -59,7 +62,7 @@ export async function startTicking(page: Page): Promise<void> {
   );
 }
 
-/** 重新打开页面，在世界列表上点第一条的「进入」，等加载画面消失。世界还没开始推进。 */
+/** 重新打开页面，在世界列表上点第一条的「进入」，等加载画面消失。世界处于暂停。 */
 export async function reloadAndEnter(page: Page): Promise<void> {
   await page.reload();
   await waitForWorldList(page);
@@ -67,9 +70,22 @@ export async function reloadAndEnter(page: Page): Promise<void> {
   await waitForWorld(page);
 }
 
-/** 从世界列表新建一个默认种子、默认难度的世界并让它开始推进。端到端冒烟测试的起点。 */
+/**
+ * 让世界暂停时照样推进、不显示暂停菜单，等它推进了一个 tick。冒烟测试用：无头 Chromium 锁定指针几秒之后帧率
+ * 越来越低，测试不能一直锁着（见 `DebugHandle.setIgnorePause`）。之后的状态与第六切片之前打开页面时一样：世界在
+ * 推进、鼠标没锁定，点画布锁定。
+ */
+export async function ignorePause(page: Page): Promise<void> {
+  const start = await page.evaluate(() => {
+    window.__VOXEL__!.setIgnorePause(true);
+    return window.__VOXEL__!.core.tickCount;
+  });
+  await page.waitForFunction((start) => window.__VOXEL__!.core.tickCount > start, start);
+}
+
+/** 从世界列表新建一个默认种子、默认难度的世界，让它不理会暂停。端到端冒烟测试的起点。 */
 export async function enterDefaultWorld(page: Page): Promise<void> {
   await waitForWorldList(page);
   await createWorld(page, { seed: String(DEFAULT_SEED) });
-  await startTicking(page);
+  await ignorePause(page);
 }

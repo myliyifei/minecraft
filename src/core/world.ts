@@ -449,6 +449,9 @@ function blockKey(x: number, y: number, z: number): string {
 /** 区块键的一维跨度，决定了世界的区块坐标范围：±2²⁵ 个区块。 */
 const CHUNK_KEY_STRIDE = 1 << 26;
 
+/** 区块坐标的绝对值小于它（`chunkKey` 的取值范围）。导入的文件按它校验区块与实体坐标。 */
+export const CHUNK_COORD_LIMIT = CHUNK_KEY_STRIDE / 2;
+
 /**
  * 区块的 Map 键。
  *

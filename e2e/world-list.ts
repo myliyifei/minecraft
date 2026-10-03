@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { BlockType } from '../src/core/block';
 import { DEFAULT_SEED } from '../src/core/constants';
 import type { Difficulty } from '../src/core/difficulty';
 import { STRINGS } from '../src/ui/strings';
@@ -60,6 +61,29 @@ export async function pressEscape(page: Page): Promise<void> {
         document.exitPointerLock();
       }),
   );
+}
+
+/** 经调试句柄写盘并退出到世界列表，等列表显示出来。 */
+export async function exitToList(page: Page): Promise<void> {
+  await page.evaluate(() => window.__VOXEL__!.exitToList());
+  await waitForWorldList(page);
+}
+
+/** 把这一列地表最上面那一块挖掉，返回它的 y。 */
+export function digTop(page: Page, x: number, z: number): Promise<number> {
+  return page.evaluate(
+    ({ x, z, air }) => {
+      const core = window.__VOXEL__!.core;
+      const y = core.highestBlockY(x, z);
+      core.setBlock(x, y, z, air);
+      return y;
+    },
+    { x, z, air: BlockType.Air },
+  );
+}
+
+export function blockAt(page: Page, x: number, y: number, z: number): Promise<number> {
+  return page.evaluate(({ x, y, z }) => window.__VOXEL__!.core.getBlock(x, y, z), { x, y, z });
 }
 
 /** 重新打开页面，在世界列表上点第一条的「进入」，等加载画面消失。世界处于暂停。 */

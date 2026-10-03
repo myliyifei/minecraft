@@ -5,7 +5,7 @@ import { SNAPSHOT_FORMAT_VERSION, TERRAIN_VERSION } from '../src/core/snapshot';
 import { seedFromText } from '../src/core/world-seed';
 import { DB_NAME, WORLDS, type WorldMeta } from '../src/storage/world-storage';
 import { DIFFICULTY_NAMES, STRINGS } from '../src/ui/strings';
-import { createWorld, resumeGame, waitForWorld, waitForWorldList } from './world-list';
+import { blockAt, createWorld, digTop, exitToList, resumeGame, waitForWorld, waitForWorldList } from './world-list';
 
 /*
  * 世界列表与进入世界（#67）。每条测试的浏览器上下文都是新的，IndexedDB 一开始是空的。
@@ -35,12 +35,6 @@ function entryNamed(page: Page, name: string): Locator {
 /** 列表里自上而下的名称。 */
 function entryNames(page: Page): Promise<string[]> {
   return page.locator('.world-list__name').allTextContents();
-}
-
-/** 经调试句柄写盘并退出到世界列表，等列表显示出来。 */
-async function exitToList(page: Page): Promise<void> {
-  await page.evaluate(() => window.__VOXEL__!.exitToList());
-  await waitForWorldList(page);
 }
 
 /** 点这一条的「进入」，等加载画面消失。 */
@@ -84,23 +78,6 @@ function worldsTable(page: Page, put: readonly WorldMeta[] = []): Promise<WorldM
     },
     { dbName: DB_NAME, store: WORLDS, put },
   );
-}
-
-/** 把这一列地表最上面那一块挖掉，返回它的 y。 */
-function digTop(page: Page, x: number, z: number): Promise<number> {
-  return page.evaluate(
-    ({ x, z, air }) => {
-      const core = window.__VOXEL__!.core;
-      const y = core.highestBlockY(x, z);
-      core.setBlock(x, y, z, air);
-      return y;
-    },
-    { x, z, air: BlockType.Air },
-  );
-}
-
-function blockAt(page: Page, x: number, y: number, z: number): Promise<number> {
-  return page.evaluate(({ x, y, z }) => window.__VOXEL__!.core.getBlock(x, y, z), { x, y, z });
 }
 
 /** 挖空脚下 24 格，推进到摔死。整段在一次同步的 evaluate 里，游戏循环插不进来。 */

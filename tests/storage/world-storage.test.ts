@@ -7,6 +7,8 @@ import { Difficulty } from '../../src/core/difficulty';
 import { GameCore } from '../../src/core/game';
 import { ItemType } from '../../src/core/item';
 import { SNAPSHOT_FORMAT_VERSION, TERRAIN_VERSION, type Snapshot } from '../../src/core/snapshot';
+import { gunzipChunk } from '../../src/storage/chunk-codec';
+import { decodeWorldFile, encodeWorldFile, type WorldFile } from '../../src/storage/world-file';
 import { openWorldStorage, type WorldStorage, type WorldStorageOptions } from '../../src/storage/world-storage';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 
@@ -329,5 +331,113 @@ describe('写盘失败整次回滚（ADR-0018）', () => {
     const restored = new GameCore({ viewRadius: 3, chunkSource: () => flatTestTerrain, restore: await loaded(storage, 'a') });
     expect(restored.getBlock(4, G, 4)).toBe(BlockType.Air);
     expect(restored.getBlock(CHUNK_SIZE + 4, G, 4)).toBe(BlockType.Furnace);
+  });
+});
+
+describe('导出导入读写的原始记录（#70）', () => {
+  /** 按坐标排好序的区块段。 */
+  function sortedChunks<T extends { cx: number; cz: number }>(chunks: readonly T[]): T[] {
+    return [...chunks].sort((a, b) => a.cx - b.cx || a.cz - b.cz);
+  }
+
+  /** 读出一个世界的记录、编码成导出文件、再解码，像导入时那样拿到文件里的记录。 */
+  async function exported(storage: WorldStorage, id: string): Promise<WorldFile> {
+    const records = await storage.readRecords(id);
+    if (!records) throw new Error(`没有世界 ${id}`);
+    const encoded = encodeWorldFile(records);
+    if (!encoded.ok) throw new Error(`编码失败：${encoded.reason}`);
+    const result = await decodeWorldFile(encoded.buffer);
+    if (!result.ok) throw new Error(`解码失败：${result.reason}`);
+    return result.file;
+  }
+
+  it('读出的是四张表里的原样记录：区块是库里的 gzip 字节，不解压', async () => {
+    const { open } = fixture();
+    const storage = await open();
+    const snapshot = editedGame().snapshot();
+    await storage.saveWorld('a', '洞', snapshot);
+
+    const records = await storage.readRecords('a');
+    const { blockStates, editedChunks: _, ...state } = snapshot;
+    expect(records?.meta).toEqual((await storage.listWorlds())[0]!.meta);
+    expect(records?.state).toEqual(state);
+    expect(records?.blockStates).toEqual(blockStates);
+    expect(sortedChunks(records!.chunks).map(({ cx, cz }) => [cx, cz])).toEqual([[-1, 2], [0, 0], [1, 0]]);
+    const back = await loaded(storage, 'a');
+    for (const { cx, cz, data } of records!.chunks) {
+      const blocks = back.editedChunks.find((chunk) => chunk.cx === cx && chunk.cz === cz)!.blocks;
+      expect(await gunzipChunk(data)).toEqual(blocks);
+    }
+  });
+
+  it('版本不兼容的世界也读得出原始记录；没有这个世界时是 undefined', async () => {
+    const { open } = fixture();
+    const old = await open({ versions: { format: SNAPSHOT_FORMAT_VERSION + 1, terrain: TERRAIN_VERSION } });
+    await old.saveWorld('a', '旧', editedGame().snapshot());
+    old.close();
+    const storage = await open();
+    expect((await storage.loadWorld('a')).status).toBe('incompatible');
+    const records = await storage.readRecords('a');
+    expect(records?.meta.formatVersion).toBe(SNAPSHOT_FORMAT_VERSION + 1);
+    expect(records?.chunks).toHaveLength(3);
+    expect(await storage.readRecords('nope')).toBeUndefined();
+  });
+
+  it('导入写成一个新世界：名称与创建时间沿用文件里的，上次游玩时间取当前；读回的快照与原世界相同', async () => {
+    const { open, clock } = fixture();
+    const storage = await open();
+    await storage.saveWorld('a', '洞', editedGame().snapshot());
+    const file = await exported(storage, 'a');
+    clock.now = 7_000;
+
+    await storage.importWorld('b', file);
+    const [imported, original] = await storage.listWorlds();
+    expect(imported).toEqual({ meta: { ...original!.meta, id: 'b', lastPlayedAt: 7_000 }, compatible: true });
+    expect(sorted(await loaded(storage, 'b'))).toEqual(sorted(await loaded(storage, 'a')));
+  });
+
+  it('同一个文件导入两次是两个世界，与原世界三者互不影响', async () => {
+    const { open } = fixture();
+    const storage = await open();
+    const game = editedGame();
+    await storage.saveWorld('a', '洞', game.snapshot());
+    const file = await exported(storage, 'a');
+    await storage.importWorld('b', file);
+    await storage.importWorld('c', file);
+    const before = sorted(await loaded(storage, 'a'));
+
+    const copy = new GameCore({ viewRadius: 3, chunkSource: () => flatTestTerrain, restore: await loaded(storage, 'b') });
+    copy.setBlock(5, G, 5, BlockType.Air);
+    copy.setBlock(-CHUNK_SIZE * 3, G, 0, BlockType.Air);
+    await storage.saveWorld('b', '洞', copy.snapshot());
+
+    expect(sorted(await loaded(storage, 'a'))).toEqual(before);
+    expect(sorted(await loaded(storage, 'c'))).toEqual(before);
+    const changed = await loaded(storage, 'b');
+    expect(changed.editedChunks).toHaveLength(4);
+    const restored = new GameCore({ viewRadius: 3, chunkSource: () => flatTestTerrain, restore: changed });
+    expect(restored.getBlock(5, G, 5)).toBe(BlockType.Air);
+    await storage.deleteWorld('c');
+    expect((await storage.listWorlds()).map(({ meta }) => meta.id).sort()).toEqual(['a', 'b']);
+  });
+
+  it('写到一半失败时整次回滚，这个 id 在四张表里一条都没有', async () => {
+    const { open, factory } = fixture();
+    const storage = await open();
+    await storage.saveWorld('a', '洞', editedGame().snapshot());
+    const file = await exported(storage, 'a');
+    const counts = await recordCounts(factory);
+
+    const original = IDBObjectStore.prototype.put;
+    let chunkPuts = 0;
+    vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, ...args) {
+      if (isChunkStore(this) && ++chunkPuts === 2) throw new DOMException('配额不足', 'QuotaExceededError');
+      return original.apply(this, args);
+    });
+    await expect(storage.importWorld('b', file)).rejects.toThrow('配额不足');
+    vi.restoreAllMocks();
+
+    expect(await recordCounts(factory)).toEqual(counts);
+    expect(await storage.loadWorld('b')).toEqual({ status: 'missing' });
   });
 });

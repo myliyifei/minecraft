@@ -1,16 +1,8 @@
 import { DEFAULT_DIFFICULTY, Difficulty } from '../core/difficulty';
 import { seedFromText } from '../core/world-seed';
-import type { WorldEntry } from '../storage/world-storage';
+import { WORLD_FILE_EXTENSION } from '../storage/world-file';
+import { WORLD_NAME_MAX_LENGTH, worldNameValid, type WorldEntry } from '../storage/world-storage';
 import { DIFFICULTY_NAMES, formatLastPlayed, STRINGS, worldDetails } from './strings';
-
-/** 世界名称最多几个字符（见 CONTEXT.md「世界列表」）。按 UTF-16 码元数，与输入框的 `maxLength` 同一种数法。 */
-export const WORLD_NAME_MAX_LENGTH = 32;
-
-/** 新建世界的名称能不能用：去掉首尾空白之后 1 到 32 个字符。 */
-export function worldNameValid(name: string): boolean {
-  const length = name.trim().length;
-  return length >= 1 && length <= WORLD_NAME_MAX_LENGTH;
-}
 
 /** 世界列表里一条显示哪几颗按钮。进入那一颗可能显示但禁用（版本不兼容），也可能不显示（极限已死亡）。 */
 export interface EntryButtons {
@@ -41,13 +33,16 @@ export interface WorldListActions {
   readonly create: (world: NewWorld) => void;
   /** 删除按钮点第二次时调。 */
   readonly delete: (id: string) => void;
+  /** 一条的「导出」。 */
+  readonly export: (id: string) => void;
+  /** 点「导入」、在文件对话框里选了一个文件之后调。没选就关掉对话框时不调。 */
+  readonly import: (file: File) => void;
   /** 打开设置界面。 */
   readonly settings: () => void;
 }
 
 /**
- * 世界列表（见 CONTEXT.md）：铺满屏幕，上方是新建世界、导入、设置三颗按钮，下面每个世界一条。导入与每条的
- * 导出先只放按钮，功能在 #70 里实现。
+ * 世界列表（见 CONTEXT.md）：铺满屏幕，上方是新建世界、导入、设置三颗按钮，下面每个世界一条。
  *
  * 纯表现：列表的内容由接线层从存储读出来交给 `show`，点击原样交回接线层。
  */
@@ -55,7 +50,7 @@ export interface WorldListScreen {
   /** 按这些条目重画列表并显示。条目已按上次游玩时间倒序。 */
   show(entries: readonly WorldEntry[]): void;
   hide(): void;
-  /** 在列表上方显示一行提示（取不到锁时）。下一次点击列表上的按钮时清掉。 */
+  /** 在列表上方显示一行提示（取不到锁、导入的文件无效时）。下一次点击列表上的按钮时清掉。 */
   notify(message: string): void;
 }
 
@@ -109,15 +104,28 @@ export function installWorldList(parent: HTMLElement, actions: WorldListActions)
   const toolbar = document.createElement('div');
   toolbar.className = 'world-list__toolbar';
   const newWorldButton = button(STRINGS.newWorld, 'world-list__new');
-  // 导入（#70）还没有实现，先禁用。
+  // 导入：点按钮时调隐藏的文件输入框打开文件对话框。每次先清空，再选同一个文件也触发 change。
   const importButton = button(STRINGS.importWorld, 'world-list__import');
-  importButton.disabled = true;
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = WORLD_FILE_EXTENSION;
+  fileInput.className = 'world-list__import-file';
+  fileInput.hidden = true;
+  importButton.addEventListener('click', () => {
+    clearMessage();
+    fileInput.value = '';
+    fileInput.click();
+  });
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files?.[0];
+    if (file) actions.import(file);
+  });
   const settingsButton = button(STRINGS.settings, 'world-list__settings');
   settingsButton.addEventListener('click', () => {
     clearMessage();
     actions.settings();
   });
-  toolbar.append(newWorldButton, importButton, settingsButton);
+  toolbar.append(newWorldButton, importButton, fileInput, settingsButton);
 
   const message = document.createElement('p');
   message.className = 'world-list__message';
@@ -232,9 +240,11 @@ export function installWorldList(parent: HTMLElement, actions: WorldListActions)
       row.append(enter);
     }
     if (buttons.export) {
-      // 导出（#70）还没有实现，先禁用。
       const exportButton = button(STRINGS.exportWorld, 'world-list__export');
-      exportButton.disabled = true;
+      exportButton.addEventListener('click', () => {
+        clearMessage();
+        actions.export(meta.id);
+      });
       row.append(exportButton);
     }
     if (buttons.delete) {

@@ -3,6 +3,7 @@ import type { Difficulty } from '../core/difficulty';
 import { SNAPSHOT_FORMAT_VERSION, TERRAIN_VERSION, type BlockStateRecord, type Snapshot } from '../core/snapshot';
 import type { ChunkCoord } from '../core/world';
 import { gunzipChunk, gzipChunk } from './chunk-codec';
+import type { WorldFile } from './world-file';
 
 /*
  * 存档的存储模块（ADR-0018）：把核心导出的快照写进 IndexedDB、读回、删除。一个库四张表，都按世界 id 分隔：
@@ -13,7 +14,7 @@ import { gunzipChunk, gzipChunk } from './chunk-codec';
  * - `chunks`：每个已改区块一条，键是 `[世界 id, cx, cz]`，值是方块数组的 gzip。
  *
  * 前三张每次写盘整体重写，`chunks` 只写快照里带的那些，即上次写盘之后改过的。记录就是快照里对应的那部分，
- * 不另造结构；导出文件的各段与这里的记录相同。
+ * 不另造结构；导出文件的各段与这里的记录相同（world-file.ts），导出时原样读出、导入时原样写回。
  */
 
 /** 库名与元数据表名、已改区块表名。导出给端到端测试：它直接往库里写一条版本不同的元数据，读暂停时写进去的区块。 */
@@ -24,6 +25,15 @@ const STATES = 'states';
 const BLOCK_STATES = 'blockStates';
 export const CHUNKS = 'chunks';
 const ALL_STORES = [WORLDS, STATES, BLOCK_STATES, CHUNKS];
+
+/** 世界名称最多几个字符（见 CONTEXT.md「世界列表」）。按 UTF-16 码元数，与输入框的 `maxLength` 同一种数法。 */
+export const WORLD_NAME_MAX_LENGTH = 32;
+
+/** 世界的名称能不能用：去掉首尾空白之后 1 到 32 个字符。新建表单与导入的文件都按它查。 */
+export function worldNameValid(name: string): boolean {
+  const length = name.trim().length;
+  return length >= 1 && length <= WORLD_NAME_MAX_LENGTH;
+}
 
 /** 世界列表显示的与读档前比对的字段。种子、难度、已死亡标记以快照为准，这里的副本每次写盘时从快照复制。 */
 export interface WorldMeta {
@@ -70,12 +80,24 @@ export interface StorageVersions {
   readonly terrain: number;
 }
 
+export const CURRENT_VERSIONS: StorageVersions = { format: SNAPSHOT_FORMAT_VERSION, terrain: TERRAIN_VERSION };
+
+/** 一个世界在四张表里的记录，区块是 gzip 字节、不解压。导出文件就是把它们拼起来。 */
+export interface WorldRecords extends WorldFile {
+  readonly meta: WorldMeta;
+}
+
+/** 已经压缩、要写进或刚读出 `chunks` 表的一个区块。 */
+export interface PackedChunk extends ChunkCoord {
+  readonly data: Uint8Array<ArrayBuffer>;
+}
+
 export interface WorldStorageOptions {
   /** 默认是浏览器的 `indexedDB`；Node 下的测试传 fake-indexeddb 的。 */
   readonly indexedDB: IDBFactory;
   /** 写进元数据的时刻，默认 `Date.now`。 */
   readonly now: () => number;
-  /** 默认是 `SNAPSHOT_FORMAT_VERSION` 与 `TERRAIN_VERSION`。 */
+  /** 默认是 `CURRENT_VERSIONS`。 */
   readonly versions: StorageVersions;
 }
 
@@ -93,7 +115,7 @@ export async function openWorldStorage(options: Partial<WorldStorageOptions> = {
   const db = await result(request);
   // 另一个标签页要升级库时关闭这个连接，否则它的升级一直被阻塞。
   db.onversionchange = () => db.close();
-  return new WorldStorage(db, options.now ?? Date.now, options.versions ?? { format: SNAPSHOT_FORMAT_VERSION, terrain: TERRAIN_VERSION });
+  return new WorldStorage(db, options.now ?? Date.now, options.versions ?? CURRENT_VERSIONS);
 }
 
 export class WorldStorage {
@@ -121,21 +143,35 @@ export class WorldStorage {
     if (!meta) return { status: 'missing' };
     if (!this.compatible(meta)) return { status: 'incompatible', meta };
 
-    const range = chunksOf(id);
-    const chunks = tx.objectStore(CHUNKS);
-    const [state, blockStates, keys, packed] = await Promise.all([
-      result<WorldState>(tx.objectStore(STATES).get(id)),
-      result<BlockStateRecord[]>(tx.objectStore(BLOCK_STATES).get(id)),
-      result(chunks.getAllKeys(range)),
-      result<Uint8Array<ArrayBuffer>[]>(chunks.getAll(range)),
-    ]);
+    const { state, blockStates, chunks } = await readBody(tx, id);
     // 解压在事务结束之后：事务里不等待 IndexedDB 以外的 Promise。
-    const blocks: ChunkBlocks[] = await Promise.all(packed.map(gunzipChunk));
-    const editedChunks = keys.map((key, i) => {
-      const [, cx, cz] = key as ChunkKey;
-      return { cx, cz, blocks: blocks[i]! };
-    });
+    const blocks: ChunkBlocks[] = await Promise.all(chunks.map(({ data }) => gunzipChunk(data)));
+    const editedChunks = chunks.map(({ cx, cz }, i) => ({ cx, cz, blocks: blocks[i]! }));
     return { status: 'ok', meta, snapshot: { ...state, blockStates, editedChunks } };
+  }
+
+  /**
+   * 一个世界在四张表里的原始记录，导出用：不比对版本、不解压区块，版本不兼容的世界也读得出来。没有这个世界时
+   * 是 undefined。
+   */
+  async readRecords(id: string): Promise<WorldRecords | undefined> {
+    const tx = this.db.transaction(ALL_STORES);
+    const meta: WorldMeta | undefined = await result(tx.objectStore(WORLDS).get(id));
+    if (!meta) return undefined;
+    return { meta, ...(await readBody(tx, id)) };
+  }
+
+  /**
+   * 把导入文件里的记录写成一个新世界：id 由调用方新生成，名称沿用文件里的，上次游玩时间取当前。四张表在同一个
+   * 读写事务里提交，失败时整次回滚、一条都不留，Promise 拒绝。
+   */
+  importWorld(id: string, file: WorldFile): Promise<void> {
+    return this.inOrder(id, () =>
+      this.readWrite((tx) => {
+        putBody(tx, id, file.state, file.blockStates, file.chunks);
+        tx.objectStore(WORLDS).put({ ...file.meta, id, lastPlayedAt: this.now() } satisfies WorldMeta);
+      }),
+    );
   }
 
   /**
@@ -191,18 +227,13 @@ export class WorldStorage {
     return meta.formatVersion === this.versions.format && meta.terrainVersion === this.versions.terrain;
   }
 
-  private async write(id: string, name: string, snapshot: Snapshot, chunks: readonly PackedChunk[]): Promise<void> {
-    const tx = this.db.transaction(ALL_STORES, 'readwrite');
-    const done = completion(tx);
-    try {
+  private write(id: string, name: string, snapshot: Snapshot, chunks: readonly PackedChunk[]): Promise<void> {
+    return this.readWrite(async (tx) => {
       // 先等这一个读完成。之后的写不转成 Promise，写到一半出错时就不会有未处理的 Promise 拒绝。
       const worlds = tx.objectStore(WORLDS);
       const previous = await result<WorldMeta | undefined>(worlds.get(id));
       const { blockStates, editedChunks: _, ...state } = snapshot;
-      tx.objectStore(STATES).put(state satisfies WorldState, id);
-      tx.objectStore(BLOCK_STATES).put(blockStates, id);
-      const chunkStore = tx.objectStore(CHUNKS);
-      for (const { cx, cz, data } of chunks) chunkStore.put(data, [id, cx, cz] satisfies ChunkKey);
+      putBody(tx, id, state, blockStates, chunks);
 
       const now = this.now();
       const meta: WorldMeta = {
@@ -217,6 +248,15 @@ export class WorldStorage {
         hardcoreDead: snapshot.hardcoreDead,
       };
       worlds.put(meta);
+    });
+  }
+
+  /** 开一个四张表的读写事务，交给 fill 发出写请求，等事务提交。 */
+  private async readWrite(fill: (tx: IDBTransaction) => void | Promise<void>): Promise<void> {
+    const tx = this.db.transaction(ALL_STORES, 'readwrite');
+    const done = completion(tx);
+    try {
+      await fill(tx);
     } catch (error) {
       // 写到一半同步抛出（比如配额不足）时主动中止，已经发出的写一并作废。
       try {
@@ -231,13 +271,45 @@ export class WorldStorage {
   }
 }
 
+/** 除元数据之外的三张表里的记录。 */
+type WorldBody = Omit<WorldRecords, 'meta'>;
+
+/** 在 tx 里读这个世界在 `states`、`blockStates`、`chunks` 三张表里的记录。 */
+async function readBody(tx: IDBTransaction, id: string): Promise<WorldBody> {
+  const range = chunksOf(id);
+  const chunks = tx.objectStore(CHUNKS);
+  const [state, blockStates, keys, packed] = await Promise.all([
+    result<WorldState>(tx.objectStore(STATES).get(id)),
+    result<BlockStateRecord[]>(tx.objectStore(BLOCK_STATES).get(id)),
+    result(chunks.getAllKeys(range)),
+    result<Uint8Array<ArrayBuffer>[]>(chunks.getAll(range)),
+  ]);
+  return {
+    state,
+    blockStates,
+    chunks: keys.map((key, i) => {
+      const [, cx, cz] = key as ChunkKey;
+      return { cx, cz, data: packed[i]! };
+    }),
+  };
+}
+
+/** 在 tx 里写这个世界在 `states`、`blockStates` 两张表里的记录与给出的这些区块。请求不转成 Promise。 */
+function putBody(
+  tx: IDBTransaction,
+  id: string,
+  state: WorldState,
+  blockStates: readonly BlockStateRecord[],
+  chunks: readonly PackedChunk[],
+): void {
+  tx.objectStore(STATES).put(state, id);
+  tx.objectStore(BLOCK_STATES).put(blockStates, id);
+  const chunkStore = tx.objectStore(CHUNKS);
+  for (const { cx, cz, data } of chunks) chunkStore.put(data, [id, cx, cz] satisfies ChunkKey);
+}
+
 /** `chunks` 表的键。 */
 type ChunkKey = [worldId: string, cx: number, cz: number];
-
-/** 已经压缩、要写进 `chunks` 表的一个区块。 */
-interface PackedChunk extends ChunkCoord {
-  readonly data: Uint8Array<ArrayBuffer>;
-}
 
 /** 一个世界在 `chunks` 表里的全部键。 */
 function chunksOf(id: string): IDBKeyRange {

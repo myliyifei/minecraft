@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Difficulty } from '../../src/core/difficulty';
-import type { WorldEntry, WorldMeta } from '../../src/storage/world-storage';
-import { entryButtons, WORLD_NAME_MAX_LENGTH, worldNameValid } from '../../src/ui/world-list';
+import { WORLD_NAME_MAX_LENGTH, worldNameValid, type WorldEntry, type WorldMeta } from '../../src/storage/world-storage';
+import { entryButtons } from '../../src/ui/world-list';
 
 function entry(meta: Partial<WorldMeta>, compatible = true): WorldEntry {
   return {

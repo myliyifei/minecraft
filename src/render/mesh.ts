@@ -27,7 +27,8 @@ export interface MeshData {
   readonly normals: Float32Array;
   readonly uvs: Float32Array;
   /**
-   * 每个顶点两个数：天光、方块光（ADR-0016），按平滑光照取的是 4 格的平均，所以是 0.25 的倍数。
+   * 每个顶点两个数：天光、方块光（ADR-0016），按平滑光照取的是 4 格的平均，所以是 0.25 的倍数；平滑光照关闭时
+   * 是相邻那一格的等级。
    * 存原始等级而不是折算后的亮度：世界时刻与闪烁都只是着色器每帧的输入，网格不必为它们重建。
    */
   readonly light: Float32Array;
@@ -100,6 +101,13 @@ const CORNER_SAMPLES = CUBE_FACES.map((spec) => {
   return Int8Array.from(offsets);
 });
 
+/**
+ * 平滑光照关闭时的取样表（ADR-0020）：格式与 `CORNER_SAMPLES` 相同，每个角的 4 格都是这一面外侧相邻的那一格，
+ * 平均出来就是那一格的光照。换一张表而不是在循环里另走一条路：扫描循环与两个开关下都走同一段代码，不会因为
+ * 关掉平滑光照而让优化过的代码作废（见 `warmUpChunkMeshes`）。
+ */
+const FLAT_SAMPLES = CUBE_FACES.map((spec) => Int8Array.from({ length: 4 * 4 * 3 }, (_, k) => spec.normal[k % 3]!));
+
 /** 方块编号 → 不透明、发光、是不是火把，摊成按编号索引的表：内层循环每格都要问（同 `light.ts` 的做法）。 */
 const OPAQUE = new Uint8Array(256);
 const GLOWS = new Uint8Array(256);
@@ -138,7 +146,8 @@ export function meshTiles(uvs: ArrayLike<number>): Set<number> {
  * 为一个区块生成网格：只有暴露面进网格，被不透明方块挡住的面直接跳过。
  *
  * 每个顶点带天光与方块光（ADR-0016），按**平滑光照**取：这一面外侧那一层里挨着这个角的 4 格，
- * 两个等级各自平均，不透明的格子按 0 计入，墙脚与凹处因此偏暗。4 格可以落在隔壁区块里，
+ * 两个等级各自平均，不透明的格子按 0 计入，墙脚与凹处因此偏暗。`smoothLighting` 为假时（设置里关掉了平滑光照）
+ * 四个角都直接取这一面外侧相邻那一格的光照，整个面一样亮。4 格可以落在隔壁区块里，
  * 所以要等周围 8 个区块都加载、光照算好再建（`planChunkMeshes`）。
  *
  * 顶点用区块局部的 x/z（[0, 16]）与世界 y，渲染层把网格整体平移到区块位置。
@@ -151,11 +160,11 @@ export function meshTiles(uvs: ArrayLike<number>): Set<number> {
  * （三次取整 + Map 查找）实测 22ms，下标算术是 4ms（都是在 Vitest 里测的）。先把六面都被挡住的格排除
  * 之后，打包后的代码在 Node 里每个区块约 0.4ms，Windows 上的 Edge 里连着建是约 0.5ms，夹在画面的帧之间是 0.5–1ms（#62）。
  */
-export function buildChunkMesh(chunk: ChunkView, view: MeshView): MeshData {
+export function buildChunkMesh(chunk: ChunkView, view: MeshView, smoothLighting = true): MeshData {
   meshBuffers.reset();
   glowing.reset();
   torches.reset();
-  scanChunk(chunk, view);
+  scanChunk(chunk, view, smoothLighting ? CORNER_SAMPLES : FLAT_SAMPLES);
   emitTorches(chunk.blocks);
   return {
     ...meshBuffers.take(),
@@ -168,7 +177,7 @@ export function buildChunkMesh(chunk: ChunkView, view: MeshView): MeshData {
  *
  * 单独一个函数，只做整数与 TypedArray 上的事：建火把细杆、建发光方块的对象都在它外面（见 `warmUpChunkMeshes`）。
  */
-function scanChunk(chunk: ChunkView, view: MeshView): void {
+function scanChunk(chunk: ChunkView, view: MeshView, cornerSamples: readonly Int8Array[]): void {
   const blocks = chunk.blocks;
   const originX = chunk.cx * CHUNK_SIZE;
   const originZ = chunk.cz * CHUNK_SIZE;
@@ -233,7 +242,7 @@ function scanChunk(chunk: ChunkView, view: MeshView): void {
           if (neighbor === block) continue;
 
           meshBuffers.quad(CUBE_FACES[f]!, lx, y, lz, tiles);
-          const samples = CORNER_SAMPLES[f]!;
+          const samples = cornerSamples[f]!;
           for (let v = 0; v < 4; v++) {
             let sky = 0;
             let blockLight = 0;
@@ -437,7 +446,7 @@ const EMPTY_VIEW: MeshView = {
  * 预算（#62）。只预热还不够，另外三样一起做了，放下第一支火把之后才不再作废重来（Node 的 `--trace-deopt` 里一次都
  * 没有，Edge 里放下第一支火把那一帧建网格与之后的一样快）：扫描循环单独一个函数（`scanChunk`），发光方块与火把在
  * 循环里只记下标（`IndexList`）；顶点写进 TypedArray（`MeshBuffers`）；平滑光照的平均乘 0.25 而不是除以 4（乘数是
- * 小数，V8 一开始就按小数算）。
+ * 小数，V8 一开始就按小数算）。两张取样表各建一次（平滑光照开与关），设置里切换时也不作废。
  */
 export function warmUpChunkMeshes(): void {
   const blocks = new Uint8Array(CHUNK_BLOCK_COUNT);
@@ -457,5 +466,6 @@ export function warmUpChunkMeshes(): void {
   blocks[blockIndex(LAST, y, LAST)] = BlockType.OakLeaves;
   blocks[blockIndex(LAST - 1, y, LAST)] = BlockType.OakLeaves;
   blocks[blockIndex(0, y, LAST)] = BlockType.Stone;
-  buildChunkMesh({ cx: 0, cz: 0, blocks, light }, EMPTY_VIEW);
+  buildChunkMesh({ cx: 0, cz: 0, blocks, light }, EMPTY_VIEW, true);
+  buildChunkMesh({ cx: 0, cz: 0, blocks, light }, EMPTY_VIEW, false);
 }

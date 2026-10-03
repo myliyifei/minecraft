@@ -35,9 +35,9 @@ import { plainsTreePlacement } from '../src/core/terrain';
 import { OAK_CANOPY_RADIUS, oakTreesTouching, type OakTree } from '../src/core/tree';
 import type { Vec3 } from '../src/core/vec3';
 import {
-  HOTBAR_KEY_CODES,
+  DEFAULT_KEY_BINDINGS,
+  hotbarAction,
   INVENTORY_CLOSE_KEY,
-  KEY_BINDINGS,
   MOUSE_BINDINGS,
 } from '../src/input/keybindings';
 import {
@@ -592,7 +592,7 @@ test('点击画布锁定鼠标，视角不被甩一下', async ({ page }) => {
 
 test('锁定鼠标后按住 W 玩家往前走', async ({ page }) => {
   await grabPointer(page);
-  const walk = await walkWhileHolding(page, KEY_BINDINGS.forward, TICK_RATE);
+  const walk = await walkWhileHolding(page, DEFAULT_KEY_BINDINGS.forward, TICK_RATE);
   // 期间视角没被甩动，下面的方向断言才成立
   expect(walk.yaw).toBe(0);
   // 视角朝 −Z，一路是平地：走一秒就是一个步行速度的距离
@@ -620,20 +620,20 @@ test('锁定鼠标后按住空格玩家离地', async ({ page }) => {
   const ground = await page.evaluate(() => window.__VOXEL__!.core.player.position.y);
   expect(await apexOverOneSecond()).toBe(ground);
 
-  await page.keyboard.down(KEY_BINDINGS.jump);
+  await page.keyboard.down(DEFAULT_KEY_BINDINGS.jump);
   const apex = await apexOverOneSecond();
-  await page.keyboard.up(KEY_BINDINGS.jump);
+  await page.keyboard.up(DEFAULT_KEY_BINDINGS.jump);
   expect(apex).toBeGreaterThan(ground);
 });
 
 test('未锁定鼠标时按键不动玩家', async ({ page }) => {
-  const walk = await walkWhileHolding(page, KEY_BINDINGS.forward, TICK_RATE);
+  const walk = await walkWhileHolding(page, DEFAULT_KEY_BINDINGS.forward, TICK_RATE);
   expect(walk.to).toEqual(walk.from);
 });
 
 test('释放鼠标后按住的键不会卡着继续走', async ({ page }) => {
   await grabPointer(page);
-  await page.keyboard.down(KEY_BINDINGS.forward);
+  await page.keyboard.down(DEFAULT_KEY_BINDINGS.forward);
 
   // 真人按 Esc 时是浏览器自己退出指针锁定（规范要求 UA 这么做），CDP 合成的 Esc
   // 触发不了它，所以这里直接退出锁定——要测的是我们这一侧：锁定一丢，按键就不算数了。
@@ -646,7 +646,7 @@ test('释放鼠标后按住的键不会卡着继续走', async ({ page }) => {
     core.tick(ticks);
     return { from, to: { ...core.player.position } };
   }, TICK_RATE);
-  await page.keyboard.up(KEY_BINDINGS.forward);
+  await page.keyboard.up(DEFAULT_KEY_BINDINGS.forward);
   expect(stuck.to).toEqual(stuck.from);
 });
 
@@ -829,7 +829,7 @@ test('按住连锁键对准树干，画面上出现一圈连锁预览轮廓', as
   await waitForFullViewDistance(page);
   await grabPointer(page);
   // 连锁键与左键都走真实事件：验的就是「按住 AltLeft 再按左键」这条线接上了没有
-  await page.keyboard.down(KEY_BINDINGS.chainMining);
+  await page.keyboard.down(DEFAULT_KEY_BINDINGS.chainMining);
   await page.mouse.down();
 
   // **对准要在按下之后**：指针锁定下 Playwright 的 mouse.down 会连带投一发大位移的
@@ -872,7 +872,7 @@ test('按住连锁键对准树干，画面上出现一圈连锁预览轮廓', as
   );
 
   // 松开连锁键（真实 keyup）：预览随即从画面上消失，接着挖的是单块
-  await page.keyboard.up(KEY_BINDINGS.chainMining);
+  await page.keyboard.up(DEFAULT_KEY_BINDINGS.chainMining);
   const released = await page.evaluate(() => {
     const { core, renderer } = window.__VOXEL__!;
     core.tick();
@@ -1387,7 +1387,7 @@ test('调试句柄让玩家摔死：死亡画面铺满屏幕并交还鼠标，�
   await expect.poll(() => readLockedElementId(page)).toBe(null);
 
   // 背包键与 Esc 都关不掉它，不打开背包界面，也不把鼠标抓回去
-  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS.inventory);
   await page.keyboard.press(INVENTORY_CLOSE_KEY);
   await page.evaluate(() => {
     const { core, hud } = window.__VOXEL__!;
@@ -1566,7 +1566,7 @@ test('数字键与滚轮切换选中格，快捷栏跟着高亮', async ({ page 
   expect(await step()).toEqual({ core: 0, marked: '0', highlighted: 1 });
 
   // 数字键 3 选中第三格（真实按键）
-  await page.keyboard.press(HOTBAR_KEY_CODES[2]!);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS[hotbarAction(2)]);
   expect(await step()).toEqual({ core: 2, marked: '2', highlighted: 1 });
 
   // 往下滚一格
@@ -2294,7 +2294,7 @@ test('按 E 打开背包界面，36 格与快捷栏对应，再按 E 关闭', as
   await expect(screen).toBeHidden();
 
   await grabPointer(page);
-  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS.inventory);
   await expect(screen).toBeVisible();
 
   // 打开时鼠标交还给页面：玩家要用它点格子
@@ -2314,7 +2314,7 @@ test('按 E 打开背包界面，36 格与快捷栏对应，再按 E 关闭', as
   // 底部那一栏收起来：屏幕上不会同时出现两排快捷栏
   await expect(page.locator('#hud')).toBeHidden();
 
-  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS.inventory);
   await expect(screen).toBeHidden();
   await expect(page.locator('#hud')).toBeVisible();
   expect(errors).toEqual([]);
@@ -2330,11 +2330,11 @@ test('关掉背包界面之后鼠标自动回到第一人称，视角不被甩�
     });
 
   const before = await look();
-  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS.inventory);
   await expect(screen).toBeVisible();
   await expect.poll(() => readLockedElementId(page)).toBe(null);
 
-  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS.inventory);
   await expect(screen).toBeHidden();
   // 不必再点一下画面：界面一关就回到指针锁定，网页鼠标随即消失
   await expect.poll(() => readLockedElementId(page)).toBe('game');
@@ -2358,13 +2358,13 @@ async function sendInventoryRepeat(page: Page): Promise<boolean> {
     const core = window.__VOXEL__!.core;
     core.tick();
     return core.uiMode;
-  }, KEY_BINDINGS.inventory);
+  }, DEFAULT_KEY_BINDINGS.inventory);
 }
 
 test('按住背包键不放，界面不会反复开关', async ({ page }) => {
   await grabPointer(page);
   const screen = page.locator('#inventory-screen');
-  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS.inventory);
   await expect(screen).toBeVisible();
 
   for (let i = 0; i < 5; i++) expect(await sendInventoryRepeat(page)).toBe(true);
@@ -2375,7 +2375,7 @@ test('按住背包键不放，界面不会反复开关', async ({ page }) => {
 test('背包界面开着时按 Esc 关掉它', async ({ page }) => {
   await grabPointer(page);
   const screen = page.locator('#inventory-screen');
-  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS.inventory);
   await expect(screen).toBeVisible();
 
   // 界面开着时指针锁定已经交还，Esc 不再被浏览器吃掉，由输入适配器关掉界面
@@ -2810,12 +2810,12 @@ test('背包界面开着时不显示十字准星', async ({ page }) => {
   await expect(crosshair).toBeVisible();
 
   await grabPointer(page);
-  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS.inventory);
   await expect(screen).toBeVisible();
   // 那时鼠标交还给页面，玩家在摆物品，不是在瞄准
   await expect(crosshair).toBeHidden();
 
-  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS.inventory);
   await expect(screen).toBeHidden();
   await expect(crosshair).toBeVisible();
   expect(errors).toEqual([]);
@@ -2889,7 +2889,7 @@ test('右键对着工作台打开工作台界面并交还鼠标，按 E 关闭�
   await expect(page.locator('#crafting-table-screen [data-output]')).toBeVisible();
 
   // 按 E 关掉的是工作台界面，不是再开一层背包界面；鼠标当场回到第一人称
-  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS.inventory);
   await expect(screen).toBeHidden();
   await expect(inventory).toBeHidden();
   await expect.poll(() => readLockedElementId(page)).toBe('game');
@@ -2959,7 +2959,7 @@ test('右键对着熔炉打开熔炉界面：三格、两条进度条、36 格�
   }
 
   // 按 E 关掉的是熔炉界面，不是再开一层背包界面；鼠标当场回到第一人称
-  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS.inventory);
   await expect(screen).toBeHidden();
   await expect(page.locator('#inventory-screen')).toBeHidden();
   await expect.poll(() => readLockedElementId(page)).toBe('game');
@@ -3003,11 +3003,11 @@ test('按住背包键不放，熔炉界面不会被连发关掉，关掉之后�
 
   // 第一发 keydown 关掉熔炉界面。要等鼠标重新锁定，连发才会进入背包键那个分支；
   // 没锁定、也没有界面开着时，无论有没有连发拦截，连发都会被忽略
-  await page.keyboard.down(KEY_BINDINGS.inventory);
+  await page.keyboard.down(DEFAULT_KEY_BINDINGS.inventory);
   await expect(screen).toBeHidden();
   await expect.poll(() => readLockedElementId(page)).toBe('game');
   for (let i = 0; i < 5; i++) expect(await sendInventoryRepeat(page)).toBe(false);
-  await page.keyboard.up(KEY_BINDINGS.inventory);
+  await page.keyboard.up(DEFAULT_KEY_BINDINGS.inventory);
   await expect(inventory).toBeHidden();
   expect(errors).toEqual([]);
 });

@@ -1,22 +1,33 @@
 import type { GameCore } from '../core/game';
 import { IDLE_INTENT, type MoveIntent } from '../core/player';
 import {
-  ACTION_BY_CODE,
-  HOTBAR_SLOT_BY_CODE,
+  HOTBAR_ACTIONS,
   INVENTORY_CLOSE_KEY,
-  KEY_BINDINGS,
   MOUSE_BINDINGS,
   MOVE_ACTIONS,
+  type KeyAction,
+  type KeyBindingsView,
   type MoveAction,
 } from './keybindings';
 import { isPointerSpike } from './pointer-spike';
 import { isPointerWarp } from './pointer-warp';
 
 /**
- * 鼠标灵敏度：鼠标每移动一像素，视角转多少弧度。
- * 0.0022 rad/px ≈ 0.13°/px。设置界面（后续切片）会让玩家调它。
+ * 灵敏度 100% 时鼠标每移动一像素视角转多少弧度：0.0022 rad/px ≈ 0.13°/px。实际转速再乘设置里的百分比。
  */
-export const MOUSE_SENSITIVITY = 0.0022;
+export const BASE_MOUSE_SENSITIVITY = 0.0022;
+
+/** 输入层读的两项设置（ADR-0020）：键位表与灵敏度（百分比）。每次按键、每次鼠标移动读当前值。 */
+export interface InputSettings {
+  readonly keys: KeyBindingsView;
+  readonly sensitivity: number;
+}
+
+/** 移动意图里的动作。键位表查出来的动作是其中之一的，记进按下的移动动作集合。 */
+const IS_MOVE_ACTION: ReadonlySet<KeyAction> = new Set(MOVE_ACTIONS);
+
+/** 快捷栏的动作到格号。 */
+const HOTBAR_SLOT: ReadonlyMap<KeyAction, number> = new Map(HOTBAR_ACTIONS.map((action, slot) => [action, slot]));
 
 /**
  * 输入适配器要用到的核心指令，加两样查询：界面模式开着没有，与死了没有。
@@ -45,14 +56,16 @@ export type PlayerInputTarget = Pick<
  * 因此 Esc 之后玩家不会继续走、也不会继续挖。
  *
  * 背包键是唯一在未锁定时也认的键，条件是界面正开着（界面模式，见 CONTEXT.md）：那时
- * 鼠标已经交还给页面，玩家得有办法把界面关掉。界面开着时其余按键一概不算数——「哪些
+ * 鼠标已经交还给页面，玩家得有办法把界面关掉。界面开着时其余按键一概不生效——「哪些
  * 输入在界面模式下作废」这条规则本身在核心里（`GameCore.step`），这里只是不再把它们
  * 递过去。
  *
+ * 按键查的是设置里键位表的当前值（ADR-0020），设置界面改了键，下一次按键就按新键算。两个动作绑到同一个键时
+ * 两个都触发。
+ *
  * **Esc 不在可自定义的键位表里**：指针锁定期间它由浏览器消费（规范要求 UA 退出锁定，
  * 页面既拦不住也收不到）；界面模式下锁定已经交还，它才轮得到页面处理。两种情形下它都
- * 换不掉，所以它是 `INVENTORY_CLOSE_KEY` 这个单独的常量，不在 `KEY_BINDINGS` 里——
- * 设置界面（后续切片）改不到它。
+ * 换不掉，所以它是 `INVENTORY_CLOSE_KEY` 这个单独的常量，不在键位表里——设置界面改不到它。
  *
  * 死亡画面也是界面模式，但键盘一概不认，背包键与 Esc 也不例外：它们关不掉死亡画面，
  * 照常处理的话还会把指针锁定抓回来。离开死亡画面只有重生按钮一条路，按钮在界面层，
@@ -96,6 +109,7 @@ export function installPlayerControls(
   canvas: HTMLCanvasElement,
   target: PlayerInputTarget,
   hooks: PauseHooks,
+  settings: InputSettings,
 ): PlayerControls {
   const pressed = new Set<MoveAction>();
   const locked = (): boolean => document.pointerLockElement === canvas;
@@ -265,29 +279,32 @@ export function installPlayerControls(
     // 浏览器偶尔会投来手做不到的巨型增量，采了视角就会跳到别处——见 pointer-spike.ts。
     if (isPointerSpike(Math.hypot(event.movementX, event.movementY), elapsedMs)) return;
     // 两个方向都取负：偏航 0 朝 −Z（右手边是 +X，往右转是减），俯仰正为抬头。
-    target.turn(-event.movementX * MOUSE_SENSITIVITY, -event.movementY * MOUSE_SENSITIVITY);
+    const radiansPerPixel = BASE_MOUSE_SENSITIVITY * (settings.sensitivity / 100);
+    target.turn(-event.movementX * radiansPerPixel, -event.movementY * radiansPerPixel);
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
     // 死亡画面上键盘一概不认，理由见 `PlayerControls`。
     if (target.health.dead) return;
+    const actions = settings.keys.actionsOf(event.code);
 
     // 背包键两头都要认：锁定着的时候按它开背包界面，有界面开着（背包或工作台）的时候
     // 按它关那个界面。开哪个、关哪个由核心定，这里只认「现在有没有界面开着」。
-    if (event.code === KEY_BINDINGS.inventory && (locked() || uiOpen())) {
+    const togglesInventory = actions.includes('inventory') && (locked() || uiOpen());
+    if (togglesInventory) {
       event.preventDefault();
       // 按住不放时浏览器每几十毫秒补发一次 keydown。开合是切换型动作，连发会让界面
       // 每个 tick 开一次关一次；移动、连锁键那些「按下就设成同一个值」的动作幂等，
-      // 所以只有切换型的这两处要挡。
-      if (event.repeat) return;
-      // 现在有界面开着就说明这一下是关它。开合下一个 tick 才生效，方向得在这里判。
-      const closing = uiOpen();
-      target.toggleInventory();
-      // 打开就把鼠标交还给页面，玩家拿它点格子；关上就抓回来，玩家不必再点一下画面。
-      // 释放锁定顺带清掉按住的键与挖掘状态（见 onLockChange），所以这里不必再清一遍。
-      if (closing) grabPointer();
-      else releasePointer();
-      return;
+      // 所以只有切换型的这两处要挡。只挡开合，同键的别的动作照常往下走。
+      if (!event.repeat) {
+        // 现在有界面开着就说明这一下是关它。开合下一个 tick 才生效，方向得在这里判。
+        const closing = uiOpen();
+        target.toggleInventory();
+        // 打开就把鼠标交还给页面，玩家拿它点格子；关上就抓回来，玩家不必再点一下画面。
+        // 释放锁定顺带清掉按住的键与挖掘状态（见 onLockChange），所以这里不必再清一遍。
+        if (closing) grabPointer();
+        else releasePointer();
+      }
     }
 
     // 界面开着时 Esc 关掉它。指针锁定期间这颗键收不到——那时浏览器自己用它退出锁定。
@@ -301,47 +318,42 @@ export function installPlayerControls(
       return;
     }
 
-    // 未锁定时其余按键一概不算数。界面开着的时候锁定已经交还，所以摆物品期间按 W
+    // 未锁定时其余按键一概不生效。界面开着的时候锁定已经交还，所以摆物品期间按 W
     // 不会移动——不过让它作废的是这一条，而「界面模式下哪些输入作废」那条规则在核心里
     // （`GameCore.step`）：即便这里漏过去了，核心那一侧也不会照着走。
-    if (!locked()) return;
-
-    // 数字键选快捷栏的一格。按住不放没有额外含义，所以不记入 pressed 的按下/松开状态。
-    const slot = HOTBAR_SLOT_BY_CODE.get(event.code);
-    if (slot !== undefined) {
-      event.preventDefault();
-      target.selectHotbarSlot(slot);
-      return;
-    }
-
-    // 连锁键不进 pressed 那套账：它不是移动意图的一部分，核心那边是独立的一个开关。
-    // 按住不放连发的 keydown 反复设同一个值，没有副作用。
-    if (event.code === KEY_BINDINGS.chainMining) {
-      // Alt 默认会点亮浏览器的菜单栏并抢走后面的按键，绑过的键一律拦下。
-      event.preventDefault();
-      target.setChainMining(true);
-      return;
-    }
-
-    const action = ACTION_BY_CODE.get(event.code);
-    if (action === undefined) return;
-    // 空格默认滚动页面，绑过的键一律拦下。
+    //
+    // 这一下开合了界面时例外：同键的别的动作也要触发（ADR-0020）。释放与抓回锁定都是异步的，此刻锁着没有说明
+    // 不了什么，按锁定判的话打开时触发、关上时不触发，所以开合了就一律往下走。
+    if (!locked() && !togglesInventory) return;
+    if (actions.length === 0) return;
+    // 空格默认滚动页面，Alt 默认点亮浏览器的菜单栏并抢走后面的按键：绑过的键一律拦下。
     event.preventDefault();
-    // 按住不放会连发 keydown，意图没变就不必再交给核心。
-    if (pressed.has(action)) return;
-    pressed.add(action);
-    sendIntent();
+
+    let moved = false;
+    for (const action of actions) {
+      // 数字键选快捷栏的一格。按住不放没有额外含义，所以不记入 pressed 的按下/松开状态。
+      const slot = HOTBAR_SLOT.get(action);
+      if (slot !== undefined) target.selectHotbarSlot(slot);
+      // 连锁键不记进 pressed：它不是移动意图的一部分，核心那边是独立的一个开关。
+      // 按住不放连发的 keydown 反复设同一个值，没有副作用。
+      else if (action === 'chainMining') target.setChainMining(true);
+      // 按住不放会连发 keydown，意图没变就不必再交给核心。
+      else if (IS_MOVE_ACTION.has(action) && !pressed.has(action as MoveAction)) {
+        pressed.add(action as MoveAction);
+        moved = true;
+      }
+    }
+    if (moved) sendIntent();
   };
 
   const onKeyUp = (event: KeyboardEvent): void => {
     // 松键一律处理，哪怕这期间锁定丢了，否则按键会卡住。
-    if (event.code === KEY_BINDINGS.chainMining) {
-      target.setChainMining(false);
-      return;
+    let moved = false;
+    for (const action of settings.keys.actionsOf(event.code)) {
+      if (action === 'chainMining') target.setChainMining(false);
+      else if (IS_MOVE_ACTION.has(action) && pressed.delete(action as MoveAction)) moved = true;
     }
-    const action = ACTION_BY_CODE.get(event.code);
-    if (action === undefined || !pressed.delete(action)) return;
-    sendIntent();
+    if (moved) sendIntent();
   };
 
   canvas.addEventListener('click', onClick);

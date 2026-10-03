@@ -7,8 +7,10 @@ import { installPlayerControls } from './input/controls';
 import { startGameLoop } from './loop';
 import { ATLAS_PATH, CRACK_PATH } from './render/atlas';
 import { loadPixelTexture, WorldRenderer } from './render/renderer';
+import type { Settings } from './settings';
 import type { WorldStorage } from './storage/world-storage';
 import { installHud } from './ui/hud';
+import type { SettingsScreen } from './ui/settings-screen';
 import { createChunkStream, SPAWN_READY_RADIUS } from './worker/chunk-stream';
 
 /** 进入世界的两种起点：新建（种子与难度），或读档（快照）。 */
@@ -23,6 +25,10 @@ export interface WorldSessionOptions {
   /** 世界的名称。元数据每次写盘整体重写，名称由这里给。 */
   readonly name: string;
   readonly start: WorldStart;
+  /** 设置（ADR-0020）：视距、灵敏度、键位与三个画面开关。改动当场生效。 */
+  readonly settings: Settings;
+  /** 设置界面。暂停菜单上的「设置」打开它，关掉回到暂停菜单。 */
+  readonly settingsScreen: SettingsScreen;
 }
 
 /** 进入了的一个世界。 */
@@ -43,13 +49,22 @@ export interface WorldSession {
  * 兑现时处于暂停，显示暂停菜单（ADR-0019）：玩家点回到游戏、锁定生效才开始推进。进入之后马上写一次盘：
  * 新建的世界从此出现在世界列表里，读档的世界更新上次游玩时间。
  */
-export async function startWorldSession({ storage, id, name, start }: WorldSessionOptions): Promise<WorldSession> {
+export async function startWorldSession({
+  storage,
+  id,
+  name,
+  start,
+  settings,
+  settingsScreen,
+}: WorldSessionOptions): Promise<WorldSession> {
   // 每个世界一块新画布：退出时连同上面的监听器一起丢掉，下一个世界的渲染器拿到的是干净的 WebGL 上下文。
   const canvas = document.createElement('canvas');
   canvas.id = 'game';
   document.body.prepend(canvas);
   // 地形生成搬进 Worker：铺满视距要生成几百个区块，放在主线程上会连续掉帧。
   const worker = new Worker(new URL('./worker/chunk-worker.ts', import.meta.url), { type: 'module' });
+  // 进入的半路出错时也要退订，否则这个没进去的世界还挂在设置上。
+  let unsubscribe = (): void => {};
 
   try {
     // 新建时出生点由原点那一列算出来，等原点周围；读档时出生点取快照里的，等玩家周围。存档里的已改区块
@@ -66,13 +81,18 @@ export async function startWorldSession({ storage, id, name, start }: WorldSessi
 
     // 种子只有一个出处：Worker 与核心都用区块来源记着的那个，两边不可能对不上。
     const chunkSource = (): ChunkSource => chunks.source;
+    const { viewRadius } = settings;
     const core =
       'restore' in start
-        ? new GameCore({ restore: start.restore, chunkSource })
-        : new GameCore({ seed: chunks.seed, difficulty: start.difficulty, chunkSource });
+        ? new GameCore({ restore: start.restore, chunkSource, viewRadius })
+        : new GameCore({ seed: chunks.seed, difficulty: start.difficulty, chunkSource, viewRadius });
+    // 设置界面上拖视距滑条：改小时超出范围的区块当场卸载，改大时缺的从下一 tick 起按平时的节奏加载。
+    unsubscribe = settings.subscribe(() => {
+      if (core.viewRadius !== settings.viewRadius) core.setViewRadius(settings.viewRadius);
+    });
 
     const [texture, crackTexture] = await Promise.all([loadPixelTexture(ATLAS_PATH), loadPixelTexture(CRACK_PATH)]);
-    const renderer = new WorldRenderer({ canvas, core, texture, crackTexture });
+    const renderer = new WorldRenderer({ canvas, core, texture, crackTexture, settings });
     // 首帧之前把已经到位的区块一次铺完；之后每帧只补几个，见 MESH_BUDGET_PER_FRAME。
     renderer.syncChunkMeshes(Infinity);
     renderer.render();
@@ -140,11 +160,16 @@ export async function startWorldSession({ storage, id, name, start }: WorldSessi
     /** 世界此刻算不算暂停：循环推不推进、暂停菜单显不显示都看它。 */
     const paused = (): boolean => controls.paused && !ignorePause;
     // 进入暂停的那一刻写盘（ADR-0019）。
-    const controls = installPlayerControls(canvas, core, {
-      onPause: () => {
-        if (!exiting) void save();
+    const controls = installPlayerControls(
+      canvas,
+      core,
+      {
+        onPause: () => {
+          if (!exiting) void save();
+        },
       },
-    });
+      settings,
+    );
     const hud = installHud(
       document.body,
       core,
@@ -156,6 +181,8 @@ export async function startWorldSession({ storage, id, name, start }: WorldSessi
         resume: () => {
           if (!exiting) controls.resume();
         },
+        // 设置界面开着时仍处于暂停：它不请求锁定。关掉回到暂停菜单。
+        openSettings: () => settingsScreen.open(),
         // 写盘失败时世界不退出，暂停菜单上提示写盘失败，可以再点一次。
         saveAndExit: () => void exit().catch(() => {}),
       },
@@ -213,6 +240,7 @@ export async function startWorldSession({ storage, id, name, start }: WorldSessi
     const teardown = (): void => {
       closed = true;
       stopLoop();
+      unsubscribe();
       window.removeEventListener('beforeunload', onBeforeUnload);
       window.removeEventListener('pagehide', onPageHide);
       if (document.pointerLockElement === canvas) document.exitPointerLock();
@@ -266,6 +294,7 @@ export async function startWorldSession({ storage, id, name, start }: WorldSessi
     void save();
     return { exit, ended };
   } catch (error) {
+    unsubscribe();
     worker.terminate();
     canvas.remove();
     throw error;

@@ -496,6 +496,11 @@ function spread(half: number, random: () => number): number {
  */
 export class ParticleSystem {
   readonly pool: ParticlePool;
+  /**
+   * 生不生成新粒子：设置里的粒子开关（ADR-0020），渲染层每帧照它写。关掉时火把不冒、挖掘不溅、碎掉不爆，
+   * 池子里已有的照常推进、到期消失。
+   */
+  emitting = true;
   private readonly random: () => number;
 
   constructor(capacity = PARTICLE_LIMIT, random: () => number = Math.random) {
@@ -518,8 +523,10 @@ export class ParticleSystem {
     mining: DiggingView,
   ): void {
     const dt = Math.min(Math.max(seconds, 0), MAX_STEP_SECONDS);
-    this.emitFromGlowing(dt, eye, sources);
-    this.splash(dt, mining, world);
+    if (this.emitting) {
+      this.emitFromGlowing(dt, eye, sources);
+      this.splash(dt, mining, world);
+    }
     this.pool.step(dt, world);
     this.pool.sortBackToFront(eye);
   }
@@ -601,6 +608,7 @@ export class ParticleSystem {
    * 游戏循环一帧可能补几个 tick，碎掉的方块只在一 tick 里有值，等到画这一帧时可能已经清空了。
    */
   burst({ x, y, z, block }: BrokenBlock): void {
+    if (!this.emitting) return;
     const random = this.random;
     const { min, max } = selectionBounds(block, x, y, z);
     const sizeX = max.x - min.x;

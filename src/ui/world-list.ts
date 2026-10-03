@@ -41,11 +41,13 @@ export interface WorldListActions {
   readonly create: (world: NewWorld) => void;
   /** 删除按钮点第二次时调。 */
   readonly delete: (id: string) => void;
+  /** 打开设置界面。 */
+  readonly settings: () => void;
 }
 
 /**
- * 世界列表（见 CONTEXT.md）：铺满屏幕，上方是新建世界、导入、设置三颗按钮，下面每个世界一条。导入与设置、
- * 每条的导出先只放按钮，功能在各自的 issue 里实现（#69、#70）。
+ * 世界列表（见 CONTEXT.md）：铺满屏幕，上方是新建世界、导入、设置三颗按钮，下面每个世界一条。导入与每条的
+ * 导出先只放按钮，功能在 #70 里实现。
  *
  * 纯表现：列表的内容由接线层从存储读出来交给 `show`，点击原样交回接线层。
  */
@@ -107,11 +109,14 @@ export function installWorldList(parent: HTMLElement, actions: WorldListActions)
   const toolbar = document.createElement('div');
   toolbar.className = 'world-list__toolbar';
   const newWorldButton = button(STRINGS.newWorld, 'world-list__new');
-  // 导入（#70）与设置（#69）还没有实现，先禁用。
+  // 导入（#70）还没有实现，先禁用。
   const importButton = button(STRINGS.importWorld, 'world-list__import');
   importButton.disabled = true;
   const settingsButton = button(STRINGS.settings, 'world-list__settings');
-  settingsButton.disabled = true;
+  settingsButton.addEventListener('click', () => {
+    clearMessage();
+    actions.settings();
+  });
   toolbar.append(newWorldButton, importButton, settingsButton);
 
   const message = document.createElement('p');

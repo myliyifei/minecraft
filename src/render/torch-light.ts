@@ -56,6 +56,13 @@ export function flickerAt(seconds: number): number {
 }
 
 /**
+ * 这一帧送进着色器的闪烁量：设置里关掉了闪烁（ADR-0020）就是 0，火光不再起伏；开着就是 `flickerAt`。
+ */
+export function frameFlicker(enabled: boolean, seconds: number): number {
+  return enabled ? flickerAt(seconds) : 0;
+}
+
+/**
  * 闪烁量最小时火把本身暗多少：火把按贴图本色画（`SELF_LIT_BLOCK_LIGHT`），再乘一个随闪烁在
  * 1 − 它到 1 之间起伏的系数，火焰与它照亮的地方同一节奏。
  */

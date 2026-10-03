@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { installPlayerControls, type PlayerControls, type PlayerInputTarget } from '../../src/input/controls';
-import { KEY_BINDINGS } from '../../src/input/keybindings';
+import { DEFAULT_KEY_BINDINGS, KeyBindings } from '../../src/input/keybindings';
 
 /**
  * 暂停（ADR-0019）：不是输入层自己释放的指针锁定一旦丢失就暂停，锁定重新生效才解除。
@@ -123,7 +123,7 @@ beforeEach(() => {
       pauses++;
       uiOpenAtPause = target.uiMode;
     },
-  });
+  }, { keys: new KeyBindings(), sensitivity: 100 });
 });
 
 afterEach(() => {
@@ -151,7 +151,7 @@ describe('暂停', () => {
 describe('输入层为界面模式释放的锁定不算暂停', () => {
   it('按背包键打开界面：锁定当场释放，事件比下一 tick 先到，界面标志还是假，也不暂停', () => {
     enterGame();
-    press(KEY_BINDINGS.inventory);
+    press(DEFAULT_KEY_BINDINGS.inventory);
     expect(target.toggles).toBe(1);
     expect(doc.pointerLockElement).toBe(null);
     expect(target.uiMode).toBe(false);
@@ -161,9 +161,9 @@ describe('输入层为界面模式释放的锁定不算暂停', () => {
 
   it('自己释放的记号只管那一次：关掉界面抓回锁定之后再按 Esc，照常暂停', () => {
     enterGame();
-    press(KEY_BINDINGS.inventory);
+    press(DEFAULT_KEY_BINDINGS.inventory);
     target.uiMode = true;
-    press(KEY_BINDINGS.inventory);
+    press(DEFAULT_KEY_BINDINGS.inventory);
     grant();
     target.uiMode = false;
     browserExits();
@@ -195,7 +195,7 @@ describe('每帧同步释放的锁定不算暂停', () => {
 describe('页面隐藏', () => {
   it('界面开着时切走：界面当场关掉，再暂停', () => {
     enterGame();
-    press(KEY_BINDINGS.inventory);
+    press(DEFAULT_KEY_BINDINGS.inventory);
     target.uiMode = true;
     hide();
     expect(target.closed).toBe(1);
@@ -242,9 +242,9 @@ describe('回到游戏', () => {
 
   it('不在暂停时抓回锁定被拒（关掉背包界面时）：进入暂停', async () => {
     enterGame();
-    press(KEY_BINDINGS.inventory);
+    press(DEFAULT_KEY_BINDINGS.inventory);
     target.uiMode = true;
-    press(KEY_BINDINGS.inventory);
+    press(DEFAULT_KEY_BINDINGS.inventory);
     await deny();
     expect(controls.paused).toBe(true);
     expect(pauses).toBe(1);
@@ -280,9 +280,9 @@ describe('锁定失败经 pointerlockerror 报来', () => {
 
   it('关掉背包界面时抓回被拒、只来了事件：进入暂停一次', async () => {
     enterGame();
-    press(KEY_BINDINGS.inventory);
+    press(DEFAULT_KEY_BINDINGS.inventory);
     target.uiMode = true;
-    press(KEY_BINDINGS.inventory);
+    press(DEFAULT_KEY_BINDINGS.inventory);
     doc.dispatchEvent(new Event('pointerlockerror'));
     await deny();
     expect(controls.paused).toBe(true);

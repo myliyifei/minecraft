@@ -945,3 +945,132 @@ body {
   text-align: center;
   color: #fff;
 }
+
+/*
+ * 设置界面：叠在世界列表或暂停菜单之上，底下压暗，正中一块不透明的面板，边框与世界列表的那块一样；内容比一屏长时
+ * 在面板里滚动。键位两列排开，每一项左边是动作名、右边是按键；同键的两行标成生命值的红。
+ */
+.settings {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  justify-items: center;
+  align-items: center;
+  padding: var(--tile);
+  background: rgb(0 0 0 / 55%);
+  font-family: var(--font-ui);
+  color: var(--ink);
+}
+
+.settings[hidden] {
+  display: none;
+}
+
+.settings__panel {
+  display: grid;
+  gap: calc(var(--tile) / 2);
+  width: min(100%, calc(var(--tile) * 36));
+  max-height: 100%;
+  overflow-y: auto;
+  padding: var(--tile);
+  /* 不透明：底下是世界列表或暂停菜单，透出来的字会和这里的叠在一起。 */
+  background: color-mix(in srgb, var(--stone) 20%, #fff);
+  box-shadow: inset 0 0 0 2px rgb(28 23 18 / 35%);
+}
+
+.settings__title {
+  margin: 0;
+  font-size: calc(var(--text) * 1.5);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-align: center;
+}
+
+.settings__heading {
+  margin: calc(var(--tile) / 2) 0 0;
+  font-size: var(--text);
+  font-weight: 700;
+}
+
+.settings__keys {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--tile) * 15), 1fr));
+  gap: calc(var(--tile) / 4) var(--tile);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings__key {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--tile) / 2);
+  padding: calc(var(--tile) / 8) calc(var(--tile) / 4);
+}
+
+.settings__key--conflict {
+  background: color-mix(in srgb, var(--health) 25%, transparent);
+  box-shadow: inset 0 0 0 2px var(--health);
+}
+
+.settings__binding,
+.settings__fixed,
+.settings__done {
+  min-width: calc(var(--tile) * 6);
+  padding: calc(var(--tile) / 4) calc(var(--tile) / 2);
+  border: 0;
+  font: inherit;
+  text-align: center;
+}
+
+.settings__binding,
+.settings__done {
+  background: rgb(0 0 0 / 40%);
+  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 35%);
+  color: #fff;
+  text-shadow: 1px 1px 0 var(--ink);
+  cursor: pointer;
+}
+
+.settings__binding:hover,
+.settings__binding:focus-visible,
+.settings__done:hover,
+.settings__done:focus-visible {
+  background: rgb(0 0 0 / 60%);
+  box-shadow: inset 0 0 0 2px #fff;
+  outline: none;
+}
+
+/* 等着按键的那一项：亮黄边，与连锁预览的轮廓同一种颜色，看得出这一项在等输入。 */
+.settings__binding--waiting,
+.settings__binding--waiting:hover {
+  box-shadow: inset 0 0 0 2px #ffd83b;
+}
+
+.settings__fixed {
+  box-shadow: inset 0 0 0 1px rgb(28 23 18 / 35%);
+  opacity: 0.7;
+}
+
+.settings__row {
+  display: grid;
+  grid-template-columns: calc(var(--tile) * 6) 1fr calc(var(--tile) * 6);
+  align-items: center;
+  gap: calc(var(--tile) / 2);
+}
+
+.settings__row--toggle {
+  display: flex;
+  cursor: pointer;
+}
+
+.settings__value {
+  text-align: right;
+}
+
+.settings__done {
+  justify-self: center;
+  margin-top: calc(var(--tile) / 2);
+  min-width: calc(var(--tile) * 14);
+}

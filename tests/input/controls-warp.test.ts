@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { installPlayerControls, MOUSE_SENSITIVITY, type PlayerInputTarget } from '../../src/input/controls';
+import { BASE_MOUSE_SENSITIVITY, installPlayerControls, type PlayerInputTarget } from '../../src/input/controls';
+import { KeyBindings } from '../../src/input/keybindings';
 import { WARP_WINDOW_MS } from '../../src/input/pointer-warp';
 
 /**
@@ -61,7 +62,11 @@ beforeEach(() => {
     uiMode: false,
     health: { dead: false },
   } as unknown as PlayerInputTarget;
-  controls = installPlayerControls(canvas as unknown as HTMLCanvasElement, target, { onPause: () => {} });
+  // 灵敏度 100%：每像素正好转 BASE_MOUSE_SENSITIVITY。
+  controls = installPlayerControls(canvas as unknown as HTMLCanvasElement, target, { onPause: () => {} }, {
+    keys: new KeyBindings(),
+    sensitivity: 100,
+  });
 });
 
 afterEach(() => {
@@ -74,7 +79,7 @@ describe('抓回锁定之后的第一发鼠标移动', () => {
     controls.grabPointer();
     lockAt(1000);
     moveAt(1300, -20);
-    expect(turns).toEqual([[20 * MOUSE_SENSITIVITY, -0]]);
+    expect(turns).toEqual([[20 * BASE_MOUSE_SENSITIVITY, -0]]);
   });
 
   it('WSL2 Chrome 的顺序：归位事件比锁定变更事件先到，丢掉它，之后的照常转', () => {
@@ -83,7 +88,7 @@ describe('抓回锁定之后的第一发鼠标移动', () => {
     moveAt(999, 400);
     doc.dispatchEvent(eventAt('pointerlockchange', 1000));
     moveAt(1300, -20);
-    expect(turns).toEqual([[20 * MOUSE_SENSITIVITY, -0]]);
+    expect(turns).toEqual([[20 * BASE_MOUSE_SENSITIVITY, -0]]);
   });
 
   it('无头 Chromium 的顺序：锁定变更之后 1 毫秒内到的归位事件丢掉', () => {
@@ -91,7 +96,7 @@ describe('抓回锁定之后的第一发鼠标移动', () => {
     lockAt(1000);
     moveAt(1000.4, -640);
     moveAt(1300, -20);
-    expect(turns).toEqual([[20 * MOUSE_SENSITIVITY, -0]]);
+    expect(turns).toEqual([[20 * BASE_MOUSE_SENSITIVITY, -0]]);
   });
 
   it('只丢一发：窗口内连着到的第二发照常转', () => {
@@ -111,6 +116,6 @@ describe('抓回锁定之后的第一发鼠标移动', () => {
     controls.grabPointer();
     lockAt(3000);
     moveAt(3300, 10);
-    expect(turns.map(([yaw]) => yaw)).toEqual([20 * MOUSE_SENSITIVITY, -10 * MOUSE_SENSITIVITY]);
+    expect(turns.map(([yaw]) => yaw)).toEqual([20 * BASE_MOUSE_SENSITIVITY, -10 * BASE_MOUSE_SENSITIVITY]);
   });
 });

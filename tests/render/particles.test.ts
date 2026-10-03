@@ -438,3 +438,38 @@ describe('挖掘溅出碎屑、碎掉爆一团（#60）', () => {
     expect(system.pool.count).toBe(10);
   });
 });
+
+describe('粒子开关（ADR-0020）', () => {
+  const eye = { x: 0.5, y: 72.5, z: 0.5 };
+  const torch: GlowingBlock = { block: BlockType.Torch, x: 2, y: 71, z: 0 };
+  const digging: DiggingView = {
+    target: { x: 0, y: 70, z: 0, normal: { x: 0, y: 1, z: 0 }, distance: 1.5 },
+    digging: true,
+    progress: 0.5,
+  };
+  const world: ParticleWorldView = {
+    ...OPEN_AIR,
+    getBlock: (x, y, z) => (x === 0 && y === 70 && z === 0 ? BlockType.Stone : BlockType.Air),
+  };
+
+  it('关掉之后火把不冒、挖掘不溅、碎掉不爆：池子不增长', () => {
+    const system = new ParticleSystem(PARTICLE_LIMIT, seeded(21));
+    system.emitting = false;
+    for (let i = 0; i < 120; i++) system.update(FRAME, eye, [torch], world, digging);
+    system.burst(debrisOf(BlockType.Stone, 3, 70, 3));
+    expect(system.pool.count).toBe(0);
+  });
+
+  it('已有的粒子照常推进、到期消失', () => {
+    const system = new ParticleSystem(PARTICLE_LIMIT, seeded(22));
+    for (let i = 0; i < 60; i++) system.update(FRAME, eye, [torch], world, NOT_DIGGING);
+    const before = system.pool.count;
+    expect(before).toBeGreaterThan(0);
+    system.emitting = false;
+    system.update(FRAME, eye, [torch], world, NOT_DIGGING);
+    expect(system.pool.count).toBeLessThanOrEqual(before);
+    // 火焰与烟最长活几秒：推进 10 秒之后一个都不剩
+    for (let i = 0; i < 600; i++) system.update(FRAME, eye, [torch], world, NOT_DIGGING);
+    expect(system.pool.count).toBe(0);
+  });
+});

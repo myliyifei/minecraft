@@ -1,9 +1,11 @@
 // 后缀要写全：vite.config.ts 会 import 本文件去填 index.html 的占位符，而 Vite 的原生
 // 配置加载器解析不了省略后缀的路径。这条约束是传递的——本文件与它 import 到的模块
 // （现在是 core/item.ts 与 core/difficulty.ts，那两边一个 import 都没有）都在配置加载器的模块图里，往那条链上
-// 加省略后缀的 import 会让 `npm run dev` 发出警告。其余源文件不经过配置加载器，照旧不写后缀。
+// 加省略后缀的 import 会让 `npm run dev` 发出警告。input/keybindings.ts 只以 `import type` 引入，编译时整行删掉，
+// 不进模块图；它省略了后缀，所以不能改成引入值。其余源文件不经过配置加载器，照旧不写后缀。
 import { Difficulty } from '../core/difficulty.ts';
 import { ItemType } from '../core/item.ts';
+import type { HotbarAction, KeyAction } from '../input/keybindings.ts';
 
 /**
  * 界面文字的唯一来源。所有玩家可见的文案都从这里取，不在别处写字面量。
@@ -79,7 +81,66 @@ export const STRINGS = {
   difficulty: '难度',
   createWorld: '创建',
   cancel: '取消',
+  // 设置界面（ADR-0020）：从世界列表与暂停菜单进的是同一个。上半是键位，下半是视距、灵敏度与三个画面开关。
+  keyBindings: '键位',
+  // 点了一项键位、等着按下一个键时那颗按钮上的字。按 Esc 取消。
+  pressAKey: '按下一个键',
+  // 两个动作绑到同一个键：两项都标红，读屏软件报这一句。
+  keyConflict: '与其他动作同键',
+  // 挖掘、使用与关闭界面三项固定，列出来但不能点。
+  fixedBinding: '固定',
+  viewRadius: '视距',
+  sensitivity: '灵敏度',
+  smoothLighting: '平滑光照',
+  flicker: '闪烁',
+  particles: '粒子',
+  done: '完成',
+  // 按键与鼠标按钮的显示名里要用到的字。字母、数字、标点的显示名就是那个字符，在 src/input/keybindings.ts 里按规则取。
+  keySpace: '空格',
+  keyNumpad: '小键盘',
+  mouseLeft: '鼠标左键',
+  mouseRight: '鼠标右键',
 } as const;
+
+/** 设置界面里列出的动作名。快捷栏九格按格号拼，见 `keyActionName`。 */
+const KEY_ACTION_NAMES: Readonly<Record<Exclude<KeyAction, HotbarAction>, string>> = {
+  forward: '前进',
+  back: '后退',
+  left: '向左',
+  right: '向右',
+  jump: '跳跃',
+  inventory: '背包',
+  chainMining: '连锁挖掘',
+};
+
+/** 设置界面里固定的三项的名字：挖掘、使用在鼠标上，Esc 关闭界面。 */
+export const FIXED_ACTION_NAMES = {
+  mine: '挖掘',
+  use: '使用',
+  close: '关闭界面',
+} as const;
+
+/** 一个可改键的动作在设置界面上的名字。 */
+export function keyActionName(action: KeyAction): string {
+  const hotbar = /^hotbar(\d+)$/.exec(action);
+  if (hotbar) return `${STRINGS.hotbar} ${hotbar[1]}`;
+  return KEY_ACTION_NAMES[action as Exclude<KeyAction, HotbarAction>];
+}
+
+/** 分左右两颗的修饰键的显示名，比如「左 Alt」。 */
+export function keyOnSide(side: 'left' | 'right', key: string): string {
+  return `${side === 'left' ? '左' : '右'} ${key}`;
+}
+
+/** 设置界面上视距滑条旁边的读数。 */
+export function viewRadiusValue(chunks: number): string {
+  return `${chunks} 个区块`;
+}
+
+/** 设置界面上灵敏度滑条旁边的读数：相对默认的百分比。 */
+export function sensitivityValue(percent: number): string {
+  return `${percent}%`;
+}
 
 /** 难度的名字（见 CONTEXT.md「难度」）。按难度索引，加一档不补这张表就编译不过。 */
 export const DIFFICULTY_NAMES: Readonly<Record<Difficulty, string>> = {

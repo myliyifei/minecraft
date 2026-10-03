@@ -17,6 +17,8 @@ export interface PauseMenuActions {
    * 才解除，菜单在那之后的一帧藏起。
    */
   readonly resume: () => void;
+  /** 打开设置界面。设置界面开着时仍处于暂停：它不请求锁定。 */
+  readonly openSettings: () => void;
   /** 保存并退出到世界列表：接线层再写一次盘，写成了才销毁世界。 */
   readonly saveAndExit: () => void;
 }
@@ -24,8 +26,7 @@ export interface PauseMenuActions {
 /**
  * 暂停菜单（见 CONTEXT.md「暂停菜单」）：暂停时铺满画面的一层，正中是三个按钮，下面是提示行。
  *
- * 纯表现：什么时候暂停、什么时候解除由输入层定，这里按 `paused` 显示与隐藏。设置按钮先放着不能点，
- * 设置界面由 #69 接上。
+ * 纯表现：什么时候暂停、什么时候解除由输入层定，这里按 `paused` 显示与隐藏。设置界面叠在它之上，关掉回到它。
  */
 export interface PauseMenuHud {
   /** 按暂停状态刷新画面。每帧调一次；没变就不碰 DOM。 */
@@ -53,8 +54,7 @@ export function installPauseMenu(
   title.textContent = STRINGS.paused;
 
   const resume = button(STRINGS.backToGame, () => actions.resume());
-  const settings = button(STRINGS.settings, () => {});
-  settings.disabled = true;
+  const settings = button(STRINGS.settings, () => actions.openSettings());
   const exit = button(STRINGS.saveAndExit, () => actions.saveAndExit());
   // 不在显示时把焦点移到按钮上：按 Esc 的那一刻玩家可能正按着空格跳，松开空格会当场按下聚焦的按钮。
 

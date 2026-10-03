@@ -723,7 +723,7 @@ describe('顶点光照的取样：六个面、区块边角，每格的等级各�
    * 区块 (cx, cz) 里只有一块石头在 (bx, by, bz)（世界坐标），周围摆几块不透明的格子；区块里外每一格的光照都取
    * `levelsAt`。区块外的格子走视图读，所以石头贴着区块边时，角上的取样要读到隔壁区块。
    */
-  function scene(cx: number, cz: number, [bx, by, bz]: readonly [number, number, number]) {
+  function scene(cx: number, cz: number, [bx, by, bz]: readonly [number, number, number], smoothLighting = true) {
     const opaque = opaqueAround(bx, by, bz);
     const isStone = (x: number, yy: number, z: number) =>
       (x === bx && yy === by && z === bz) || opaque.has(`${x},${yy},${z}`);
@@ -746,7 +746,7 @@ describe('顶点光照的取样：六个面、区块边角，每格的等级各�
       blockLightAt: (x, yy, z) => levelsAt(x, yy, z)[1],
       chunkAt: () => undefined,
     };
-    return { mesh: buildChunkMesh(chunk, view), isStone };
+    return { mesh: buildChunkMesh(chunk, view, smoothLighting), isStone };
   }
 
   /**
@@ -809,6 +809,26 @@ describe('顶点光照的取样：六个面、区块边角，每格的等级各�
       }
       expect(normals.size).toBe(6);
       expect(checked).toBe(24);
+    });
+
+    it(`平滑光照关闭、石头在${where}：每个面的 4 个角都等于这一面外侧相邻那一格的光照`, () => {
+      const { mesh } = scene(cx, cz, block, false);
+      const normals = new Set<string>();
+      for (let v = 0; v < mesh.positions.length / 3; v++) {
+        const normal = [mesh.normals[v * 3]!, mesh.normals[v * 3 + 1]!, mesh.normals[v * 3 + 2]!] as const;
+        // 只看这块石头自己的面，做法同上
+        const face = Math.floor(v / 4);
+        const owner = [0, 1, 2].map((axis) => {
+          let sum = 0;
+          for (let k = 0; k < 4; k++) sum += mesh.positions[(face * 4 + k) * 3 + axis]!;
+          return Math.floor(sum / 4 - normal[axis]! / 2) + (axis === 0 ? cx * CHUNK_SIZE : axis === 2 ? cz * CHUNK_SIZE : 0);
+        });
+        if (owner.some((p, axis) => p !== block[axis])) continue;
+        const [nx, ny, nz] = block.map((p, axis) => p + normal[axis]!);
+        expect([mesh.light[v * 2], mesh.light[v * 2 + 1]], `法线 ${normal}`).toEqual(levelsAt(nx!, ny!, nz!));
+        normals.add(normal.join(','));
+      }
+      expect(normals.size).toBe(6);
     });
   }
 });

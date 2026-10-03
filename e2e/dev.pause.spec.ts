@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { BlockType } from '../src/core/block';
 import { ItemType } from '../src/core/item';
-import { KEY_BINDINGS } from '../src/input/keybindings';
+import { DEFAULT_KEY_BINDINGS } from '../src/input/keybindings';
 import { CHUNKS, DB_NAME, WORLDS } from '../src/storage/world-storage';
 import { STRINGS } from '../src/ui/strings';
 import { createWorld, pressEscape, resumeGame, waitForWorld, waitForWorldList } from './world-list';
@@ -78,7 +78,7 @@ test('加载画面消失后是暂停菜单，世界不推进；点回到游戏�
   const menu = pauseMenu(page);
   await expect(menu).toBeVisible();
   await expect(menu.getByRole('button', { name: STRINGS.backToGame })).toBeVisible();
-  await expect(menu.getByRole('button', { name: STRINGS.settings })).toBeDisabled();
+  await expect(menu.getByRole('button', { name: STRINGS.settings })).toBeEnabled();
   await expect(menu.getByRole('button', { name: STRINGS.saveAndExit })).toBeVisible();
   await expect(page.locator('#enter-hint')).toHaveCount(0);
   await expectStill(page);
@@ -156,7 +156,7 @@ test('挖一块后 Esc：暂停菜单出现、世界停住、那个区块已写�
 
 test('按背包键打开背包界面：锁定交还给页面，但不暂停，世界照旧推进', async ({ page }) => {
   await resumeGame(page);
-  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS.inventory);
   await expect(page.locator('#inventory-screen')).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.pointerLockElement)).toBe(null);
   const before = await tickCount(page);
@@ -168,7 +168,7 @@ test('按背包键打开背包界面：锁定交还给页面，但不暂停，�
 test('背包界面开着时切走标签页：界面当场关掉、光标物品退回原格，然后暂停', async ({ page }) => {
   await page.evaluate((dirt) => window.__VOXEL__!.core.giveItem(dirt, 5), ItemType.Dirt);
   await resumeGame(page);
-  await page.keyboard.press(KEY_BINDINGS.inventory);
+  await page.keyboard.press(DEFAULT_KEY_BINDINGS.inventory);
   await expect(page.locator('#inventory-screen')).toBeVisible();
   // 拿起快捷栏第一格那一堆，放在光标上
   await page.evaluate(() => {

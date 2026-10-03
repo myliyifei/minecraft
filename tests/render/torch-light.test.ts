@@ -4,6 +4,7 @@ import {
   FLICKER_AMPLITUDE,
   SELF_LIT_FLICKER_DIM,
   flickerAt,
+  frameFlicker,
   heldLightLevel,
   selfLitBrightness,
 } from '../../src/render/torch-light';
@@ -70,5 +71,15 @@ describe('火把本身随闪烁起伏', () => {
   it('闪烁量越大越亮', () => {
     expect(selfLitBrightness(FLICKER_AMPLITUDE / 2)).toBeGreaterThan(selfLitBrightness(0));
     expect(selfLitBrightness(FLICKER_AMPLITUDE / 2)).toBeLessThan(selfLitBrightness(FLICKER_AMPLITUDE));
+  });
+});
+
+describe('闪烁开关（ADR-0020）', () => {
+  it('关掉时每一刻的闪烁量都是 0', () => {
+    for (let t = 0; t < 10; t += 0.137) expect(frameFlicker(false, t)).toBe(0);
+  });
+
+  it('开着时就是这一刻的闪烁量', () => {
+    for (let t = 0; t < 10; t += 0.137) expect(frameFlicker(true, t)).toBe(flickerAt(t));
   });
 });

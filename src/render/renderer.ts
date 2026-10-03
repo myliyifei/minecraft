@@ -51,7 +51,7 @@ import {
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes } from './mesh-plan';
 import { ParticleSystem, type ParticleCounts } from './particles';
 import { selectionBounds } from './selection';
-import { flickerAt, heldLightLevel } from './torch-light';
+import { frameFlicker, heldLightLevel } from './torch-light';
 import {
   ZombiePart,
   createZombieModel,
@@ -63,6 +63,7 @@ import {
   type ZombieGeometries,
 } from './zombie-model';
 import { chunkKey, type ChunkCoord } from '../core/world';
+import type { DisplayToggle } from '../settings';
 
 /** 竖直视场角（度）。 */
 const FIELD_OF_VIEW = 70;
@@ -160,7 +161,12 @@ export interface WorldRendererOptions {
   readonly texture: THREE.Texture;
   /** 裂纹条（见 `CRACK_PATH`）。渲染层会改它的 uv 偏移来切换裂纹阶。 */
   readonly crackTexture: THREE.Texture;
+  /** 设置里的三个画面开关（ADR-0020）。每帧读当前值，改了下一帧生效。 */
+  readonly settings: RenderSettings;
 }
+
+/** 渲染层读的那几项设置。 */
+export type RenderSettings = Readonly<Record<DisplayToggle, boolean>>;
 
 /**
  * 场景里那套选框与裂纹现在是什么样。
@@ -376,9 +382,14 @@ export class WorldRenderer {
   private readonly particleGeometry: THREE.InstancedBufferGeometry;
   /** 上一帧的真实时间（毫秒），粒子按两帧之间的间隔推进。 */
   private lastFrameMs: number | undefined;
+  private readonly settings: RenderSettings;
+  /** 已建的网格是按平滑光照开还是关建的。与设置不同时全部过期重建（`syncChunkMeshes`）。 */
+  private meshedSmooth: boolean;
 
-  constructor({ canvas, core, texture, crackTexture }: WorldRendererOptions) {
+  constructor({ canvas, core, texture, crackTexture, settings }: WorldRendererOptions) {
     this.core = core;
+    this.settings = settings;
+    this.meshedSmooth = settings.smoothLighting;
     // 在建真正的区块之前让网格构建的每条分支都走一遍，理由见 warmUpChunkMeshes。
     warmUpChunkMeshes();
     this.renderer = new THREE.WebGLRenderer({
@@ -633,6 +644,12 @@ export class WorldRenderer {
    * `budget` 给 Infinity 表示「现在全部建完」，首帧之前用它把出生点那一带一次铺好。
    */
   syncChunkMeshes(budget = MESH_BUDGET_PER_FRAME): void {
+    // 设置里切了平滑光照：已建的网格全部过期，与只有光照变了的一样按预算由近到远重建，几秒内换完。设置界面开在暂停
+    // 菜单上，暂停时照样每帧画，所以关掉设置之前就能看到墙角的变化。
+    if (this.settings.smoothLighting !== this.meshedSmooth) {
+      this.meshedSmooth = this.settings.smoothLighting;
+      this.deferredRelights = [...this.meshes.values()].map(({ cx, cz }) => ({ cx, cz }));
+    }
     // 方块变了的网格当帧重建，只有光照变了的与新区块一起按预算由近到远排，没轮到的留到下一帧；缺邻居的丢掉
     // 等邻居回来。都由 planChunkMeshes 定，首次建与重建因此走同一条「8 个邻居都在」的规则。
     const stale = this.core.takeStaleChunks();
@@ -674,7 +691,7 @@ export class WorldRenderer {
     const chunk = this.core.chunkAt(cx, cz);
     if (!chunk) return;
 
-    const data = buildChunkMesh(chunk, this.core);
+    const data = buildChunkMesh(chunk, this.core, this.meshedSmooth);
     const { glowingBlocks } = data;
     if (data.indices.length === 0) {
       this.meshes.set(chunkKey(cx, cz), { cx, cz, glowingBlocks });
@@ -755,11 +772,11 @@ export class WorldRenderer {
 
   /**
    * 更新送进着色器的手持光与闪烁量（ADR-0016）：手持光看选中格里的物品，每帧都写，切到别的格子
-   * 下一帧就灭；闪烁量按真实时间算。两者都只在画面上，核心不知道它们。
+   * 下一帧就灭；闪烁量按真实时间算，设置里关掉闪烁时是 0。两者都只在画面上，核心不知道它们。
    */
   private updateTorchLight(): void {
     this.frame.heldLight.value = heldLightLevel(this.core.inventory.held?.item);
-    this.frame.flicker.value = flickerAt(performance.now() / 1000);
+    this.frame.flicker.value = frameFlicker(this.settings.flicker, performance.now() / 1000);
   }
 
   /**
@@ -774,6 +791,8 @@ export class WorldRenderer {
     const now = performance.now();
     const seconds = this.lastFrameMs === undefined ? 0 : (now - this.lastFrameMs) / 1000;
     this.lastFrameMs = now;
+    // 粒子开关每帧照设置写一次。设置只在暂停时改，那时不推进 tick，`afterTick` 里的碎掉爆一团也就读得到这一次写的。
+    this.particleSystem.emitting = this.settings.particles;
     this.particleSystem.update(seconds, this.camera.position, this.glowingBlocks(), this.core, this.core.mining);
 
     const { count } = this.particleSystem.pool;

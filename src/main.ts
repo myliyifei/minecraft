@@ -1,7 +1,9 @@
 import './ui/style.css';
 import { installListDebugHandle, removeListDebugHandle, type EnterOutcome } from './debug';
+import { loadSettings } from './settings';
 import { withWorldLock } from './storage/world-lock';
 import { openWorldStorage } from './storage/world-storage';
+import { installSettingsScreen } from './ui/settings-screen';
 import { STRINGS } from './ui/strings';
 import { installWorldList, type NewWorld } from './ui/world-list';
 import { startWorldSession, type WorldStart } from './world-session';
@@ -22,7 +24,9 @@ async function main(): Promise<void> {
   const loading = document.querySelector('#loading');
   if (!(loading instanceof HTMLElement)) throw new Error('页面缺少 #loading 元素');
 
-  // 设置（ADR-0020）由 #69 实现：页面打开时先读设置，再显示世界列表。
+  // 页面打开时先读设置（ADR-0020），再显示世界列表。设置界面只有一个，世界列表与暂停菜单都打开它。
+  const settings = loadSettings();
+  const settingsScreen = installSettingsScreen(document.body, settings);
   const storage = await openWorldStorage();
   let busy = false;
 
@@ -42,7 +46,7 @@ async function main(): Promise<void> {
         list.hide();
         removeListDebugHandle();
         loading.hidden = false;
-        const session = await startWorldSession({ storage, id, ...prepared });
+        const session = await startWorldSession({ storage, id, ...prepared, settings, settingsScreen });
         loading.hidden = true;
         settle('entered');
         // 锁在这个 Promise 兑现时释放：要一直等到退出世界。
@@ -101,6 +105,10 @@ async function main(): Promise<void> {
     },
     delete: (id) => {
       if (!busy) void deleteWorld(id).catch((error: unknown) => console.error('删除世界失败', error));
+    },
+    // 正在进入时不打开：世界的画布与暂停菜单随后挂上，会画在设置界面之上。
+    settings: () => {
+      if (!busy) settingsScreen.open();
     },
   });
 

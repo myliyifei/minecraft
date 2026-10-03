@@ -105,6 +105,20 @@ describe('区块 Worker 的隔离（ADR-0003：Worker 只是适配器）', () =>
   });
 });
 
+describe('存储模块的边界（ADR-0018：核心只进出快照）', () => {
+  const storageFiles = tsFilesIn(join(SRC, 'storage'));
+
+  it('存储模块只从核心与自己目录里引入模块', () => {
+    // 存储只读写快照的形状，不知道渲染、输入与界面；世界列表与暂停菜单调它，它不调它们。
+    expect(storageFiles.length).toBeGreaterThan(0);
+    for (const file of storageFiles) {
+      for (const specifier of importedModules(readFileSync(file, 'utf8'))) {
+        expect(specifier, file).toMatch(/^\.\.\/core\/|^\.\//);
+      }
+    }
+  });
+});
+
 describe('键位表是单一数据源', () => {
   const table = join(SRC, 'input/keybindings.ts');
 

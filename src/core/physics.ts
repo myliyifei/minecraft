@@ -111,7 +111,12 @@ export class FallTracker {
     this.highest = y;
   }
 
-  /** 从 y 重新算起：重生这类瞬移之后调，瞬移之前的高度不算进落差。 */
+  /** 离地之后到过的最高 y。快照存它，读档后用 `reset` 放回。 */
+  get highestY(): number {
+    return this.highest;
+  }
+
+  /** 从 y 重新算起：重生这类瞬移之后调，瞬移之前的高度不算进落差。读档时传快照里的最高点。 */
   reset(y: number): void {
     this.highest = y;
   }

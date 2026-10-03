@@ -102,6 +102,17 @@ export class Health implements HealthView {
   }
 
   /**
+   * 回到快照里的生命值与上次受伤的 tick（ADR-0018）。无敌时间不另存，按上次受伤的 tick 重建：玩家受伤都走
+   * `hurt`，生效那一下同时开始无敌时间，两者因此总是差 `INVULNERABLE_TICKS`。燃烧走的那条路不开始无敌时间，
+   * 只有僵尸会燃烧，僵尸又不进快照。
+   */
+  restore(points: number, lastHurtTick: number | undefined): void {
+    this.current = points;
+    this.lastHurt = lastHurtTick;
+    this.invulnerableUntil = lastHurtTick === undefined ? -Infinity : lastHurtTick + INVULNERABLE_TICKS;
+  }
+
+  /**
    * 第 now 个 tick 的回血：距上次受伤满 `REGEN_DELAY_TICKS` 的那一 tick 回 1，之后每满
    * `REGEN_INTERVAL_TICKS` 再回 1，到满血为止。死了不回，没受过伤也没什么可回。
    *

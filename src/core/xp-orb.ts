@@ -1,6 +1,7 @@
 import { stepEntities } from './entity';
 import type { ExperienceSink } from './experience';
 import { boxCenter, hitboxAt, touches, type Hitbox } from './physics';
+import type { XpOrbSnapshot } from './snapshot';
 import type { Vec3 } from './vec3';
 
 /** 经验球碰撞箱的边长（方块）。比掉落物再小一点，看上去是一小团光而不是一小块方块。 */
@@ -105,7 +106,24 @@ export class XpOrbs implements XpOrbsView, XpOrbSink {
   spawnInBlock(amount: number, x: number, y: number, z: number): void {
     // 碰撞箱的中心对准那一格的中心，所以底面比格底高半个箱高。
     const position: Vec3 = { x: x + 0.5, y: y + 0.5 - XP_ORB_SIZE / 2, z: z + 0.5 };
-    this.list.push(new XpOrb(this.nextId++, amount, position));
+    this.list.push(new XpOrb({ id: this.nextId++, amount, position, speed: 0, age: 0 }));
+  }
+
+  /** 下一个经验球的编号。快照存它，读档后接着往下编。 */
+  get nextXpOrbId(): number {
+    return this.nextId;
+  }
+
+  /** 每个经验球的快照（ADR-0018），按生成先后。 */
+  snapshot(): XpOrbSnapshot[] {
+    return this.list.map((orb) => orb.snapshot());
+  }
+
+  /** 换成快照里的那些经验球，编号从 nextId 接着编。读档时在构造之后调一次。 */
+  restore(nextId: number, orbs: readonly XpOrbSnapshot[]): void {
+    this.nextId = nextId;
+    this.list.length = 0;
+    for (const record of orbs) this.list.push(new XpOrb(record));
   }
 
   /**
@@ -144,15 +162,22 @@ class XpOrb implements XpOrbView {
    * 存速度向量的话经验球会带着惯性冲过玩家再绕回来，在他身边打转；只存速率、方向每
    * tick 重取，「加速飞过去」就是单调靠近的。
    */
-  private speed = 0;
-  private ticks = 0;
+  private speed: number;
+  private ticks: number;
 
-  constructor(id: number, amount: number, position: Vec3) {
+  /** 刚生成的与从快照读回的都经过这个构造函数。上一个 tick 的位置取当前位置：快照不存它。 */
+  constructor({ id, amount, position, speed, age }: XpOrbSnapshot) {
     this.id = id;
     this.amount = amount;
     this.x = this.prevX = position.x;
     this.y = this.prevY = position.y;
     this.z = this.prevZ = position.z;
+    this.speed = speed;
+    this.ticks = age;
+  }
+
+  snapshot(): XpOrbSnapshot {
+    return { id: this.id, amount: this.amount, position: this.position, speed: this.speed, age: this.ticks };
   }
 
   get age(): number {

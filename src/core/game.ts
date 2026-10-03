@@ -2,19 +2,21 @@ import { Attack } from './attack';
 import { BlockStateKind, BlockType, BlockUse, blockUse, isSolid, type BlockEdit } from './block';
 import type { BlockState, BlockStateEntry, BlockStateView } from './block-state';
 import type { ChunkView } from './chunk';
-import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS, WORLD_MIN_Y } from './constants';
+import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS, UNLOAD_MARGIN, WORLD_MIN_Y } from './constants';
 import { CRAFTING_TABLE_GRID, CraftingGrid, INVENTORY_CRAFTING_GRID } from './crafting-grid';
+import { DEFAULT_DIFFICULTY, type Difficulty } from './difficulty';
 import { Drops, type DropsView } from './drop';
 import { Experience, type ExperienceView } from './experience';
 import { stepFurnaces } from './furnace';
 import { FurnaceSlots } from './furnace-slots';
 import { fallDamage, Health, type HealthView } from './health';
-import { Inventory, wrapHotbarSlot, type InventoryView } from './inventory';
+import { INVENTORY_SIZE, Inventory, wrapHotbarSlot, type InventoryView } from './inventory';
 import type { ItemType } from './item';
 import { InventoryScreen, type InventoryScreenView } from './inventory-screen';
 import { IDLE_MINING, Mining, type MiningView } from './mining';
 import { placeBlock } from './placement';
 import { IDLE_INTENT, Player, type MoveIntent, type PlayerView } from './player';
+import type { Snapshot } from './snapshot';
 import { streamChunks } from './streaming';
 import { plainsTerrain } from './terrain';
 import { effectiveSkyLight, isNightAt, skyDarkeningAt, timeOfDayAt, wrapTimeOfDay } from './time-of-day';
@@ -48,8 +50,15 @@ const OUTPUT_CLICK: ScreenClick = Object.freeze({ kind: 'output' });
 export interface GameCoreOptions {
   /** 世界种子。同一种子每次进入得到同样的地形。 */
   readonly seed?: number;
-  /** 视距（区块数）：这个半径内的区块保持加载，见 CONTEXT.md 的「视距」。 */
+  /** 视距（区块数）：这个半径内的区块保持加载，见 CONTEXT.md 的「视距」。之后可以改，见 `setViewRadius`。 */
   readonly viewRadius?: number;
+  /** 难度（见 CONTEXT.md），默认普通。只在新建世界时给；读档时以快照里的为准。 */
+  readonly difficulty?: Difficulty;
+  /**
+   * 从快照构造（ADR-0018）：种子、难度与世界的持续状态都取快照里的，`seed` 与 `difficulty` 不看。快照里的
+   * 已改区块要是存档里的全部，构造之后它们的方块数组归核心所有。
+   */
+  readonly restore?: Snapshot;
   /**
    * 换掉区块的来源：测试里塞一个特定形状的世界，浏览器里塞一个由 Worker 生成区块的
    * 来源。拿到的是本世界的种子，因此替换实现同样受种子驱动。
@@ -64,12 +73,15 @@ export interface GameCoreOptions {
  * 第一切片有「推进时间」「查询/写入方块」「玩家移动」「区块随玩家流式加载」「空手挖掘」
  * 「掉落物与背包」「经验球与等级」「放置方块」「背包界面」九件事，第二切片起加「合成」
  * 与「使用（工作台界面）」，第三切片加「熔炉界面」与「熔炼」，第四切片加「世界时刻」「生命值」
- * 「死亡与重生」「僵尸」与「攻击」。别的生物由后续切片挂进 step()。
+ * 「死亡与重生」「僵尸」与「攻击」，第六切片加「导出快照与从快照构造」（ADR-0018）。别的生物由后续切片挂进 step()。
  */
 export class GameCore implements BlockEdit, BlockStateView {
   private readonly world: World;
   private readonly worldSeed: number;
-  private readonly radius: number;
+  private readonly worldDifficulty: Difficulty;
+  /** 极限难度下玩家死过没有。进快照，读档时放回；什么时候置真是难度规则的事。 */
+  private hardcoreDead: boolean;
+  private radius: number;
   private readonly playerState: Player;
   private readonly dropsState: Drops;
   private readonly xpOrbsState: XpOrbs;
@@ -133,19 +145,32 @@ export class GameCore implements BlockEdit, BlockStateView {
   private readonly screenClicks: ScreenClick[] = [];
 
   constructor(options: GameCoreOptions = {}) {
-    this.worldSeed = options.seed ?? DEFAULT_SEED;
+    const restore = options.restore;
+    this.worldSeed = restore?.seed ?? options.seed ?? DEFAULT_SEED;
+    this.worldDifficulty = restore?.difficulty ?? options.difficulty ?? DEFAULT_DIFFICULTY;
+    this.hardcoreDead = restore?.hardcoreDead ?? false;
     this.radius = options.viewRadius ?? DEFAULT_VIEW_RADIUS;
     // 支撑没了的火把交给掉落物（`World.dropDetachedTorches`）。掉落物要拿世界算碰撞，比世界晚建，
     // 所以这里传一个转发给掉落物的函数。世界在这个构造函数里只加载区块、不写方块，调用到它时掉落物已经建好。
     this.world = new World((options.chunkSource ?? plainsTerrain)(this.worldSeed), {
       spawnInBlock: (stack, x, y, z) => this.dropsState.spawnInBlock(stack, x, y, z),
     });
-    // 出生点要先有地形才算得出来，所以先加载原点周围，玩家最后造。
-    // 来源当场给不出区块时（浏览器里 Worker 还在生成）这里只加载得到已经就绪的那些，
-    // 其余由 tick 补上——所以浏览器那一侧要先把出生点那一带备好，见 src/main.ts。
-    streamChunks(this.world, ORIGIN_CHUNK, this.radius);
-    this.firstSpawn = this.originColumnTop();
-    this.playerState = new Player(this.world, this.firstSpawn);
+    if (restore) {
+      // 读档：已改区块先进已改区块表再流式加载，加载时就复用它们。加载的是玩家周围；出生点取快照里的，
+      // 原点那一列这时可能还没加载，按「未加载即空气」重算就错了。
+      this.world.restore(restore.editedChunks, restore.blockStates);
+      this.firstSpawn = restore.firstSpawn;
+      this.playerState = new Player(this.world, this.firstSpawn);
+      this.playerState.restore(restore.player);
+      streamChunks(this.world, this.playerChunk, this.radius);
+    } else {
+      // 出生点要先有地形才算得出来，所以先加载原点周围，玩家最后造。
+      // 来源当场给不出区块时（浏览器里 Worker 还在生成）这里只加载得到已经就绪的那些，
+      // 其余由 tick 补上——所以浏览器那一侧要先把出生点那一带备好，见 src/main.ts。
+      streamChunks(this.world, ORIGIN_CHUNK, this.radius);
+      this.firstSpawn = this.originColumnTop();
+      this.playerState = new Player(this.world, this.firstSpawn);
+    }
     this.dropsState = new Drops(this.world, this.worldSeed);
     this.xpOrbsState = new XpOrbs();
     // 僵尸死了在原地掉腐肉、被玩家打死的还掉经验球：与挖掘同一条路交给掉落物与经验球。
@@ -176,6 +201,72 @@ export class GameCore implements BlockEdit, BlockStateView {
       this.inventoryState,
       this.zombiesState,
     );
+    if (restore) this.restoreFrom(restore);
+  }
+
+  /**
+   * 世界的持续状态从快照放回：tick 计数与时刻偏移、三个编号、玩家的生命值与经验与背包、掉落物与经验球。
+   * 已改区块、状态表与玩家的位置在构造函数里先放回了：流式加载与出生点要用它们。没放回的取初始值（`Snapshot`）。
+   */
+  private restoreFrom(restore: Snapshot): void {
+    const { player } = restore;
+    this.ticks = restore.ticks;
+    this.timeOffset = restore.timeOffset;
+    this.dropsState.restore(restore.nextDropId, restore.drops);
+    this.xpOrbsState.restore(restore.nextXpOrbId, restore.xpOrbs);
+    this.zombiesState.restoreNextId(restore.nextZombieId);
+    this.healthState.restore(player.health, player.lastHurtTick ?? undefined);
+    this.experienceState.gain(player.experience);
+    player.inventory.forEach((stack, i) => this.inventoryState.setSlot(i, stack ?? undefined));
+    this.inventoryState.select(player.selectedSlot);
+    this.nextSlot = this.inventoryState.selectedSlot;
+  }
+
+  /**
+   * 导出快照（ADR-0018）：普通对象加 `Uint8Array`，之后世界怎么变都不影响它。
+   *
+   * 已改区块只带上次写盘之后改过的那些，取走即清空（`returnUnsavedChunks` 在写盘失败时放回），取快照的同步
+   * 耗时因此与改过的区块数成正比。界面、光标物品与合成网格不进快照，调用方先调 `closeAllScreens`，
+   * 不然光标与网格里的东西就丢了。
+   */
+  snapshot(): Snapshot {
+    const health = this.healthState;
+    return {
+      seed: this.worldSeed,
+      difficulty: this.worldDifficulty,
+      hardcoreDead: this.hardcoreDead,
+      firstSpawn: { ...this.firstSpawn },
+      ticks: this.ticks,
+      timeOffset: this.timeOffset,
+      nextDropId: this.dropsState.nextDropId,
+      nextZombieId: this.zombiesState.nextZombieId,
+      nextXpOrbId: this.xpOrbsState.nextXpOrbId,
+      player: {
+        ...this.playerState.snapshot(),
+        health: health.points,
+        lastHurtTick: health.lastHurtTick ?? null,
+        experience: this.experienceState.total,
+        inventory: Array.from({ length: INVENTORY_SIZE }, (_, i) => this.inventoryState.slot(i) ?? null),
+        selectedSlot: this.inventoryState.selectedSlot,
+      },
+      drops: this.dropsState.snapshot(),
+      xpOrbs: this.xpOrbsState.snapshot(),
+      blockStates: this.world.blockStateRecords(),
+      editedChunks: this.world.takeUnsavedChunks(),
+    };
+  }
+
+  /**
+   * 写盘失败时把那次快照里的已改区块放回「上次写盘之后改过的」集合，下次写盘再写（ADR-0018）。给的是那次
+   * 快照的 `editedChunks`，或只是它们的坐标。
+   */
+  returnUnsavedChunks(coords: readonly ChunkCoord[]): void {
+    this.world.returnUnsavedChunks(coords);
+  }
+
+  /** 本世界的难度。新建时定，之后不变。 */
+  get difficulty(): Difficulty {
+    return this.worldDifficulty;
   }
 
   /** 玩家状态的只读视图。渲染层读它摆相机，改状态只能通过下面几个指令。 */
@@ -428,6 +519,22 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
+   * 关闭全部界面，立即生效（ADR-0004 的第二个例外，见那篇补记）：开着的界面按背包键关闭的规则关掉，光标
+   * 物品退回原格，合成网格里的退回背包，放不下的掉在玩家脚下；熔炉三格里的留在熔炉里。没有界面开着时
+   * 什么都不做。取快照之前与页面隐藏时调：之后不再有 tick，排队的背包键不会生效。
+   *
+   * 关掉时排着的背包键与界面点击一并作废：它们是冲着刚关掉的那个界面来的，下一个 tick 生效的话，背包键会
+   * 把背包界面重新打开。
+   */
+  closeAllScreens(): void {
+    const active = this.activeScreen;
+    if (!active) return;
+    for (const stack of active.toggle()) this.dropsState.spawnAt(stack, this.playerState.position);
+    this.toggleQueued = false;
+    this.screenClicks.length = 0;
+  }
+
+  /**
    * 往背包里放 count 个 item，立即生效，返回装不下的数量。按物品进背包的规则放（`Inventory.add`）：
    * 先并进同一类型的未满堆，再占空格。
    *
@@ -574,9 +681,20 @@ export class GameCore implements BlockEdit, BlockStateView {
     return this.world.chunkAt(cx, cz);
   }
 
-  /** 视距（区块数）。渲染层按它决定网格的范围。 */
+  /** 视距（区块数）。渲染层每帧读它决定网格的范围。 */
   get viewRadius(): number {
     return this.radius;
+  }
+
+  /**
+   * 改视距（见 CONTEXT.md 的「视距」、ADR-0020）：改小时超出范围的区块当场卸载，卸载线照旧比视距多留
+   * `UNLOAD_MARGIN` 环；改大时缺的区块从下一个 tick 起按平时的节奏加载。设置界面开在暂停菜单上，那时不推进
+   * tick，所以卸载不等 tick。不是非负整数时抛错：视距的取值范围是设置界面的事，这里只拒绝写错的调用。
+   */
+  setViewRadius(radius: number): void {
+    if (!Number.isInteger(radius) || radius < 0) throw new RangeError(`视距应为非负整数，收到 ${radius}`);
+    this.radius = radius;
+    this.world.unloadOutside(this.playerChunk, radius + UNLOAD_MARGIN);
   }
 
   /** 玩家所在的区块。加载与卸载都以它为中心。 */

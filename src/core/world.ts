@@ -1,5 +1,7 @@
 import { BlockType, blockDrop, blockStateKind, isOpaque, type BlockEdit } from './block';
 import {
+  blockStateFromRecord,
+  blockStateRecord,
   initialBlockState,
   type BlockState,
   type BlockStateEntry,
@@ -10,6 +12,7 @@ import { CHUNK_SHIFT, CHUNK_SIZE, MAX_LIGHT_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } fr
 import type { DropSink } from './drop';
 import { BARE_HAND } from './item';
 import { Lighting } from './light';
+import type { BlockStateRecord, ChunkRecord } from './snapshot';
 import { TORCH_ATTACH_OFFSETS, isTorch, torchSupportCell } from './torch';
 
 export interface ChunkCoord {
@@ -68,6 +71,13 @@ export class World implements BlockEdit, BlockStateView {
    * 只留那几处改动、为什么不给它设上限，见 ADR-0008。
    */
   private readonly editedChunks = new Map<number, Chunk>();
+  /**
+   * 上次写盘之后改过的区块（ADR-0018），按区块键去重。存档只写这些，不写全部已改区块。
+   *
+   * 与 `editedChunks` 分开：那张表只增不减，这一张每次取快照时取走清空（`takeUnsavedChunks`），写盘失败时
+   * 放回（`returnUnsavedChunks`）。由 `setBlock` 在方块真的变了时登记，与 `editedChunks` 同一处。
+   */
+  private readonly unsavedChunks = new Map<number, ChunkCoord>();
   /**
    * 自上次取走以来方块变了的区块，按区块键去重（见 `StaleChunks.blocks`）。
    *
@@ -224,8 +234,9 @@ export class World implements BlockEdit, BlockStateView {
     if (previous === block) return true;
     chunk.set(lx, by, lz, block);
     this.syncBlockState(bx, by, bz, previous, block);
-    // 这一下让它成了已改区块，卸载后不再丢弃。
+    // 这一下让它成了已改区块，卸载后不再丢弃；下次写盘要写它。
     this.editedChunks.set(key, chunk);
+    this.unsavedChunks.set(key, { cx: chunk.cx, cz: chunk.cz });
     this.markStale(bx, bz, previous, block);
     // 同步更新光照，不等下一 tick：同一 tick 之后的步骤读到的就是新值（ADR-0017）。
     this.lighting.blockChanged(chunk, lx, by, lz, previous, block);
@@ -265,6 +276,55 @@ export class World implements BlockEdit, BlockStateView {
   /** 整张状态表：每一条带着它的世界坐标。调试句柄读它看世界里有哪些带状态的方块。 */
   allBlockStates(): BlockStateEntry[] {
     return [...this.blockStates.values()];
+  }
+
+  /**
+   * 整张状态表按快照的形状给出（`BlockStateRecord`）：不带种类，物品堆与进度是复制出来的值，之后熔炉怎么烧
+   * 都不影响它。
+   */
+  blockStateRecords(): BlockStateRecord[] {
+    return [...this.blockStates.values()].map(({ x, y, z, state }) => ({ x, y, z, state: blockStateRecord(state) }));
+  }
+
+  /**
+   * 取走上次写盘之后改过的那些区块并清空记录，每个复制一份方块数组。只复制这些而不是全部已改区块，
+   * 取快照的同步耗时因此与改过的区块数成正比（ADR-0018）。
+   */
+  takeUnsavedChunks(): ChunkRecord[] {
+    const records: ChunkRecord[] = [];
+    for (const [key, { cx, cz }] of this.unsavedChunks) {
+      // 登记过的一定在已改区块表里：两张表在 `setBlock` 的同一处写，已改区块表只增不减。
+      records.push({ cx, cz, blocks: this.editedChunks.get(key)!.blocks.slice() });
+    }
+    this.unsavedChunks.clear();
+    return records;
+  }
+
+  /** 写盘失败时把那次取走的区块放回去，下次写盘再写。不是已改区块的坐标不登记。 */
+  returnUnsavedChunks(coords: readonly ChunkCoord[]): void {
+    for (const { cx, cz } of coords) {
+      const key = chunkKey(cx, cz);
+      if (this.editedChunks.has(key)) this.unsavedChunks.set(key, { cx, cz });
+    }
+  }
+
+  /**
+   * 从快照放回存档里的全部已改区块与方块状态表（ADR-0018）。构造之后、加载任何区块之前调：放回的区块进已改
+   * 区块表，加载时就复用它们，不向来源要。放回的不算上次写盘之后改过的：它们就是从盘上读出来的。
+   *
+   * 方块数组直接接管，不复制。状态表的每一条按那一格在已改区块里的方块编号补回种类；那一格不是带状态的方块
+   * （存档与方块对不上）时那一条丢掉：带状态的方块被换掉时，状态表本来就会删掉那一条。
+   */
+  restore(chunks: readonly ChunkRecord[], states: readonly BlockStateRecord[]): void {
+    for (const { cx, cz, blocks } of chunks) {
+      this.editedChunks.set(chunkKey(cx, cz), new Chunk(cx, cz, blocks));
+    }
+    for (const { x, y, z, state: record } of states) {
+      const chunk = this.editedChunks.get(chunkKey(chunkOf(x), chunkOf(z)));
+      if (!chunk) continue;
+      const state = blockStateFromRecord(chunk.get(localOf(x), y, localOf(z)), record);
+      if (state) this.blockStates.set(blockKey(x, y, z), { x, y, z, state });
+    }
   }
 
   /**

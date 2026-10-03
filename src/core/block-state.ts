@@ -1,5 +1,6 @@
 import { BlockStateKind, blockStateKind, type BlockType } from './block';
 import type { ItemStack, ItemType } from './item';
+import type { FurnaceStateRecord } from './snapshot';
 
 /**
  * 熔炉的方块状态（见 CONTEXT.md 的「方块状态」「熔炉」）：三个格子，加燃烧与熔炼的进度。
@@ -76,6 +77,45 @@ export function blockStateContents(state: BlockState): ItemStack[] {
     if (stack) contents.push(stack);
   }
   return contents;
+}
+
+/**
+ * 一条状态按快照的形状给出（ADR-0018）：去掉种类，空格写 null。字段逐个复制，之后熔炉再烧，快照里的值不变；
+ * 物品堆本身不可变，直接引用。
+ */
+export function blockStateRecord(state: BlockState): FurnaceStateRecord {
+  return {
+    input: state.input ?? null,
+    fuel: state.fuel ?? null,
+    output: state.output ?? null,
+    burnTicksLeft: state.burnTicksLeft,
+    burnTicksTotal: state.burnTicksTotal,
+    smeltProgress: state.smeltProgress,
+    progressItem: state.progressItem ?? null,
+    pendingExperience: state.pendingExperience,
+  };
+}
+
+/**
+ * 快照里的一条状态放回 block 那一格：种类按方块编号查（`blockStateKind`），不是带状态的方块返回 undefined。
+ */
+export function blockStateFromRecord(block: BlockType, record: FurnaceStateRecord): BlockState | undefined {
+  switch (blockStateKind(block)) {
+    case BlockStateKind.Furnace:
+      return {
+        kind: BlockStateKind.Furnace,
+        input: record.input ?? undefined,
+        fuel: record.fuel ?? undefined,
+        output: record.output ?? undefined,
+        burnTicksLeft: record.burnTicksLeft,
+        burnTicksTotal: record.burnTicksTotal,
+        smeltProgress: record.smeltProgress,
+        progressItem: record.progressItem ?? undefined,
+        pendingExperience: record.pendingExperience,
+      };
+    case BlockStateKind.None:
+      return undefined;
+  }
 }
 
 /** 方块状态表里的一条：哪一格、什么状态。调试句柄遍历整张表时读到的形状。 */

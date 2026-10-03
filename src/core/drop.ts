@@ -12,6 +12,7 @@ import {
   touches,
   type Hitbox,
 } from './physics';
+import type { DropSnapshot } from './snapshot';
 import type { Axis, Vec3 } from './vec3';
 
 /** 掉落物碰撞箱的边长（方块）。与原版一致：比方块小得多，看上去就是一小块。 */
@@ -139,7 +140,25 @@ export class Drops implements DropsView, DropSink {
     const id = this.nextId++;
     // 碰撞箱的中心对准那一格的中心，所以底面比格底高半个箱高。
     const position: Vec3 = { x: x + 0.5, y: y + 0.5 - DROP_SIZE / 2, z: z + 0.5 };
-    this.list.push(new Drop(id, stack, position, spawnVelocity(this.seed, x, y, z, id)));
+    const { x: vx, z: vz } = spawnVelocity(this.seed, x, y, z, id);
+    this.list.push(new Drop({ id, stack, position, velocity: { x: vx, y: 0, z: vz }, age: 0 }));
+  }
+
+  /** 下一个掉落物的编号。快照存它，读档后接着往下编。 */
+  get nextDropId(): number {
+    return this.nextId;
+  }
+
+  /** 每个掉落物的快照（ADR-0018），按生成先后。 */
+  snapshot(): DropSnapshot[] {
+    return this.list.map((drop) => drop.snapshot());
+  }
+
+  /** 换成快照里的那些掉落物，编号从 nextId 接着编。读档时在构造之后调一次。 */
+  restore(nextId: number, drops: readonly DropSnapshot[]): void {
+    this.nextId = nextId;
+    this.list.length = 0;
+    for (const record of drops) this.list.push(new Drop(record));
   }
 
   /**
@@ -188,18 +207,31 @@ class Drop implements DropView {
   private prevY: number;
   private prevZ: number;
   private velocityX: number;
-  private velocityY = 0;
+  private velocityY: number;
   private velocityZ: number;
-  private ticks = 0;
+  private ticks: number;
 
-  constructor(id: number, stack: ItemStack, position: Vec3, velocity: Horizontal) {
+  /** 刚生成的与从快照读回的都经过这个构造函数。上一个 tick 的位置取当前位置：快照不存它。 */
+  constructor({ id, stack, position, velocity, age }: DropSnapshot) {
     this.id = id;
     this.stack = stack;
     this.x = this.prevX = position.x;
     this.y = this.prevY = position.y;
     this.z = this.prevZ = position.z;
     this.velocityX = velocity.x;
+    this.velocityY = velocity.y;
     this.velocityZ = velocity.z;
+    this.ticks = age;
+  }
+
+  snapshot(): DropSnapshot {
+    return {
+      id: this.id,
+      stack: this.stack,
+      position: this.position,
+      velocity: { x: this.velocityX, y: this.velocityY, z: this.velocityZ },
+      age: this.ticks,
+    };
   }
 
   get item(): ItemType {

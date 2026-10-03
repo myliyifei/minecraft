@@ -59,7 +59,8 @@ describe('无头游戏核心的隔离（ADR-0001：世界状态与渲染层分�
   });
 
   it('核心不触碰 DOM 与浏览器全局', () => {
-    const forbidden = /\b(window|document|navigator|requestAnimationFrame|HTMLElement|localStorage)\b/;
+    // 存档不进核心（ADR-0018）：核心只进出快照，IndexedDB 由核心之外的存储模块读写。
+    const forbidden = /\b(window|document|navigator|requestAnimationFrame|HTMLElement|localStorage|indexedDB)\b/;
     for (const file of coreFiles) {
       expect(codeOf(file)).not.toMatch(forbidden);
     }

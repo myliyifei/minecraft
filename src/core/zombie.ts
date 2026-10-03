@@ -209,6 +209,19 @@ export class Zombies implements ZombiesView, EntityRaycast {
     return this.list;
   }
 
+  /**
+   * 下一只僵尸的编号。僵尸不进快照，编号进：编号是游走与掉落的哈希输入，读档后接着往下编，
+   * 之后生成的僵尸才与不读档时的一样（ADR-0018）。
+   */
+  get nextZombieId(): number {
+    return this.nextId;
+  }
+
+  /** 读档时放回快照里的编号。在构造之后、生成任何一只之前调。 */
+  restoreNextId(nextId: number): void {
+    this.nextId = nextId;
+  }
+
   /** 在 position（碰撞箱底面中心）无条件生成一只。不看那里是不是实心，也不看光照。 */
   spawnAt(position: Vec3): void {
     this.list.push(new Zombie(this.nextId++, position));

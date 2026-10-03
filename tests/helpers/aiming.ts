@@ -1,4 +1,5 @@
 import type { BlockType } from '../../src/core/block';
+import type { GameCore } from '../../src/core/game';
 import type { Vec3 } from '../../src/core/vec3';
 import { World } from '../../src/core/world';
 import { FLAT_GROUND_Y, flatTestWorld } from './flat-terrain';
@@ -28,4 +29,18 @@ export function worldWithBlocks(...placements: Array<[BlockCoord, BlockType]>): 
 export function unit({ x, y, z }: Vec3): Vec3 {
   const length = Math.hypot(x, y, z);
   return { x: x / length, y: y / length, z: z / length };
+}
+
+/**
+ * 让核心里玩家的视线正对 point（从眼睛到它的方向）。不推进 tick：视角立即生效，目标方块在下一 tick
+ * 按新视线重算。
+ */
+export function aimAt(game: GameCore, point: Vec3): void {
+  const eye = game.player.eyePosition;
+  const dx = point.x - eye.x;
+  const dy = point.y - eye.y;
+  const dz = point.z - eye.z;
+  const yaw = Math.atan2(-dx, -dz);
+  const pitch = Math.atan2(dy, Math.hypot(dx, dz));
+  game.turn(yaw - game.player.yaw, pitch - game.player.pitch);
 }

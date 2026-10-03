@@ -3033,3 +3033,88 @@ describe('GameCore 的已改区块在玩家走远再回来之后', () => {
     expect(core.blockStateCount).toBe(1);
   });
 });
+
+/** 视距 radius 的平地核心。关闭全部界面与视距两节用它。 */
+function flatCore(radius: number): GameCore {
+  return new GameCore({ viewRadius: radius, chunkSource: () => flatTestTerrain });
+}
+
+describe('GameCore 的关闭全部界面', () => {
+  it('背包开着、光标上有东西：调用当场关闭界面、物品回到原格，不等 tick', () => {
+    const game = flatCore(1);
+    game.giveItem(ItemType.Dirt, 5);
+    game.giveItem(ItemType.OakLog, 3);
+    game.toggleInventory();
+    game.tick();
+    game.clickSlot(1);
+    game.tick();
+    expect(game.inventoryScreen.cursor).toEqual({ item: ItemType.OakLog, count: 3 });
+
+    game.closeAllScreens();
+    expect(game.inventoryScreen.open).toBe(false);
+    expect(game.uiMode).toBe(false);
+    expect(game.inventory.slot(1)).toEqual({ item: ItemType.OakLog, count: 3 });
+  });
+
+  it('关掉时排着的背包键作废：下一 tick 不会把背包重新打开', () => {
+    const game = flatCore(1);
+    game.toggleInventory();
+    game.tick();
+    game.toggleInventory();
+    game.closeAllScreens();
+    game.tick();
+    expect(game.inventoryScreen.open).toBe(false);
+  });
+
+  it('合成网格里的东西退回背包，背包满了放不下的掉在玩家脚下', () => {
+    const game = flatCore(1);
+    game.giveItem(ItemType.Dirt, 5);
+    game.toggleInventory();
+    game.tick();
+    game.clickSlot(0);
+    game.clickSlot(game.inventoryScreen.crafting!.firstSlot);
+    game.tick();
+    game.giveItem(ItemType.Cobblestone, 64 * INVENTORY_SIZE);
+    game.closeAllScreens();
+    expect(game.drops.all().map(({ item, count }) => ({ item, count }))).toEqual([{ item: ItemType.Dirt, count: 5 }]);
+  });
+
+  it('没有界面开着时什么都不做：排着的背包键照样在下一 tick 打开背包', () => {
+    const game = flatCore(1);
+    game.toggleInventory();
+    game.closeAllScreens();
+    game.tick();
+    expect(game.inventoryScreen.open).toBe(true);
+  });
+});
+
+describe('GameCore 的视距可变', () => {
+  /** 已加载区块到原点区块的最远切比雪夫距离。 */
+  function farthestLoaded(game: GameCore): number {
+    return Math.max(...game.loadedChunks().map(({ cx, cz }) => Math.max(Math.abs(cx), Math.abs(cz))));
+  }
+
+  it('改小：超出卸载线的区块当场卸载，不等 tick（暂停时也生效，ADR-0020）', () => {
+    const game = flatCore(4);
+    game.setViewRadius(2);
+    expect(game.viewRadius).toBe(2);
+    expect(game.isChunkLoaded(4, 0)).toBe(false);
+    expect(farthestLoaded(game)).toBe(2 + UNLOAD_MARGIN);
+    game.tick();
+    expect(farthestLoaded(game)).toBe(2 + UNLOAD_MARGIN);
+  });
+
+  it('改大：下一 tick 起按平时的节奏把缺的区块加载进来', () => {
+    const game = flatCore(1);
+    game.setViewRadius(3);
+    expect(game.loadedChunkCount).toBe(9);
+    game.tick();
+    expect(game.loadedChunkCount).toBe(49);
+  });
+
+  it('不是非负整数时抛错', () => {
+    const game = flatCore(1);
+    expect(() => game.setViewRadius(-1)).toThrow(RangeError);
+    expect(() => game.setViewRadius(2.5)).toThrow(RangeError);
+  });
+});

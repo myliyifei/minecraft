@@ -14,6 +14,7 @@ import {
   type Hitbox,
   type HorizontalDelta,
 } from './physics';
+import type { PlayerSnapshot } from './snapshot';
 import type { Axis, Vec3 } from './vec3';
 
 /** 碰撞箱的水平边长（方块）。 */
@@ -70,6 +71,12 @@ export const IDLE_INTENT: MoveIntent = Object.freeze({
   right: false,
   jump: false,
 });
+
+/** 快照里归 `Player` 管的那几项：位置、视角与运动。生命值、经验与背包在别的模块上。 */
+export type PlayerMotion = Pick<
+  PlayerSnapshot,
+  'position' | 'yaw' | 'pitch' | 'velocityY' | 'fallHighest' | 'knockback'
+>;
 
 /** 玩家状态的只读视图。渲染层与调试句柄拿到的是这个，改状态只能经由核心的 tick。 */
 export interface PlayerView {
@@ -212,6 +219,34 @@ export class Player implements PlayerView {
     this.velocityY = 0;
     this.knock = NO_WALK;
     this.fallHeight.reset(spawn.y);
+  }
+
+  /** 位置、视角与运动的快照（ADR-0018）。 */
+  snapshot(): PlayerMotion {
+    return {
+      position: this.position,
+      yaw: this.yawAngle,
+      pitch: this.pitchAngle,
+      velocityY: this.velocityY,
+      fallHighest: this.fallHeight.highestY,
+      knockback: { x: this.knock.x, z: this.knock.z },
+    };
+  }
+
+  /**
+   * 回到快照里的位置、视角与运动。上一个 tick 的位置取当前位置：快照不存它，渲染层不会从别处插值过来。
+   * 击退两个分量都是 0 时就是没被打过（`NO_WALK`），与刚进入世界时一样。
+   */
+  restore(motion: PlayerMotion): void {
+    const { position, knockback } = motion;
+    this.x = this.prevX = position.x;
+    this.y = this.prevY = position.y;
+    this.z = this.prevZ = position.z;
+    this.yawAngle = motion.yaw;
+    this.pitchAngle = motion.pitch;
+    this.velocityY = motion.velocityY;
+    this.fallHeight.reset(motion.fallHighest);
+    this.knock = knockback.x === 0 && knockback.z === 0 ? NO_WALK : { x: knockback.x, z: knockback.z };
   }
 
   /**

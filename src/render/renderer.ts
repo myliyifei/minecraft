@@ -471,7 +471,20 @@ export class WorldRenderer {
     this.scene.add(particleMesh);
 
     this.resize();
-    window.addEventListener('resize', () => this.resize());
+    window.addEventListener('resize', this.onResize);
+  }
+
+  /** 窗口尺寸变化时重设画布与相机。存成字段，`dispose` 才能把它从窗口上移除。 */
+  private readonly onResize = (): void => this.resize();
+
+  /**
+   * 退出世界时调：卸下窗口监听，释放 WebGL 上下文。上下文丢弃之后，GPU 上的网格、贴图与材质一并回收，
+   * 不必逐个 dispose。之后这个渲染器不能再用，画布由接线层移除。
+   */
+  dispose(): void {
+    window.removeEventListener('resize', this.onResize);
+    this.renderer.dispose();
+    this.renderer.forceContextLoss();
   }
 
   /** 已经建过网格的区块数（含一个面都没有的那些）。 */

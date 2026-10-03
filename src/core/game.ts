@@ -166,7 +166,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     } else {
       // 出生点要先有地形才算得出来，所以先加载原点周围，玩家最后造。
       // 来源当场给不出区块时（浏览器里 Worker 还在生成）这里只加载得到已经就绪的那些，
-      // 其余由 tick 补上——所以浏览器那一侧要先把出生点那一带备好，见 src/main.ts。
+      // 其余由 tick 补上——所以浏览器那一侧要先把出生点那一带备好，见 src/world-session.ts。
       streamChunks(this.world, ORIGIN_CHUNK, this.radius);
       this.firstSpawn = this.originColumnTop();
       this.playerState = new Player(this.world, this.firstSpawn);

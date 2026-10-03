@@ -1,7 +1,8 @@
 // 后缀要写全：vite.config.ts 会 import 本文件去填 index.html 的占位符，而 Vite 的原生
 // 配置加载器解析不了省略后缀的路径。这条约束是传递的——本文件与它 import 到的模块
-// （现在是 core/item.ts，那边一个 import 都没有）都在配置加载器的模块图里，往那条链上
+// （现在是 core/item.ts 与 core/difficulty.ts，那两边一个 import 都没有）都在配置加载器的模块图里，往那条链上
 // 加省略后缀的 import 会让 `npm run dev` 发出警告。其余源文件不经过配置加载器，照旧不写后缀。
+import { Difficulty } from '../core/difficulty.ts';
 import { ItemType } from '../core/item.ts';
 
 /**
@@ -9,8 +10,8 @@ import { ItemType } from '../core/item.ts';
  */
 export const STRINGS = {
   gameTitle: '体素世界',
-  // 省略号交给加载屏上那个一明一灭的方块光标，文案本身不带标点。
-  loadingWorld: '正在生成世界',
+  // 加载画面上那一行。新建与读档都经过它。省略号交给一明一灭的方块光标，文案本身不带标点。
+  loadingWorld: '正在加载世界',
   crosshair: '十字准星',
   // 进入提示：没锁定鼠标、又没开界面时显示在准星正下方，告诉玩家先点一下画面才能操作。
   clickToStart: '点击画面开始',
@@ -48,7 +49,53 @@ export const STRINGS = {
   youDied: '你死了',
   respawn: '重生',
   deleteWorld: '删除世界',
+  // 世界列表：打开页面看到的第一个画面。上方三颗按钮，下面每个世界一条。
+  worldList: '世界列表',
+  newWorld: '新建世界',
+  importWorld: '导入',
+  settings: '设置',
+  // 一个世界都没有时列表里那一行。
+  noWorlds: '还没有世界',
+  enterWorld: '进入',
+  exportWorld: '导出',
+  deleteEntry: '删除',
+  // 删除按钮点过一次之后换成这几个字，再点一次才删。
+  confirmDelete: '确认删除',
+  // 存档的格式版本或地形算法版本与当前不同：不能进入，只能删除或导出。
+  incompatible: '版本不兼容',
+  // 进入或删除时取不到这个世界的锁。
+  worldInUse: '已在另一个标签页打开',
+  // 新建世界表单。种子框留空就随机取一个。
+  worldName: '名称',
+  defaultWorldName: '新的世界',
+  worldSeed: '种子',
+  seedPlaceholder: '留空则随机',
+  difficulty: '难度',
+  createWorld: '创建',
+  cancel: '取消',
 } as const;
+
+/** 难度的名字（见 CONTEXT.md「难度」）。按难度索引，加一档不补这张表就编译不过。 */
+export const DIFFICULTY_NAMES: Readonly<Record<Difficulty, string>> = {
+  [Difficulty.Peaceful]: '和平',
+  [Difficulty.Easy]: '简单',
+  [Difficulty.Normal]: '普通',
+  [Difficulty.Hard]: '困难',
+  [Difficulty.Hardcore]: '极限',
+};
+
+/** 上次游玩时间的显示格式：年月日加时分。日期的写法也是玩家可见的文字，地区设置只写在这里。 */
+const LAST_PLAYED_FORMAT = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' });
+
+/** 世界列表里显示的上次游玩时间。 */
+export function formatLastPlayed(ms: number): string {
+  return LAST_PLAYED_FORMAT.format(ms);
+}
+
+/** 世界列表里一条名称下面那一行：种子、难度、上次游玩时间。中间的分隔号也是玩家可见的文字，不在别处拼。 */
+export function worldDetails(seed: number, difficulty: Difficulty, lastPlayed: string): string {
+  return `${STRINGS.worldSeed} ${seed} · ${DIFFICULTY_NAMES[difficulty]} · ${lastPlayed}`;
+}
 
 /**
  * 损耗过的工具那一格的提示文字：物品名，加还剩几点耐久。满耐久的工具只报物品名，与耐久条

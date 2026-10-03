@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { STRINGS } from '../src/ui/strings';
-import { waitForFirstFrame } from './canvas';
+import { createWorld, waitForWorldList } from './world-list';
 
 /**
  * 跑在生产构建的预览上。生产构建不挂调试句柄、也不保留绘制缓冲，
- * 所以这里不数画布颜色（那条断言在 dev 项目里）——加载遮罩被移除本身就说明
- * 贴图加载、渲染器构造、首帧渲染全部跑通了。
+ * 所以这里不数画布颜色（那条断言在 dev 项目里）——从世界列表新建世界、加载画面藏起本身就说明
+ * 存储模块、贴图加载、渲染器构造、首帧渲染全部正常。
  */
 const errors: string[] = [];
 
@@ -16,12 +16,13 @@ test.beforeEach(async ({ page }) => {
     if (message.type() === 'error') errors.push(message.text());
   });
   await page.goto('/');
-  await waitForFirstFrame(page);
+  await waitForWorldList(page);
+  await createWorld(page);
 });
 
 test('生产构建不挂调试句柄', async ({ page }) => {
-  const handle = await page.evaluate(() => window.__VOXEL__ ?? null);
-  expect(handle).toBeNull();
+  const handles = await page.evaluate(() => [window.__VOXEL__ ?? null, window.__VOXEL_LIST__ ?? null]);
+  expect(handles).toEqual([null, null]);
 });
 
 test('生产构建能正常起来并画完首帧', async ({ page }) => {

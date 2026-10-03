@@ -16,9 +16,10 @@ import { gunzipChunk, gzipChunk } from './chunk-codec';
  * 不另造结构；导出文件的各段与这里的记录相同。
  */
 
-const DB_NAME = 'voxel-worlds';
+/** 库名与元数据表名。导出给端到端测试：它直接往库里写一条版本不同的元数据。 */
+export const DB_NAME = 'voxel-worlds';
 const DB_VERSION = 1;
-const WORLDS = 'worlds';
+export const WORLDS = 'worlds';
 const STATES = 'states';
 const BLOCK_STATES = 'blockStates';
 const CHUNKS = 'chunks';
@@ -78,7 +79,7 @@ export interface WorldStorageOptions {
   readonly versions: StorageVersions;
 }
 
-/** 打开存档库，第一次打开时建四张表。 */
+/** 打开存储模块的库，第一次打开时建四张表。 */
 export async function openWorldStorage(options: Partial<WorldStorageOptions> = {}): Promise<WorldStorage> {
   const factory = options.indexedDB ?? indexedDB;
   const request = factory.open(DB_NAME, DB_VERSION);

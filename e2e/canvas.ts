@@ -108,10 +108,3 @@ export async function readElementPixels(
     return pixels;
   }, png);
 }
-
-/** 等首帧画完：加载遮罩被移除即表示核心与渲染都就绪。 */
-export async function waitForFirstFrame(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.querySelector('#loading') === null, null, {
-    timeout: 20_000,
-  });
-}

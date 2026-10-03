@@ -76,8 +76,8 @@ import {
   countCanvasColors,
   installPixelProbe,
   readElementPixels,
-  waitForFirstFrame,
 } from './canvas';
+import { enterDefaultWorld, reloadAndEnter, startTicking } from './world-list';
 
 /** 熔炉三格各自的下标与读屏名字。 */
 const FURNACE_SLOTS: ReadonlyArray<readonly [number, string]> = [
@@ -113,7 +113,7 @@ const XP_ABSORB_TICKS = TICK_RATE;
 
 /**
  * 默认种子下、会写进原点区块的第一棵橡树。树根不一定落在原点区块里，但一定在页面
- * 打开时就等好了的那一片内（见 SPAWN_READY_RADIUS）。
+ * 进入世界时就等好了的那一片内（见 SPAWN_READY_RADIUS）。
  *
  * 在 Node 这一侧用纯地形函数算出来，再拿去核对页面里的世界——两边对得上，就说明
  * Worker 生成的区块与核心认的是同一个世界（ADR-0003）。
@@ -127,7 +127,7 @@ function spawnAreaTree(): OakTree {
 /**
  * 等视距内的区块全部到位。
  *
- * 页面打开时只等好了出生点那一小片（见 SPAWN_READY_RADIUS），
+ * 进入世界时只等好了出生点那一小片（见 SPAWN_READY_RADIUS），
  * 其余由 Worker 陆续送来。要对整片地形下断言就得先等它补齐，否则读到的是
  * 「未加载即空气」。
  */
@@ -351,7 +351,7 @@ test.beforeEach(async ({ page }) => {
   });
   await installPixelProbe(page);
   await page.goto('/');
-  await waitForFirstFrame(page);
+  await enterDefaultWorld(page);
 });
 
 test('页面加载过程中没有 JS 错误', () => {
@@ -441,17 +441,21 @@ test('页面打开后是由默认种子生成的起伏平原', async ({ page }) 
 test('同一种子每次进入地形相同', async ({ page }) => {
   await waitForFullViewDistance(page);
   const before = await readTopBlockProfile(page);
-  await page.reload();
-  await waitForFirstFrame(page);
+  // 重新打开页面，从世界列表再进入这个世界
+  await reloadAndEnter(page);
+  await startTicking(page);
   await waitForFullViewDistance(page);
   expect(await readTopBlockProfile(page)).toEqual(before);
 });
 
 test('地形生成在 Worker 里进行，视距内的区块陆续送到', async ({ page }) => {
-  // 首帧只等了出生点那一小片，此时视距还没铺满
+  // beforeEach 已经让世界推进起来，视距很快铺满。重新打开页面再进入这个世界，在世界开始推进之前看
+  await reloadAndEnter(page);
+  // 加载画面只等了玩家周围那一小片，此时视距还没铺满
   const atFirstFrame = await page.evaluate(() => window.__VOXEL__!.core.loadedChunkCount);
   expect(atFirstFrame).toBeLessThan(CHUNKS_IN_VIEW);
 
+  await startTicking(page);
   await waitForFullViewDistance(page);
 
   const state = await page.evaluate(() => ({
@@ -459,7 +463,7 @@ test('地形生成在 Worker 里进行，视距内的区块陆续送到', async 
     delivered: window.__VOXEL__!.chunks.deliveredCount,
   }));
   // 送回来的不少于世界里现有的：视距铺满靠的是 Worker 的产出，不是主线程边跑边生成
-  // （主线程根本没有生成器——核心拿到的来源只有 chunks.source，见 src/main.ts）
+  // （主线程根本没有生成器——核心拿到的来源只有 chunks.source，见 src/world-session.ts）
   expect(state.delivered).toBeGreaterThanOrEqual(state.loaded);
   expect(errors).toEqual([]);
 });

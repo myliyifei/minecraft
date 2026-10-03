@@ -7,8 +7,8 @@
     <title>{{gameTitle}}</title>
   </head>
   <body>
-    <canvas id="game"></canvas>
-    <div id="loading">
+    <!-- 加载画面：进入世界时显示，网格建好后藏起。世界的画布与世界列表由脚本挂上。 -->
+    <div id="loading" hidden>
       <h1 class="loading__title">{{gameTitle}}</h1>
       <p class="loading__status" role="status">
         {{loadingWorld}}<span class="loading__cursor" aria-hidden="true"></span>

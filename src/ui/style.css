@@ -57,17 +57,14 @@ body {
 }
 
 /*
- * 加载屏是一段世界剖面：天空之下依次是草、泥土、石头、基岩，
+ * 加载画面与世界列表的底图是一段世界剖面：天空之下依次是草、泥土、石头、基岩，
  * 层序与地形生成出来的一列方块一致，色带高度都是 --tile 的整数倍、边界全是硬边。
- * 标题与状态行的基线正好落在草线上，与草层顶边对齐。
+ * 加载画面的标题与状态行的基线正好落在草线上，与草层顶边对齐。
  */
-#loading {
+#loading,
+.world-list {
   position: fixed;
   inset: 0;
-  display: grid;
-  align-content: end;
-  justify-items: center;
-  padding-bottom: calc(var(--ground) + var(--tile));
   background-color: var(--sky);
   /* 前两层是 16px 的方块网格，只铺在地层上：地面因此看上去是垒起来的方块，不是几条色带。 */
   background-image:
@@ -92,6 +89,148 @@ body {
     auto;
   font-family: var(--font-ui);
   color: var(--ink);
+}
+
+#loading {
+  display: grid;
+  align-content: end;
+  justify-items: center;
+  padding-bottom: calc(var(--ground) + var(--tile));
+}
+
+/* 两者都显式给了 display，[hidden] 要写回去。 */
+#loading[hidden],
+.world-list[hidden],
+.world-list [hidden] {
+  display: none;
+}
+
+/*
+ * 世界列表：天空里一块半透明的面板，标题在上，下面是三颗按钮、提示行、新建世界表单与世界一条一条。
+ * 面板到草线为止，列表长了在面板里滚动，地层始终露在下面。
+ */
+.world-list {
+  display: grid;
+  justify-items: center;
+  align-items: start;
+  padding: calc(var(--tile) * 2) var(--tile) calc(var(--ground) + var(--tile));
+}
+
+.world-list__panel {
+  display: grid;
+  gap: var(--tile);
+  width: min(100%, calc(var(--tile) * 36));
+  max-height: 100%;
+  overflow-y: auto;
+  padding: var(--tile);
+  background: rgb(255 255 255 / 45%);
+  box-shadow: inset 0 0 0 2px rgb(28 23 18 / 35%);
+}
+
+.world-list__title {
+  font-size: clamp(1.5rem, 6vw, 2.5rem);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-align: center;
+  /* 与加载画面的标题同一种硬阴影。 */
+  text-shadow: calc(var(--tile) / 6) calc(var(--tile) / 6) 0 rgb(255 255 255 / 45%);
+}
+
+.world-list__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--tile) / 2);
+}
+
+.world-list__button {
+  min-width: calc(var(--tile) * 5);
+  padding: calc(var(--tile) / 4) calc(var(--tile) / 2);
+  border: 0;
+  background: rgb(0 0 0 / 40%);
+  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 35%);
+  font: inherit;
+  color: #fff;
+  text-shadow: 1px 1px 0 var(--ink);
+  cursor: pointer;
+}
+
+.world-list__button:hover:not(:disabled),
+.world-list__button:focus-visible {
+  background: rgb(0 0 0 / 60%);
+  box-shadow: inset 0 0 0 2px #fff;
+  outline: none;
+}
+
+.world-list__button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 删除按钮点过一次、等第二下时换成生命值的红，看得出再点就删。 */
+.world-list__delete--armed,
+.world-list__delete--armed:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--health) 70%, rgb(0 0 0 / 40%));
+}
+
+.world-list__message {
+  padding: calc(var(--tile) / 4) calc(var(--tile) / 2);
+  background: color-mix(in srgb, var(--health) 80%, transparent);
+  color: #fff;
+}
+
+.world-list__form {
+  display: grid;
+  gap: calc(var(--tile) / 2);
+  padding: calc(var(--tile) / 2);
+  box-shadow: inset 0 0 0 1px rgb(28 23 18 / 35%);
+}
+
+.world-list__field {
+  display: grid;
+  gap: calc(var(--tile) / 4);
+}
+
+.world-list__field input,
+.world-list__field select {
+  padding: calc(var(--tile) / 4);
+  border: 0;
+  box-shadow: inset 0 0 0 2px rgb(28 23 18 / 45%);
+  background: rgb(255 255 255 / 80%);
+  font: inherit;
+  color: var(--ink);
+}
+
+.world-list__entries {
+  display: grid;
+  gap: calc(var(--tile) / 2);
+  list-style: none;
+}
+
+.world-list__entry {
+  display: grid;
+  gap: calc(var(--tile) / 4);
+  padding: calc(var(--tile) / 2);
+  background: rgb(255 255 255 / 40%);
+}
+
+.world-list__name {
+  font-weight: 700;
+}
+
+.world-list__details {
+  font-size: 0.875em;
+}
+
+.world-list__incompatible {
+  justify-self: start;
+  padding: 0 calc(var(--tile) / 4);
+  background: var(--ink);
+  font-size: 0.875em;
+  color: #fff;
+}
+
+.world-list__empty {
+  text-align: center;
 }
 
 .loading__title {

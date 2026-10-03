@@ -46,11 +46,16 @@ async function main(): Promise<void> {
   // 首帧画完才撤掉加载遮罩，页面不会闪一下空画布。
   loading.remove();
   const controls = installPlayerControls(canvas, core);
-  // 重生按钮按下那一刻抓回指针锁定：锁定只在用户手势里放行，所以由按钮的 click 直接调，不等下一帧。
   const hud = installHud(
     document.body,
     core,
-    () => controls.grabPointer(),
+    {
+      // 重生按钮按下那一刻抓回指针锁定：锁定只在用户手势里放行，所以由按钮的 click 直接调，不等下一帧。
+      afterRespawn: () => controls.grabPointer(),
+      // 删除世界只出现在极限难度下。这里进入的总是默认难度的世界，不会显示这颗按钮；删除存档并回到
+      // 世界列表由 #67 实现。
+      deleteWorld: () => {},
+    },
     () => controls.locked,
   );
   hud.update();

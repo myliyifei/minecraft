@@ -1,7 +1,7 @@
 import type { GameCore } from '../core/game';
 import type { InventoryScreenView } from '../core/inventory-screen';
 import { installCrosshair } from './crosshair';
-import { installDeathScreen } from './death-screen';
+import { installDeathScreen, type DeathScreenActions } from './death-screen';
 import { installEnterHint } from './enter-hint';
 import { installHealthBar } from './health-bar';
 import { installHotbar } from './hotbar';
@@ -37,6 +37,7 @@ export type HudSource = Pick<
   GameCore,
   | 'experience'
   | 'health'
+  | 'difficulty'
   | 'tickCount'
   | 'inventory'
   | 'inventoryScreen'
@@ -65,13 +66,13 @@ function screenSource(source: HudSource, screen: InventoryScreenView): Inventory
 /**
  * 把 HUD 挂到页面上。返回的句柄要每帧 `update()`。
  *
- * `afterRespawn` 在死亡画面的重生按钮按下、核心重生之后同步调，接线层在这里抓回指针锁定
+ * `deathScreenActions` 是死亡画面那颗按钮按下之后交给接线层的事：重生之后抓回指针锁定，极限难度下删除世界
  * （见 `installDeathScreen`）。`pointerLocked` 报此刻鼠标是否锁定在画布上，进入提示按它显示与隐藏。
  */
 export function installHud(
   parent: HTMLElement,
   source: HudSource,
-  afterRespawn: () => void,
+  deathScreenActions: DeathScreenActions,
   pointerLocked: () => boolean,
 ): Hud {
   // 红闪挂在最前面：后挂的元素画在它上面，心、快捷栏、准星与三层界面因此都不被染红，
@@ -111,7 +112,7 @@ export function installHud(
   );
   // 死亡画面挂在最后，压在其余一切之上。死亡时核心已经关掉了三层界面，准星与底部那一栏
   // 也因为界面模式收起了，这里只是保证叠放的先后。
-  const deathScreen = installDeathScreen(parent, source, afterRespawn);
+  const deathScreen = installDeathScreen(parent, source, deathScreenActions);
 
   /** 上一次画的是收起还是展开。与当前相同就不碰 DOM。 */
   let shownOpen: boolean | undefined;

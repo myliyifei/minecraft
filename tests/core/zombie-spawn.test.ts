@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType, isSolid } from '../../src/core/block';
+import { Difficulty } from '../../src/core/difficulty';
 import { GameCore } from '../../src/core/game';
 import { ItemType } from '../../src/core/item';
 import { IDLE_INTENT } from '../../src/core/player';
@@ -311,7 +312,7 @@ describe('候选列（Zombies.spawnNaturally）', () => {
   const sinks = [{ spawnInBlock: () => {} }, { spawnInBlock: () => {} }] as const;
 
   function attempt(tick: number, darkening = NIGHT_SKY_DARKENING, blocks = world): ZombieView | undefined {
-    const zombies = new Zombies(blocks, SEED, ...sinks);
+    const zombies = new Zombies(blocks, SEED, ...sinks, Difficulty.Normal);
     zombies.spawnNaturally(tick, player, darkening);
     return zombies.all()[0];
   }

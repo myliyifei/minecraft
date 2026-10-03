@@ -4,7 +4,7 @@ import type { BlockState, BlockStateEntry, BlockStateView } from './block-state'
 import type { ChunkView } from './chunk';
 import { DEFAULT_SEED, DEFAULT_VIEW_RADIUS, UNLOAD_MARGIN, WORLD_MIN_Y } from './constants';
 import { CRAFTING_TABLE_GRID, CraftingGrid, INVENTORY_CRAFTING_GRID } from './crafting-grid';
-import { DEFAULT_DIFFICULTY, type Difficulty } from './difficulty';
+import { DEFAULT_DIFFICULTY, deletesWorldOnDeath, type Difficulty } from './difficulty';
 import { Drops, type DropsView } from './drop';
 import { Experience, type ExperienceView } from './experience';
 import { stepFurnaces } from './furnace';
@@ -79,8 +79,8 @@ export class GameCore implements BlockEdit, BlockStateView {
   private readonly world: World;
   private readonly worldSeed: number;
   private readonly worldDifficulty: Difficulty;
-  /** 极限难度下玩家死过没有。进快照，读档时放回；什么时候置真是难度规则的事。 */
-  private hardcoreDead: boolean;
+  /** 极限难度下玩家死过没有。进快照，读档时放回；死亡那一 tick 置真（`die`）。 */
+  private worldHardcoreDead: boolean;
   private radius: number;
   private readonly playerState: Player;
   private readonly dropsState: Drops;
@@ -148,7 +148,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     const restore = options.restore;
     this.worldSeed = restore?.seed ?? options.seed ?? DEFAULT_SEED;
     this.worldDifficulty = restore?.difficulty ?? options.difficulty ?? DEFAULT_DIFFICULTY;
-    this.hardcoreDead = restore?.hardcoreDead ?? false;
+    this.worldHardcoreDead = restore?.hardcoreDead ?? false;
     this.radius = options.viewRadius ?? DEFAULT_VIEW_RADIUS;
     // 支撑没了的火把交给掉落物（`World.dropDetachedTorches`）。掉落物要拿世界算碰撞，比世界晚建，
     // 所以这里传一个转发给掉落物的函数。世界在这个构造函数里只加载区块、不写方块，调用到它时掉落物已经建好。
@@ -173,8 +173,15 @@ export class GameCore implements BlockEdit, BlockStateView {
     }
     this.dropsState = new Drops(this.world, this.worldSeed);
     this.xpOrbsState = new XpOrbs();
-    // 僵尸死了在原地掉腐肉、被玩家打死的还掉经验球：与挖掘同一条路交给掉落物与经验球。
-    this.zombiesState = new Zombies(this.world, this.worldSeed, this.dropsState, this.xpOrbsState);
+    // 僵尸死了在原地掉腐肉、被玩家打死的还掉经验球：与挖掘同一条路交给掉落物与经验球。生不生成、
+    // 打一下扣几点按难度。
+    this.zombiesState = new Zombies(
+      this.world,
+      this.worldSeed,
+      this.dropsState,
+      this.xpOrbsState,
+      this.worldDifficulty,
+    );
     this.experienceState = new Experience();
     this.healthState = new Health();
     this.inventoryState = new Inventory();
@@ -234,7 +241,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     return {
       seed: this.worldSeed,
       difficulty: this.worldDifficulty,
-      hardcoreDead: this.hardcoreDead,
+      hardcoreDead: this.worldHardcoreDead,
       firstSpawn: { ...this.firstSpawn },
       ticks: this.ticks,
       timeOffset: this.timeOffset,
@@ -264,9 +271,18 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.world.returnUnsavedChunks(coords);
   }
 
-  /** 本世界的难度。新建时定，之后不变。 */
+  /** 本世界的难度。新建时定，之后不变。死亡画面按它决定给重生还是删除世界。 */
   get difficulty(): Difficulty {
     return this.worldDifficulty;
+  }
+
+  /**
+   * 极限难度下玩家死过没有（见 CONTEXT.md「死亡画面」）。死亡那一 tick 由假变真，之后不再变回去，快照的
+   * `hardcoreDead` 就是它。核心只给出标记：外层在每个 tick 之后读它，由假变真时写一次盘，世界列表据此
+   * 只给这个世界留删除。非极限的世界一直是假。
+   */
+  get hardcoreDead(): boolean {
+    return this.worldHardcoreDead;
   }
 
   /** 玩家状态的只读视图。渲染层读它摆相机，改状态只能通过下面几个指令。 */
@@ -491,7 +507,8 @@ export class GameCore implements BlockEdit, BlockStateView {
   /**
    * 重生：回到出生点，血回满，退出死亡画面。立即生效。没死时什么都不做。
    *
-   * 由界面层的重生按钮调。
+   * 由界面层的重生按钮调。极限难度下死了不能重生（死亡画面上没有这颗按钮），这里也什么都不做。看的是
+   * 难度而不是已死亡标记：标记只在死亡那一 tick 置真，这条规则之前存下的极限死亡快照里它是假。
    *
    * 死亡期间积累的输入一并作废：按着的移动键、挖掘键、连锁键、切过的选中格，以及还没到 tick
    * 边界的使用键、背包键与界面点击。死亡画面上这些输入都不生效，重生之后也不该接着生效。
@@ -502,7 +519,7 @@ export class GameCore implements BlockEdit, BlockStateView {
    * 锁定就被放掉了。
    */
   respawn(): void {
-    if (!this.healthState.dead) return;
+    if (!this.healthState.dead || deletesWorldOnDeath(this.worldDifficulty)) return;
     // 原点区块改过又卸载了，要先放回世界：出生点按改过之后的方块算。没改过又还没送到的，
     // 出生点就是进入世界时那一个（`spawnPoint`），玩家在那里等区块送到（ADR-0013）。
     this.world.loadChunk(ORIGIN_CHUNK.cx, ORIGIN_CHUNK.cz);
@@ -811,9 +828,11 @@ export class GameCore implements BlockEdit, BlockStateView {
    * 光标上的东西回到熔炉，不随身掉落。然后背包每一堆各生成一个掉落物（耐久随堆，ADR-0010），落在同一格，
    * 由各自的编号哈希出不同的初速度散开；累计经验全部装进一个经验球，没有经验就不生成。
    *
-   * 进入死亡画面不需要另记一个状态：生命值归零就是（`uiMode`）。
+   * 进入死亡画面不需要另记一个状态：生命值归零就是（`uiMode`）。极限难度下同时把已死亡标记置真
+   * （`hardcoreDead`），写盘由外层做。
    */
   private die(): void {
+    if (deletesWorldOnDeath(this.worldDifficulty)) this.worldHardcoreDead = true;
     const at = this.playerState.position;
     for (const stack of this.activeScreen?.toggle() ?? []) this.dropsState.spawnAt(stack, at);
     for (const stack of this.inventoryState.takeAll()) this.dropsState.spawnAt(stack, at);

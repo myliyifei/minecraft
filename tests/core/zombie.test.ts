@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
+import { Difficulty } from '../../src/core/difficulty';
 import { GameCore } from '../../src/core/game';
 import { ItemType, type ItemStack } from '../../src/core/item';
 import { hitboxAt, KNOCKBACK_DECAY, KNOCKBACK_LIFT, KNOCKBACK_SPEED } from '../../src/core/physics';
@@ -50,6 +51,7 @@ function zombiesOnFlatGround(radius = 1, seed = SEED) {
     seed,
     { spawnInBlock: (stack, x, y, z) => dropped.push({ stack, at: [x, y, z] }) },
     { spawnInBlock: (amount, x, y, z) => orbs.push({ amount, at: [x, y, z] }) },
+    Difficulty.Normal,
   );
   let tick = 0;
   // 默认是夜晚：露天的平地上白天会燃烧，走、跳、消失这些测试不该掉血。

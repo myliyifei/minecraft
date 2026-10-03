@@ -1,5 +1,6 @@
 import { isSolid, type BlockView } from './block';
 import { MAX_LIGHT_LEVEL, TAU, TICK_RATE, WORLD_MAX_Y } from './constants';
+import { spawnsHostiles, zombieAttackDamage, type Difficulty } from './difficulty';
 import type { DropSink } from './drop';
 import { isBoxInLoadedChunks, isInLoadedChunk, stepEntities, type LoadedChunks } from './entity';
 import { fallDamage, Health } from './health';
@@ -45,9 +46,6 @@ export const ZOMBIE_SPEED = 1;
 
 /** 一 tick 的移动距离（方块）。 */
 export const ZOMBIE_STEP = ZOMBIE_SPEED / TICK_RATE;
-
-/** 打玩家一下扣几点。 */
-export const ZOMBIE_ATTACK_DAMAGE = 3;
 
 /** 距上次出手满这么多 tick 才再出手。 */
 export const ZOMBIE_ATTACK_INTERVAL = 20;
@@ -168,7 +166,8 @@ export interface LightLevels {
  * 僵尸之间、僵尸与玩家之间不做碰撞，可以重叠。
  *
  * 打玩家时只管够不够得着、隔没隔够 20 tick，打出去的那一下交给玩家（`ZombieTarget.hitByZombie`）：
- * 生命值、无敌时间与击退都是玩家那边的事。
+ * 生命值、无敌时间与击退都是玩家那边的事。一下扣几点按难度（`zombieAttackDamage`）；和平下不生成，
+ * 已有的下一次推进时全部消失。
  *
  * 生成的候选列、游走的方向、腐肉的件数都由种子、tick 与编号哈希出来（ADR-0014），核心不持随机状态，
  * 同一种子、同一串指令每次得到同样的僵尸。
@@ -185,6 +184,10 @@ export class Zombies implements ZombiesView, EntityRaycast {
   private readonly seed: number;
   private readonly drops: DropSink;
   private readonly experience: XpOrbSink;
+  /** 这一档有没有僵尸：和平下没有（`spawnsHostiles`）。 */
+  private readonly hostile: boolean;
+  /** 打玩家一下扣几点，按难度。 */
+  private readonly attackDamage: number;
   private readonly list: Zombie[] = [];
   /** 下一只僵尸的编号。同时是游走哈希的一个输入，同一 tick 里的几只因此各走各的。 */
   private nextId = 1;
@@ -194,11 +197,14 @@ export class Zombies implements ZombiesView, EntityRaycast {
     seed: number,
     drops: DropSink,
     experience: XpOrbSink,
+    difficulty: Difficulty,
   ) {
     this.blocks = blocks;
     this.seed = seed;
     this.drops = drops;
     this.experience = experience;
+    this.hostile = spawnsHostiles(difficulty);
+    this.attackDamage = zombieAttackDamage(difficulty);
   }
 
   get count(): number {
@@ -222,7 +228,10 @@ export class Zombies implements ZombiesView, EntityRaycast {
     this.nextId = nextId;
   }
 
-  /** 在 position（碰撞箱底面中心）无条件生成一只。不看那里是不是实心，也不看光照。 */
+  /**
+   * 在 position（碰撞箱底面中心）无条件生成一只。不看那里是不是实心，也不看光照，和平下也生成：
+   * 下一次推进时它就消失。
+   */
   spawnAt(position: Vec3): void {
     this.list.push(new Zombie(this.nextId++, position));
   }
@@ -237,13 +246,14 @@ export class Zombies implements ZombiesView, EntityRaycast {
    * `ZOMBIE_SPAWN_MAX_SKY_LIGHT`），就在那一格、列的中心生成一只；列顶之上本来就是空气，身位
    * 两格因此都空着。列的中心离玩家的水平距离也要在 24 到 48 格之间：取整到列上会偏出去不到一格。
    * 列顶在世界最高一层时不生成：上面那一格在光照数组之外，方块光读作 0，炉顶照不亮。
-   * 哪一条不满足，这一次就放弃，不另选一列重试。
+   * 哪一条不满足，这一次就放弃，不另选一列重试。和平下一次都不试。
    *
    * 不看是不是夜晚：白天露天折算天光 15，不生成；黄昏减量取整到 8 时露天折算天光降到 7，从这时起
    * 生成。看的是候选列，不是玩家脚下那一列：玩家头顶盖着东西不影响生成。候选列也只看列顶：白天屋顶
    * 底下折算天光是 0，但列顶是屋顶，屋顶上面那格折算天光 15，不生成。
    */
   spawnNaturally(tick: number, player: Vec3, skyDarkening: number): void {
+    if (!this.hostile) return;
     if (this.list.length >= ZOMBIE_MAX_COUNT || tick % ZOMBIE_SPAWN_INTERVAL !== 0) return;
     const angle = this.roll(SPAWN_SALT, tick, 0) * TAU;
     const reach =
@@ -307,10 +317,13 @@ export class Zombies implements ZombiesView, EntityRaycast {
    * 之后的位置算，与渲染层画出来的位置一致。摔落（走的那一步里）与燃烧扣完血再判一次死亡，死了当场
    * 结算，不等下一 tick：掉落落在它挨最后一下的那一格，腐肉件数的哈希用的也是这一 tick。出手排在最后，
    * 死了的不出手，原地等着的照样出手：出手不读方块。
+   *
+   * 和平下全部按消失移除，排在一切之前：不掉腐肉、不给经验，也不再出手。
    */
   step(tick: number, player: ZombieTarget, night: boolean): void {
     const at = player.position;
     stepEntities(this.list, (zombie) => {
+      if (!this.hostile) return false;
       if (zombie.dead) return this.die(zombie, tick);
       if (!isInLoadedChunk(this.blocks, zombie.position)) return false;
       if (distance(zombie.position, at) > ZOMBIE_DESPAWN_RANGE) return false;
@@ -322,7 +335,7 @@ export class Zombies implements ZombiesView, EntityRaycast {
       }
       zombie.burn(!night && this.isOpenSky(zombie.position), tick);
       if (zombie.dead) return this.die(zombie, tick);
-      zombie.attack(player, tick);
+      zombie.attack(player, tick, this.attackDamage);
       return true;
     });
   }
@@ -457,15 +470,15 @@ class Zombie implements ZombieView {
 
   /**
    * 第 now 个 tick 距上次出手满 `ZOMBIE_ATTACK_INTERVAL` tick、又够得着 target（`reaches`），就出手打它
-   * 一下。
+   * 一下，扣 damage 点。
    *
    * 玩家在无敌时间里或死了，这一下不生效，但照样算出过手，重新等 20 tick，与原版一致：几只同时围上来
    * 打时，掉血的节奏与只有一只时相同，还是每 20 tick 一下。
    */
-  attack(target: ZombieTarget, now: number): void {
+  attack(target: ZombieTarget, now: number, damage: number): void {
     if (now - this.lastAttack < ZOMBIE_ATTACK_INTERVAL) return;
     if (!this.reaches(target)) return;
-    target.hitByZombie(ZOMBIE_ATTACK_DAMAGE, this.position, now);
+    target.hitByZombie(damage, this.position, now);
     this.lastAttack = now;
   }
 

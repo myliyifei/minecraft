@@ -726,7 +726,7 @@ body {
 }
 
 /*
- * 死亡画面：铺满视口的一层红，正中是「你死了」与重生按钮（death-screen.ts）。
+ * 死亡画面：铺满视口的一层红，正中是「你死了」与一颗按钮，极限难度下是删除世界、其余是重生（death-screen.ts）。
  *
  * 比受伤红闪浓：红闪是一下提醒，这一层是一整段不能操作的时间，底下的世界仍看得见但压暗了。
  * 它挂在所有界面之后，叠在最上面。显式给了 display，所以上面 [hidden] 那一处要把它写回去。
@@ -752,8 +752,8 @@ body {
   text-shadow: calc(var(--tile) / 6) calc(var(--tile) / 6) 0 var(--ink);
 }
 
-/* 重生按钮：与配方书那一条同一种半透明底色与内描边，浏览器给按钮的默认样式全部去掉。 */
-.death-screen__respawn {
+/* 重生或删除世界那颗按钮：与配方书那一条同一种半透明底色与内描边，浏览器给按钮的默认样式全部去掉。 */
+.death-screen__button {
   min-width: calc(var(--tile) * 12);
   padding: calc(var(--tile) / 2) var(--tile);
   border: 0;
@@ -766,8 +766,8 @@ body {
   cursor: pointer;
 }
 
-.death-screen__respawn:hover,
-.death-screen__respawn:focus-visible {
+.death-screen__button:hover,
+.death-screen__button:focus-visible {
   background: rgb(0 0 0 / 60%);
   box-shadow: inset 0 0 0 2px #fff;
   outline: none;

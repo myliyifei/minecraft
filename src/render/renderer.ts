@@ -755,7 +755,8 @@ export class WorldRenderer {
    * 写进场景对象。太阳月亮那一层的位置取相机的位置，所以排在 `updateCamera` 之后。
    *
    * 眼睛在水下时（#77）背景色换成雾色、太阳与月亮不画：它们远在雾的 `far` 之外，不藏起来就会透过雾露出来。
-   * 经验球、选框与裂纹不走光照材质，改由场景上的雾（`sceneFog`）蒙住。眼睛在不在水下读核心按 tick 算的值，不按插值后的相机位置另算，出入水面时最多差一个 tick。
+   * 经验球、选框与裂纹不走光照材质，改由场景上的雾（`sceneFog`）混入雾色。眼睛在不在水下读核心按 tick 算的值，
+   * 不按插值后的相机位置另算，出入水面时最多差一个 tick。
    */
   private updateSky(alpha: number): void {
     const time = frameTimeOfDay(this.core.timeOfDay, alpha);

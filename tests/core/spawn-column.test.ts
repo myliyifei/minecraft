@@ -91,6 +91,14 @@ describe('出生列首选平原的草方块', () => {
     expect(findSpawnColumn(queries)).toEqual({ x: 160, z: -160 });
   });
 
+  it('1024 格那一圈也查：平原的草方块正好在 1024 格上时选它', () => {
+    const queries = queriesFrom([
+      [1024, -512, PLAINS_GRASS],
+      [1040, 0, PLAINS_GRASS],
+    ]);
+    expect(findSpawnColumn(queries)).toEqual({ x: 1024, z: -512 });
+  });
+
   it('原点是大海的假地形：出生列不在原点，落在大海外第一圈上，群系是平原、列顶是草方块', () => {
     const column = findSpawnColumn(oceanOriginQueries);
     expect(column).not.toEqual({ x: 0, z: 0 });
@@ -112,6 +120,14 @@ describe('1024 格以内没有平原的草方块时取陆地', () => {
       [80, -16, PLAINS_STONE],
     ]);
     expect(findSpawnColumn(queries)).toEqual({ x: 80, z: -16 });
+  });
+
+  it('取的是离原点最近的那一圈上的陆地，不是最后查到的那列：第 2 圈与第 5 圈各有一列平原的石头坡，取第 2 圈那列', () => {
+    const queries = queriesFrom([
+      [80, 48, PLAINS_STONE],
+      [-32, -16, PLAINS_STONE],
+    ]);
+    expect(findSpawnColumn(queries)).toEqual({ x: -32, z: -16 });
   });
 
   it('陆地要求列顶不是水、地表高于海平面：水塘与齐海平面的列都跳过', () => {

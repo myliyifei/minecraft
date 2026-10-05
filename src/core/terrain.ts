@@ -51,9 +51,6 @@ export interface Terrain {
   readonly spawnColumn: ColumnCoord;
 }
 
-/** 世界原点那一列。出生列搜索什么都找不到时就是它。 */
-const ORIGIN_COLUMN: ColumnCoord = Object.freeze({ x: 0, z: 0 });
-
 /** 出生列搜索的步长（方块）：只查 x、z 都是它的倍数的列。 */
 const SPAWN_SEARCH_STEP = 16;
 
@@ -69,6 +66,7 @@ export type SpawnColumnQueries = Pick<Terrain, 'biomeAt' | 'surfaceHeightAt' | '
  *
  * 只调三个查询，不生成区块：生成器放树要避开出生列，得先有出生列才造得出生成器。陆地顺带在同一遍里记下第一列，
  * 与「先查完平原、再从头查陆地」结果相同。群系最便宜，先问；地表高度最贵，只在还没找到陆地时才问。
+ * 每次搜索都返回新对象，原点也不例外：从引用是否相同就看得出出生列是不是只搜了一次。
  */
 export function findSpawnColumn(queries: SpawnColumnQueries): ColumnCoord {
   let firstLand: ColumnCoord | undefined;
@@ -80,7 +78,7 @@ export function findSpawnColumn(queries: SpawnColumnQueries): ColumnCoord {
     if (plains && block === BlockType.Grass) return column;
     if (!firstLand && block !== BlockType.Water && queries.surfaceHeightAt(x, z) > SEA_LEVEL) firstLand = column;
   }
-  return firstLand ?? ORIGIN_COLUMN;
+  return firstLand ?? searchColumn(0, 0);
 }
 
 /**
@@ -88,7 +86,7 @@ export function findSpawnColumn(queries: SpawnColumnQueries): ColumnCoord {
  * 每一圈从上一圈终点 (16(k−1), −16(k−1)) 往 +X 迈一步起，沿 +Z、−X、−Z、+X 四条边走一周，终点 (16k, −16k)。
  */
 function* spawnSearchOrder(): Generator<ColumnCoord> {
-  yield ORIGIN_COLUMN;
+  yield searchColumn(0, 0);
   const rings = SPAWN_SEARCH_RADIUS / SPAWN_SEARCH_STEP;
   for (let k = 1; k <= rings; k++) {
     for (let j = -k + 1; j <= k; j++) yield searchColumn(k, j);

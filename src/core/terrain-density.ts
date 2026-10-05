@@ -105,15 +105,24 @@ const MOUNTAIN_LEAD = 0.06;
 /** 起伏从「山开始长」再高这么多，山长到最高。 */
 const MOUNTAIN_RISE = 0.36;
 
-/** 高山最高处的基准高度比平原高几格。68 + 112 = y 180，叠上起伏幅度山顶约 y 200。 */
-const MOUNTAIN_HEIGHT = 112;
+/**
+ * 高山最高处的基准高度比平原高几格：68 + 100 = y 168。三维噪声很少同时取到 +1，大范围采样里最高的地表
+ * 约 y 185 到 190（CONTEXT.md「群系」：高山最高约到 y 200）。
+ */
+const MOUNTAIN_HEIGHT = 100;
 
-/** 三维噪声的起伏幅度（格）：大海、平原、高山最高处。高山的幅度大，悬崖与悬垂才出得来。 */
+/**
+ * 三维噪声的起伏幅度（格）：大海、平原、高山最高处。高山的幅度要比竖直跨度大好几倍，密度沿 y 才会多次变号，
+ * 悬崖与悬垂才出得来：取 48 时高山里约 4% 到 6% 的列有悬垂；取 30 时不到 1%。
+ */
 const OCEAN_AMPLITUDE = 3;
 const PLAINS_AMPLITUDE = 5;
-const MOUNTAIN_AMPLITUDE = 30;
+const MOUNTAIN_AMPLITUDE = 48;
 
-/** 地形方块的最高高度：再往上一律是空气。基准高度加幅度最高约 y 210，这条只截掉极少的山尖。 */
+/**
+ * 地形方块的最高高度：再往上一律是空气。基准高度加幅度的理论上界是 y 216，实际几乎取不到，
+ * 这条只截掉极少的山尖，保证地表不超过 y 210。
+ */
 export const MAX_TERRAIN_Y = 208;
 
 /** Hermite 缓和曲线，t 先夹到 [0, 1]。基准高度在群系参数上逐段过渡，各段之间一阶导数连续。 */
@@ -158,7 +167,7 @@ const CHUNK_GRID = CHUNK_SIZE / GRID_XZ + 1;
  * 出现悬垂。都取不是格点间距整数倍的数，噪声的整数格点（那里恒为 0）才不会与密度格点对齐。
  */
 const NOISE_SCALE_XZ = 37;
-const NOISE_SCALE_Y = 23;
+const NOISE_SCALE_Y = 17;
 
 /** 三维噪声的层数。 */
 const NOISE_OCTAVES = 2;

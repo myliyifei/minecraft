@@ -75,11 +75,11 @@ describe('方块到贴图格号的映射表', () => {
     expect(new Set([off.top, off.side, off.front, lit.front]).size).toBe(4);
   });
 
-  it('图集是 8x16，128 格里现在用了 46 格（#73 从 8 行扩到 16 行）', () => {
+  it('图集是 8x16，128 格里现在用了 54 格（#73 从 8 行扩到 16 行，#85 加白桦与云杉 8 格）', () => {
     expect(ATLAS_COLS).toBe(8);
     expect(ATLAS_ROWS).toBe(16);
-    expect(Object.keys(TILE)).toHaveLength(46);
-    expect(new Set(Object.values(TILE)).size).toBe(46);
+    expect(Object.keys(TILE)).toHaveLength(54);
+    expect(new Set(Object.values(TILE)).size).toBe(54);
   });
 
   it('粒子的烟与火焰两格接在火把之后（#59），不是任何方块或物品的贴图', () => {

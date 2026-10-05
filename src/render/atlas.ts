@@ -3,7 +3,7 @@ import { isTorch } from '../core/torch';
 import { ItemType } from '../core/item';
 
 /**
- * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 16 行，目前用了前 47 格里的 46 格（第 43 格不用）。
+ * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 16 行，目前用了 54 格：第 0 到 46 格（第 43 格不用）与第 49 到 56 格。
  *
  * 行列数都取 2 的幂：uv 是格号除以行列数，除以 8 在 float32 里是精确的，除以 5 就不是
  * ——顶点属性存的是 Float32Array，1/5 一进去就带上舍入误差，一个面的边缘会取到相邻那一格的像素。
@@ -73,6 +73,15 @@ export const TILE = {
   // 粒子（#59）：一缕烟与一个火焰光点，都是格中间一小团、四周透明。不属于任何方块或物品。
   smoke: 45,
   flame: 46,
+  // 白桦与云杉（#85）：每种树四格，原木顶面是年轮、侧面是树皮，树叶带镂空，木板四条横板。
+  birchLogTop: 49,
+  birchLogSide: 50,
+  birchLeaves: 51,
+  birchPlanks: 52,
+  spruceLogTop: 53,
+  spruceLogSide: 54,
+  spruceLeaves: 55,
+  sprucePlanks: 56,
 } as const;
 
 /**
@@ -131,6 +140,15 @@ function flat(tile: number): FaceTiles {
   return { top: tile, bottom: tile, side: tile };
 }
 
+/** 原木：顶面与底面是年轮，四个侧面是树皮。三种树的原木方块与原木物品都按它取。 */
+function logTiles(top: number, side: number): FaceTiles {
+  return { top, bottom: top, side };
+}
+
+const OAK_LOG_TILES = logTiles(TILE.oakLogTop, TILE.oakLogSide);
+const BIRCH_LOG_TILES = logTiles(TILE.birchLogTop, TILE.birchLogSide);
+const SPRUCE_LOG_TILES = logTiles(TILE.spruceLogTop, TILE.spruceLogSide);
+
 /**
  * 方块到贴图格号的映射——纯数据。后续切片加方块只往这张表加行。
  * 空气没有贴图。
@@ -141,17 +159,9 @@ export const BLOCK_TILES: Readonly<Record<BlockType, FaceTiles | null>> = {
   [BlockType.Dirt]: { top: TILE.dirt, bottom: TILE.dirt, side: TILE.dirt },
   [BlockType.Stone]: { top: TILE.stone, bottom: TILE.stone, side: TILE.stone },
   [BlockType.Bedrock]: { top: TILE.bedrock, bottom: TILE.bedrock, side: TILE.bedrock },
-  [BlockType.OakLog]: {
-    top: TILE.oakLogTop,
-    bottom: TILE.oakLogTop,
-    side: TILE.oakLogSide,
-  },
-  [BlockType.OakLeaves]: {
-    top: TILE.oakLeaves,
-    bottom: TILE.oakLeaves,
-    side: TILE.oakLeaves,
-  },
-  [BlockType.OakPlanks]: { top: TILE.oakPlanks, bottom: TILE.oakPlanks, side: TILE.oakPlanks },
+  [BlockType.OakLog]: OAK_LOG_TILES,
+  [BlockType.OakLeaves]: flat(TILE.oakLeaves),
+  [BlockType.OakPlanks]: flat(TILE.oakPlanks),
   [BlockType.CraftingTable]: CRAFTING_TABLE_TILES,
   [BlockType.Cobblestone]: COBBLESTONE_TILES,
   [BlockType.Furnace]: FURNACE_TILES,
@@ -165,6 +175,12 @@ export const BLOCK_TILES: Readonly<Record<BlockType, FaceTiles | null>> = {
   [BlockType.WallTorchPosX]: flat(TILE.torch),
   [BlockType.WallTorchNegZ]: flat(TILE.torch),
   [BlockType.WallTorchPosZ]: flat(TILE.torch),
+  [BlockType.BirchLog]: BIRCH_LOG_TILES,
+  [BlockType.BirchLeaves]: flat(TILE.birchLeaves),
+  [BlockType.BirchPlanks]: flat(TILE.birchPlanks),
+  [BlockType.SpruceLog]: SPRUCE_LOG_TILES,
+  [BlockType.SpruceLeaves]: flat(TILE.spruceLeaves),
+  [BlockType.SprucePlanks]: flat(TILE.sprucePlanks),
 };
 
 /**
@@ -176,12 +192,8 @@ export const BLOCK_TILES: Readonly<Record<BlockType, FaceTiles | null>> = {
  */
 export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
   [ItemType.Dirt]: { top: TILE.dirt, bottom: TILE.dirt, side: TILE.dirt },
-  [ItemType.OakLog]: {
-    top: TILE.oakLogTop,
-    bottom: TILE.oakLogTop,
-    side: TILE.oakLogSide,
-  },
-  [ItemType.OakPlanks]: { top: TILE.oakPlanks, bottom: TILE.oakPlanks, side: TILE.oakPlanks },
+  [ItemType.OakLog]: OAK_LOG_TILES,
+  [ItemType.OakPlanks]: flat(TILE.oakPlanks),
   // 木棍与工具没有对应的方块：掉落物的小方块六面都贴同一张图标，手持画的是平面图标
   // （`heldItemShape`）。
   [ItemType.Stick]: flat(TILE.stick),
@@ -211,6 +223,11 @@ export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
   [ItemType.StoneSword]: flat(TILE.stoneSword),
   [ItemType.IronSword]: flat(TILE.ironSword),
   [ItemType.Torch]: flat(TILE.torch),
+  // 白桦与云杉的原木与木板（#85）：小方块与方块本身六面相同。
+  [ItemType.BirchLog]: BIRCH_LOG_TILES,
+  [ItemType.BirchPlanks]: flat(TILE.birchPlanks),
+  [ItemType.SpruceLog]: SPRUCE_LOG_TILES,
+  [ItemType.SprucePlanks]: flat(TILE.sprucePlanks),
 };
 
 /**

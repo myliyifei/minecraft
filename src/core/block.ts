@@ -42,6 +42,16 @@ export const BlockType = {
   WallTorchPosX: 16,
   WallTorchNegZ: 17,
   WallTorchPosZ: 18,
+  /**
+   * 白桦与云杉（#85）：各有原木、树叶、木板三种方块，数值与橡树那三种相同（`log`、`leaves`、`planks`）。
+   * 三种树的同一种方块是不同的方块，不是外观变体：连锁挖掘里互不算同一类型（`baseBlock` 归到自己）。
+   */
+  BirchLog: 19,
+  BirchLeaves: 20,
+  BirchPlanks: 21,
+  SpruceLog: 22,
+  SpruceLeaves: 23,
+  SprucePlanks: 24,
 } as const;
 
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
@@ -240,6 +250,70 @@ const TORCH: BlockDef = {
   lightPassage: LightPassage.Clear,
 };
 
+/**
+ * 一种树的原木（橡木、白桦、云杉三种共用这一份，#85）：硬度 2、合格工具是斧、不需要工具，掉自己那种原木。
+ */
+function log(item: ItemType): BlockDef {
+  return {
+    opaque: true,
+    solid: true,
+    hardness: 2,
+    qualifiedToolClass: ToolClass.Axe,
+    minimumMaterial: ToolMaterial.Wood,
+    requiresTool: false,
+    drop: one(item),
+    // 原木自成一档，比普通方块高一倍。
+    experience: 60,
+    use: BlockUse.None,
+    state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Opaque,
+  };
+}
+
+/**
+ * 一种树的树叶（三种共用这一份，#85）：什么都不掉，树苗与苹果要等树叶凋落（后续切片）。实心但不遮挡视线，
+ * 树叶式透光（天光每格减 1）。三种树叶没有物品。
+ */
+const LEAVES: BlockDef = {
+  opaque: false,
+  solid: true,
+  hardness: 0.2,
+  // 原版用剪刀与剑。剪刀还没有，剑（#45）在本项目不是挖掘工具，所以树叶没有合格工具：拿什么挖都一样快。
+  qualifiedToolClass: ToolClass.None,
+  minimumMaterial: ToolMaterial.Wood,
+  requiresTool: false,
+  drop: null,
+  // 树叶什么都不掉，但「任何方块都给经验」（见 CONTEXT.md 的「经验球」），
+  // 所以它照普通方块给 30 点。原版的树叶不给经验，这一条是本项目自己定的。
+  experience: COMMON_EXPERIENCE,
+  use: BlockUse.None,
+  state: BlockStateKind.None,
+  lightEmission: 0,
+  lightPassage: LightPassage.Leaves,
+};
+
+/**
+ * 一种树的木板（三种共用这一份，#85）：挖掉掉回木板本身，放下去再挖起来材料不损失，木板因此是可以反复用的建材。
+ */
+function planks(item: ItemType): BlockDef {
+  return {
+    opaque: true,
+    solid: true,
+    hardness: 2,
+    qualifiedToolClass: ToolClass.Axe,
+    minimumMaterial: ToolMaterial.Wood,
+    requiresTool: false,
+    drop: one(item),
+    // 木板是加工过的建材，不像原木那样自成一档，按普通方块给。
+    experience: COMMON_EXPERIENCE,
+    use: BlockUse.None,
+    state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Opaque,
+  };
+}
+
 /** 方块属性表——纯数据。加方块只加一行。 */
 export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
   // 空气不是挖掘目标，硬度、合格工具的类别与最低材质档只是占位。
@@ -317,55 +391,9 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     lightEmission: 0,
     lightPassage: LightPassage.Opaque,
   },
-  [BlockType.OakLog]: {
-    opaque: true,
-    solid: true,
-    hardness: 2,
-    qualifiedToolClass: ToolClass.Axe,
-    minimumMaterial: ToolMaterial.Wood,
-    requiresTool: false,
-    drop: one(ItemType.OakLog),
-    // 原木自成一档，比普通方块高一倍。
-    experience: 60,
-    use: BlockUse.None,
-    state: BlockStateKind.None,
-    lightEmission: 0,
-    lightPassage: LightPassage.Opaque,
-  },
-  // 树叶什么都不掉。树苗与苹果要等树叶凋落（后续切片）。
-  [BlockType.OakLeaves]: {
-    opaque: false,
-    solid: true,
-    hardness: 0.2,
-    // 原版用剪刀与剑。剪刀还没有，剑（#45）在本项目不是挖掘工具，所以树叶没有合格工具：拿什么挖都一样快。
-    qualifiedToolClass: ToolClass.None,
-    minimumMaterial: ToolMaterial.Wood,
-    requiresTool: false,
-    drop: null,
-    // 树叶什么都不掉，但「任何方块都给经验」（见 CONTEXT.md 的「经验球」），
-    // 所以它照普通方块给 30 点。原版的树叶不给经验，这一条是本项目自己定的。
-    experience: COMMON_EXPERIENCE,
-    use: BlockUse.None,
-    state: BlockStateKind.None,
-    lightEmission: 0,
-    lightPassage: LightPassage.Leaves,
-  },
-  // 挖掉掉回木板本身：放下去再挖起来材料不损失，木板因此是可以反复用的建材。
-  [BlockType.OakPlanks]: {
-    opaque: true,
-    solid: true,
-    hardness: 2,
-    qualifiedToolClass: ToolClass.Axe,
-    minimumMaterial: ToolMaterial.Wood,
-    requiresTool: false,
-    drop: one(ItemType.OakPlanks),
-    // 木板是加工过的建材，不像原木那样自成一档，按普通方块给。
-    experience: COMMON_EXPERIENCE,
-    use: BlockUse.None,
-    state: BlockStateKind.None,
-    lightEmission: 0,
-    lightPassage: LightPassage.Opaque,
-  },
+  [BlockType.OakLog]: log(ItemType.OakLog),
+  [BlockType.OakLeaves]: LEAVES,
+  [BlockType.OakPlanks]: planks(ItemType.OakPlanks),
   // 工作台（见 CONTEXT.md）：木制，比木板硬半点；挖掉掉回工作台本身，搬得走。
   // 它是本切片唯一的可使用方块：使用键对着它打开工作台界面，而不是往它上面放方块。
   [BlockType.CraftingTable]: {
@@ -411,6 +439,12 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
   [BlockType.WallTorchPosX]: TORCH,
   [BlockType.WallTorchNegZ]: TORCH,
   [BlockType.WallTorchPosZ]: TORCH,
+  [BlockType.BirchLog]: log(ItemType.BirchLog),
+  [BlockType.BirchLeaves]: LEAVES,
+  [BlockType.BirchPlanks]: planks(ItemType.BirchPlanks),
+  [BlockType.SpruceLog]: log(ItemType.SpruceLog),
+  [BlockType.SpruceLeaves]: LEAVES,
+  [BlockType.SprucePlanks]: planks(ItemType.SprucePlanks),
 };
 
 export function isAir(block: BlockType): boolean {
@@ -609,6 +643,11 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   [ItemType.IronSword]: null,
   // 火把放下去先按地面火把查，放置再按命中面换成哪一个朝向（`torchOnFace`，#56）。
   [ItemType.Torch]: BlockType.Torch,
+  // 白桦与云杉的原木与木板（#85）放下去是对应的方块。三种树叶没有物品，这张表里没有哪一行放下去是树叶。
+  [ItemType.BirchLog]: BlockType.BirchLog,
+  [ItemType.BirchPlanks]: BlockType.BirchPlanks,
+  [ItemType.SpruceLog]: BlockType.SpruceLog,
+  [ItemType.SprucePlanks]: BlockType.SprucePlanks,
 };
 
 /**

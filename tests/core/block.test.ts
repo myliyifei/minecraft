@@ -483,6 +483,10 @@ describe('放置表', () => {
     ['腐肉放不下去', ItemType.RottenFlesh, null],
     // 火把放下去先按地面火把查，朝向由放置按命中面换（issue #56）
     ['火把放下去是地面火把', ItemType.Torch, BlockType.Torch],
+    ['白桦原木放下去是白桦原木方块（#85）', ItemType.BirchLog, BlockType.BirchLog],
+    ['白桦木板放下去是白桦木板方块', ItemType.BirchPlanks, BlockType.BirchPlanks],
+    ['云杉原木放下去是云杉原木方块', ItemType.SpruceLog, BlockType.SpruceLog],
+    ['云杉木板放下去是云杉木板方块', ItemType.SprucePlanks, BlockType.SprucePlanks],
   ];
 
   it('上面这张表覆盖了物品表的每一行：加一种物品就得在这里补一条', () => {
@@ -542,10 +546,13 @@ describe('方块表的发光等级与透光方式两列（issue #51）', () => {
     }
   });
 
-  it('树叶是树叶式，空气与火把不衰减，其余都是不透明', () => {
+  it('三种树叶是树叶式，空气与火把不衰减，其余都是不透明', () => {
     const passages: Partial<Record<BlockType, LightPassage>> = {
       [BlockType.Air]: LightPassage.Clear,
       [BlockType.OakLeaves]: LightPassage.Leaves,
+      // 白桦与云杉的树叶与橡树叶同一种透光方式（#85）
+      [BlockType.BirchLeaves]: LightPassage.Leaves,
+      [BlockType.SpruceLeaves]: LightPassage.Leaves,
     };
     for (const block of Object.values(BlockType)) {
       const torch = baseBlock(block) === BlockType.Torch;

@@ -33,7 +33,7 @@ export interface Snapshot {
   /** 极限难度下玩家死过：这个世界只剩删除。 */
   readonly hardcoreDead: boolean;
   /**
-   * 进入世界时的出生点（`GameCore.spawnPoint`）。读档时原点那一列可能还没加载，不能重算。
+   * 进入世界时的出生点（`GameCore.spawnPoint`）。读档时出生列可能还没加载，不能重算。
    */
   readonly firstSpawn: Vec3;
   /** tick 计数。运行时随机的哈希输入之一（ADR-0014）。 */

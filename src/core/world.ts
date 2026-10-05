@@ -451,7 +451,7 @@ export function localOf(worldCoord: number): number {
   return worldCoord & (CHUNK_SIZE - 1);
 }
 
-/** 世界原点所在的区块。出生点在这一列上。 */
+/** 世界原点所在的区块。 */
 export const ORIGIN_CHUNK: ChunkCoord = { cx: 0, cz: 0 };
 
 /**

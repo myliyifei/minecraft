@@ -4,7 +4,6 @@ import type { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, SEA_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { ORE_KINDS, oreVeinsTouching } from '../../src/core/ore';
 import { Biome, createTerrain, type ColumnCoord } from '../../src/core/terrain';
-import { OAK_CANOPY_RADIUS, oakTreesTouching, oakTrunkTopY, type OakTree } from '../../src/core/tree';
 import { chunkOf, chunksAround, localOf, type ChunkCoord } from '../../src/core/world';
 import {
   boundariesOn,
@@ -21,6 +20,7 @@ import {
   surveyLines,
   type BiomeBoundary,
 } from '../helpers/terrain-survey';
+import { chunksTouchedBy, crossesChunk, treeApi, treeKey, woodOf, worldCells, type Tree } from '../helpers/trees';
 
 /**
  * 三维密度地形生成出的区块（#75）：按群系各找几个区块，断言方块与三个查询一致。
@@ -494,69 +494,46 @@ describe('树', () => {
     expect(wrong).toEqual([]);
   });
 
-  it('平原里跨区块边界的橡树，几个区块里的部分合起来是完整的树', () => {
+  it('平原、冰雪与高山里跨区块边界的树（橡树、白桦、云杉），几个区块里的部分合起来是完整的树', () => {
+    // 期望值是 `footprint`：同一棵树种在一个全空气区块里的样子。真实地形有起伏，树叶只往空气里长，
+    // 所以 footprint 里的树叶格在世界里是这种树叶或被地形方块占着都算对；原木必须逐格相同。
+    const { TreeSpecies } = treeApi();
     /** 世界坐标的一格，从缓存的区块里读。 */
     const blockIn = (seed: number, x: number, y: number, z: number): BlockType =>
       chunkAt(seed, { cx: chunkOf(x), cz: chunkOf(z) }).get(localOf(x), y, localOf(z));
-    /** 树冠的一格：长出了树叶，或被地形方块占着（树叶只往空气里长）。 */
-    const canopyOk = (block: BlockType): boolean => block === BlockType.OakLeaves || isTerrainBlock(block);
 
     const wrong: string[] = [];
-    let crossing = 0;
+    const crossing = new Map<string, number>();
     for (const seed of SURVEY_SEEDS) {
-      const center = sitesOf(seed).plains;
-      expect(center, `种子 ${seed} 找不到平原内部的列`).toBeDefined();
+      expectAllBiomesFound(seed);
+      const s = sitesOf(seed);
       const terrain = createTerrain(seed);
-      // 3×3 区块里树冠整个落在这片之内的树：树根离外沿至少一个树冠半径
-      const minX = (center!.cx - 1) * CHUNK_SIZE + OAK_CANOPY_RADIUS;
-      const maxX = (center!.cx + 2) * CHUNK_SIZE - 1 - OAK_CANOPY_RADIUS;
-      const minZ = (center!.cz - 1) * CHUNK_SIZE + OAK_CANOPY_RADIUS;
-      const maxZ = (center!.cz + 2) * CHUNK_SIZE - 1 - OAK_CANOPY_RADIUS;
-      const byRoot = new Map<string, OakTree>();
-      for (const { cx, cz } of chunksAround(center!, 1)) {
-        for (const tree of oakTreesTouching(terrain, cx, cz)) byRoot.set(`${tree.x},${tree.z}`, tree);
-      }
-      const trees = [...byRoot.values()].filter(
-        (tree) =>
-          tree.x >= minX &&
-          tree.x <= maxX &&
-          tree.z >= minZ &&
-          tree.z <= maxZ &&
-          terrain.surfaceHeightAt(tree.x, tree.z) > SEA_LEVEL,
-      );
-      for (const tree of trees) {
-        const lx = localOf(tree.x);
-        const lz = localOf(tree.z);
-        const crosses =
-          lx < OAK_CANOPY_RADIUS || lx >= CHUNK_SIZE - OAK_CANOPY_RADIUS || lz < OAK_CANOPY_RADIUS || lz >= CHUNK_SIZE - OAK_CANOPY_RADIUS;
-        if (!crosses) continue;
-        crossing++;
-        const where = `种子 ${seed} 树 (${tree.x}, ${tree.z})`;
-        const top = oakTrunkTopY(tree);
-        for (let y = tree.rootY; y <= top; y++) {
-          if (blockIn(seed, tree.x, y, tree.z) !== BlockType.OakLog) wrong.push(`${where} 树干 y ${y}`);
+      const centers = [s.plains!, s.snowy!, ...s.mountains.slice(0, 2)];
+      for (const center of centers) {
+        const around = chunksAround(center, 1);
+        const inside = ({ cx, cz }: ChunkCoord): boolean => Math.abs(cx - center.cx) <= 1 && Math.abs(cz - center.cz) <= 1;
+        const trees = new Map<string, Tree>();
+        for (const { cx, cz } of around) {
+          for (const tree of treeApi().treesTouching(terrain, cx, cz)) trees.set(treeKey(tree), tree);
         }
-        // 原版式树冠：最宽两层 5×5 去掉四角，树干顶那层 3×3，顶上一层十字
-        const layers: Array<[y: number, radius: number, corners: boolean]> = [
-          [top - 2, 2, false],
-          [top - 1, 2, false],
-          [top, 1, true],
-          [top + 1, 1, false],
-        ];
-        for (const [y, r, corners] of layers) {
-          for (let dx = -r; dx <= r; dx++) {
-            for (let dz = -r; dz <= r; dz++) {
-              if (!corners && Math.abs(dx) === r && Math.abs(dz) === r) continue;
-              if (y <= top && dx === 0 && dz === 0) continue;
-              const block = blockIn(seed, tree.x + dx, y, tree.z + dz);
-              if (!canopyOk(block)) wrong.push(`${where} 树冠 (${dx}, ${y}, ${dz}) 是 ${block}`);
-            }
+        for (const tree of trees.values()) {
+          // 树冠整个落在这 3×3 个区块里、又伸出了树根所在区块的树
+          if (!crossesChunk(tree) || !chunksTouchedBy(tree).every(inside)) continue;
+          crossing.set(tree.species, (crossing.get(tree.species) ?? 0) + 1);
+          const { log, leaves } = woodOf(tree.species);
+          for (const [cell, block] of worldCells(tree)) {
+            const [x, y, z] = cell.split(',').map(Number) as [number, number, number];
+            const actual = blockIn(seed, x, y, z);
+            const ok = block === log ? actual === log : actual === leaves || isTerrainBlock(actual);
+            if (!ok) wrong.push(`种子 ${seed} ${treeKey(tree)} (${cell}) 应为 ${block}，实为 ${actual}`);
           }
         }
       }
     }
-    expect(crossing, '跨边界的树').toBeGreaterThanOrEqual(3);
-    expect(wrong).toEqual([]);
+    for (const species of [TreeSpecies.Oak, TreeSpecies.Birch, TreeSpecies.Spruce]) {
+      expect(crossing.get(species) ?? 0, `跨边界的 ${species}`).toBeGreaterThan(0);
+    }
+    expect(wrong.slice(0, 20)).toEqual([]);
   });
 });
 

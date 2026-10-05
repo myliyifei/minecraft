@@ -213,8 +213,9 @@ describe('地形对象生成的区块', () => {
         }
       }
     }
-    expect(kinds).toContain(BlockType.OakLog);
-    expect(kinds).toContain(BlockType.OakLeaves);
+    // 三种树（#79）哪一种都算：这一片长的是哪种由种子与群系决定
+    expect([BlockType.OakLog, BlockType.BirchLog, BlockType.SpruceLog].some((log) => kinds.has(log))).toBe(true);
+    expect([BlockType.OakLeaves, BlockType.BirchLeaves, BlockType.SpruceLeaves].some((leaves) => kinds.has(leaves))).toBe(true);
   });
 
   it('换种子得到不同的地形', () => {

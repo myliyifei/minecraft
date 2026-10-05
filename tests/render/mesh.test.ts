@@ -8,9 +8,9 @@ import {
   WORLD_MIN_Y,
 } from '../../src/core/constants';
 import { createTerrain } from '../../src/core/terrain';
-import { oakTreesTouching } from '../../src/core/tree';
 import { chunkOf, chunksAround, ORIGIN_CHUNK, World } from '../../src/core/world';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
+import { treeApi } from '../helpers/trees';
 import { tileUvRect, TILE } from '../../src/render/atlas';
 import {
   buildChunkMesh,
@@ -545,18 +545,26 @@ describe('网格用到了哪些贴图格号', () => {
 
 describe('生成地形的网格', () => {
 
-  it('长了树的区块，网格里有橡木原木与橡树叶的贴图', () => {
+  it('长了树的区块，网格里有这种树的原木与树叶的贴图', () => {
     // 从种子生成的世界一路走到网格：树长出来了，而且带着对的贴图上了画面。
     // 单块方块的六面贴图在上一节断言过，这里补的是「生成的树真的进了网格」这一段。
+    // 原点区块的第一棵树是哪一种由种子决定（#79），贴图按它的树种取。
+    const { TreeSpecies, treesTouching } = treeApi();
     const terrain = createTerrain(DEFAULT_SEED);
     const world = new World(terrain.generateChunk);
     for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 1)) world.loadChunk(cx, cz);
-    const tree = oakTreesTouching(terrain, 0, 0)[0];
-    if (!tree) throw new Error('原点区块附近应有一棵橡树');
+    const tree = treesTouching(terrain, 0, 0)[0];
+    if (!tree) throw new Error('原点区块附近应有一棵树');
+    const speciesTiles: Record<string, readonly [log: number, leaves: number]> = {
+      [TreeSpecies.Oak]: [TILE.oakLogSide, TILE.oakLeaves],
+      [TreeSpecies.Birch]: [TILE.birchLogSide, TILE.birchLeaves],
+      [TreeSpecies.Spruce]: [TILE.spruceLogSide, TILE.spruceLeaves],
+    };
+    const [logTile, leavesTile] = speciesTiles[tree.species]!;
 
     const tiles = meshTiles(meshOf(fromWorld(world, chunkOf(tree.x), chunkOf(tree.z))).uvs);
-    expect(tiles).toContain(TILE.oakLogSide);
-    expect(tiles).toContain(TILE.oakLeaves);
+    expect(tiles).toContain(logTile);
+    expect(tiles).toContain(leavesTile);
     // 地面的贴图也在：网格不是只剩一棵树
     expect(tiles).toContain(TILE.grassTop);
   });

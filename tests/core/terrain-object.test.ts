@@ -5,6 +5,7 @@ import { CHUNK_SIZE, DEFAULT_SEED, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/co
 import { Biome, createTerrain } from '../../src/core/terrain';
 import { chunkOf, localOf } from '../../src/core/world';
 import { NON_TERRAIN } from '../helpers/terrain-survey';
+import { LOGS } from '../helpers/trees';
 
 /**
  * 地形对象（#73）：由种子构造，含区块生成器、三个纯函数查询（群系、地表高度、列顶地表方块）与出生列。
@@ -216,7 +217,7 @@ describe('出生列', () => {
     }
   });
 
-  it('出生列周围 7 格内没有原木', () => {
+  it('出生列周围 7 格内没有原木（三种树的原木都不算，#79）', () => {
     for (const seed of ALL_SEEDS) {
       const terrain = createTerrain(seed);
       const { x: sx, z: sz } = terrain.spawnColumn;
@@ -228,7 +229,7 @@ describe('出生列', () => {
             for (let z = sz - SPAWN_CLEARANCE; z <= sz + SPAWN_CLEARANCE; z++) {
               if (chunkOf(x) !== cx || chunkOf(z) !== cz) continue;
               for (let y = WORLD_MIN_Y; y <= WORLD_MAX_Y; y++) {
-                if (chunk.get(localOf(x), y, localOf(z)) === BlockType.OakLog) logs.push(`(${x}, ${y}, ${z})`);
+                if (LOGS.has(chunk.get(localOf(x), y, localOf(z)))) logs.push(`(${x}, ${y}, ${z})`);
               }
             }
           }

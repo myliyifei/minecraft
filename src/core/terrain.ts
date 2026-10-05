@@ -3,6 +3,7 @@ import { Chunk } from './chunk';
 import { CHUNK_SIZE, SEA_LEVEL, WORLD_MIN_Y } from './constants';
 import { hashCoords } from './noise';
 import { plantOreVeins } from './ore';
+import { plantSurfacePlants } from './plant';
 import {
   COLD_TEMPERATURE,
   continentalnessAt,
@@ -247,6 +248,8 @@ function chunkSamples(
  * 4. 铺地表：上方是空气或水的每一段石头按 `surface.ts` 的规则铺顶层与其下几层。
  * 5. 嵌矿脉，只替换石头；列顶是石头的那一格（陡坡、石头岸）不换，列顶地表方块才与查询一致。
  * 6. 种树，只长在列顶地表方块是草方块或雪草方块的列上，出生列周围不长。
+ * 7. 放地表植物（`plantSurfacePlants`）：在区块内逐列放，列顶是草方块或雪草方块、上面是空气时按群系与种子哈希决定，
+ *    在树之后放，所以不长在原木与树叶的格里；出生列周围不长。
  */
 function densityGenerator(queries: Omit<Terrain, 'generateChunk'>): TerrainGenerator {
   const { seed } = queries;
@@ -307,6 +310,8 @@ function densityGenerator(queries: Omit<Terrain, 'generateChunk'>): TerrainGener
       },
     };
     plantTrees(placement, chunk);
+    // 最后放地表植物：上面那格是不是空气要等树长完才知道。
+    plantSurfacePlants(placement, chunk);
     return chunk;
   };
 }

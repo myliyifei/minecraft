@@ -1,4 +1,4 @@
-import { isSolid, type BlockView } from './block';
+import { isSolid, type BlockType, type BlockView } from './block';
 import type { Axis, Vec3 } from './vec3';
 
 /**
@@ -151,6 +151,45 @@ export function isBlockedAlong(
   delta: number,
 ): boolean {
   return sweep(blocks, hitbox, axis, delta) !== hitbox.min[axis] + delta;
+}
+
+/**
+ * 实体抬高 rise 格之后，沿一个轴走 delta 还会不会被挡：不会就说明挡住它的东西顶面不高于脚底加 rise。
+ * position 是实体坐标（碰撞箱底面中心），抬高后的碰撞箱按 width、height 重新算。
+ *
+ * 僵尸据此判断挡在前面的是不是一格高的台阶、要不要起跳（rise 为 1），玩家据此判断在水里挡住它的岸爬不爬得上去
+ * （`WATER_CLIMB_HEIGHT`）。#78 的自动跳跃判断「一格高的台阶」也用这一个。
+ */
+export function clearsAfterRising(
+  blocks: BlockView,
+  position: Vec3,
+  width: number,
+  height: number,
+  rise: number,
+  axis: Axis,
+  delta: number,
+): boolean {
+  const raised = hitboxAt({ x: position.x, y: position.y + rise, z: position.z }, width, height);
+  return !isBlockedAlong(blocks, raised, axis, delta);
+}
+
+/**
+ * 碰撞箱与某一类方块重叠出体积：覆盖到的方块里有一格满足 matches 就算。贴着面不算，取边界的容差与碰撞扫掠相同
+ * （`firstBlock`、`lastBlock`）。玩家判断在不在水里用它。
+ */
+export function overlapsBlock(
+  blocks: BlockView,
+  { min, max }: Hitbox,
+  matches: (block: BlockType) => boolean,
+): boolean {
+  for (let x = firstBlock(min.x); x <= lastBlock(max.x); x++) {
+    for (let y = firstBlock(min.y); y <= lastBlock(max.y); y++) {
+      for (let z = firstBlock(min.z); z <= lastBlock(max.z); z++) {
+        if (matches(blocks.getBlock(x, y, z))) return true;
+      }
+    }
+  }
+  return false;
 }
 
 /** 一 tick 的水平位移（方块）。玩家与僵尸的移动都先算出它，再逐轴做碰撞。 */

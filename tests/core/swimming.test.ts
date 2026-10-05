@@ -78,7 +78,7 @@ function walkedDistance(game: GameCore, ticks: number): number {
 
 /**
  * 深水箱：玩家所在那一列周围 3×3、从 G − 14 到 G + 3 全是水（替换掉地面），水面顶在 G + 4。玩家脚底在 G + 1，
- * 整个碰撞箱泡在水里，脚下还有 15 格水。`fillWith` 换成空气就是同样形状的干竖井，用来对照。
+ * 整个碰撞箱在水里，脚下还有 15 格水。`fillWith` 换成空气就是同样形状的干竖井，用来对照。
  */
 const TANK_TOP = G + 3;
 const TANK_SURFACE = TANK_TOP + 1;
@@ -210,11 +210,52 @@ describe('从水里爬上岸（#77）', () => {
     return { climbed, position: game.player.position };
   }
 
+  /** 与上面同一个水池，岸上摞 layers 层石头（岸顶比水面高 layers 格），按住跳与 W 游 300 tick，返回站上岸顶没有与脚底到过的最高处。 */
+  function swimToWall(layers: number) {
+    const game = core();
+    fill(game, [-2, 2], [G - 2, G], [-6, 1], BlockType.Water);
+    fill(game, [-2, 2], [G + 1, G + layers], [-9, -7], BlockType.Stone);
+    game.setMoveIntent(SWIM_FORWARD);
+    let climbed = false;
+    let highestFeet = -Infinity;
+    for (let i = 0; i < 300; i++) {
+      game.tick();
+      highestFeet = Math.max(highestFeet, game.player.position.y);
+      climbed ||= game.player.onGround && game.player.position.y === G + 1 + layers;
+    }
+    game.setMoveIntent(IDLE_INTENT);
+    return { climbed, highestFeet };
+  }
+
   it('岸比水面高一格：按住跳朝岸游，水平被岸挡住时得到额外的上升速度，最后站在岸顶上', () => {
     const { climbed, position } = swimToShore(true, G + 2);
     expect(climbed).toBe(true);
     expect(Math.floor(position.z)).toBeLessThanOrEqual(-7);
     expect(Math.floor(position.z)).toBeGreaterThanOrEqual(-9);
+  });
+
+  it('深水里贴着墙按住跳与 W：离水面还远时不给爬岸的速度，上升不比只按跳快', () => {
+    const game = core();
+    tank(game);
+    // 先沉下去：100 tick 之后脚底在 G − 9 附近，正前方 z = −2 那一列是地下的石头，离水面十几格
+    heights(game, IDLE_INTENT, 100);
+    const ys = heights(game, SWIM_FORWARD, 40);
+    let previous = ys[0]!;
+    for (const [i, y] of ys.slice(1).entries()) {
+      // 按住跳在水里每 tick 至多上升 0.1 格（`WATER_SWIM_UP_SPEED` 与阻力、重力收敛到的速度）
+      expect(y - previous, `第 ${i + 2} tick`).toBeLessThanOrEqual(0.1 + 1e-9);
+      previous = y;
+    }
+    // 场景搭对了：一直贴着墙（被挡在 z = −1 那一格里），而且 40 tick 之后还在水面以下很深的地方
+    expect(Math.floor(game.player.position.z)).toBe(-1);
+    expect(game.player.position.y).toBeLessThan(G);
+  });
+
+  it('岸比水面高两格：按住跳朝岸游，被挡住时不给爬岸的速度，只在水面上浮着，不会一次次被弹出水面', () => {
+    const { climbed, highestFeet } = swimToWall(2);
+    expect(climbed).toBe(false);
+    // 浮在水面时脚底至多比水面高约 0.05 格；被弹出水面时会高出 1 格以上
+    expect(highestFeet).toBeLessThan(G + 1 + 0.5);
   });
 
   it('岸与水面齐平（平地上挖的池子）：按住跳朝岸游，最后站回地面上', () => {
@@ -259,6 +300,24 @@ describe('落进水里不受摔落伤害（#77）', () => {
     }
     // 场景搭对了：入水与落到草地上是同一 tick，这一 tick 开始时还在空中
     expect(landedFromAir).toBe(true);
+    expect(game.player.position.y).toBe(FLAT_STAND_Y);
+    expect(game.health.points).toBe(MAX_HEALTH);
+  });
+
+  it('下落途中水平走进一层悬空的水、碰撞箱只擦进水格一点，下一 tick 就离开了水，落到地上也不扣血', () => {
+    // 石柱旁边 G + 4 那一层摆一片悬空的水；第 23 tick 起按 W，那一 tick 水平移动之后碰撞箱顶端擦进水格约 0.03 格，
+    // 下一 tick 下沉 0.1 格就离开了水。在水里的那一刻落差就该从那里重新算起（复现方法来自 #77 的审查）
+    const game = core(pillarTerrain(PILLAR));
+    fill(game, [-2, 2], [G + 4, G + 4], [-3, -1], BlockType.Water);
+    fill(game, [0, 0], [G + 1, G + PILLAR], [0, 0], BlockType.Air);
+    let wetTicks = 0;
+    for (let i = 0; i < 100; i++) {
+      game.setMoveIntent(i >= 23 ? FORWARD : IDLE_INTENT);
+      game.tick();
+      if (game.player.inWater) wetTicks++;
+    }
+    // 场景搭对了：只有一个 tick 结束时在水里，最后落在草地上
+    expect(wetTicks).toBe(1);
     expect(game.player.position.y).toBe(FLAT_STAND_Y);
     expect(game.health.points).toBe(MAX_HEALTH);
   });
@@ -323,7 +382,7 @@ describe('在水里与眼睛在水下的判定（#77）', () => {
   });
 });
 
-describe('只改玩家：僵尸与掉落物在水里照旧（#77 守护）', () => {
+describe('只改玩家：僵尸与掉落物在水里照旧（#77 回归检查）', () => {
   /*
    * 同一个场景摆两份：原点周围 5×5、3 格深的坑，一份灌水、一份留空，从坑上方放下同一只僵尸或同一个掉落物，逐 tick 比位置。
    * 两份完全一样，才说明水只改了玩家。经验球不受重力、不与方块碰撞（src/core/xp-orb.ts），构造时连世界都没有，不必比。

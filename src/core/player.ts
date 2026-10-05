@@ -2,6 +2,7 @@ import { isWater, type BlockView } from './block';
 import { TAU, TICK_RATE } from './constants';
 import { isBoxInLoadedChunks, type LoadedChunks } from './entity';
 import {
+  clearsAfterRising,
   decayedKnockback,
   FallTracker,
   fallStep,
@@ -12,6 +13,7 @@ import {
   knockbackFrom,
   movedAlong,
   NO_WALK,
+  overlapsBlock,
   type Hitbox,
   type HorizontalDelta,
 } from './physics';
@@ -77,13 +79,29 @@ export const WATER_MAX_SINK_SPEED = 0.1;
 export const WATER_SWIM_UP_SPEED = 0.04;
 
 /**
- * 爬岸的上升速度（方块/tick）：在水里按住跳、水平移动被挡住时竖直速度直接设成它。
+ * 爬岸的上升速度（方块/tick）：在水里按住跳、水平移动被岸挡住、而且已经浮到水面附近时，竖直速度直接设成它。
+ * 什么时候算「被岸挡住」「到了水面附近」见 `WATER_CLIMB_HEIGHT` 与 `WATER_CLIMB_SURFACE`。
  *
  * 按住跳浮在水面时脚底在水面下约 0.3 格到水面上约 0.05 格之间起伏，爬上比水面高一格的岸要从起伏的低处抬高 1.3 格以上。
- * 设速之后还在水里走一 tick（加上浮速度），出水之后按空气里的重力减速，一共抬高约 1.6 格。原版是 0.3，但原版判定在水里
- * 用的是收窄过的碰撞箱，浮得更高；这里按整个碰撞箱判定，0.3 只抬高约 1 格，从起伏的低处够不着岸顶。
+ * 设速之后还在水里走一 tick（加上浮速度），出水之后按空气里的重力减速，一共抬高约 1.6 格。原版是 0.3：原版的玩家
+ * 能直接走上 0.6 格高的台阶（登高），身子抬到离岸顶不到 0.6 格时水平一走就上去了，所以只要抬高约 1 格。本项目没有
+ * 这种登高，只能整个越过岸顶，0.3 从起伏的低处达不到岸顶。#78 做完自动跳跃后要复核这个数。
  */
 export const WATER_CLIMB_SPEED = 0.4;
+
+/**
+ * 爬岸时挡住玩家的东西最高能高出脚底多少格（方块）：碰撞箱抬高这么多之后水平不再被挡，才算被岸挡住（`clearsAfterRising`）。
+ * 浮在水面时脚底最低在水面下约 0.3 格，比水面高一格的岸顶在脚底之上约 1.3 格，取 1.5 留一点余量；比水面高两格的墙
+ * 超出这个高度，贴着它按跳不会一次次被弹出水面。不超过爬岸速度实际能抬高的约 1.6 格。
+ */
+export const WATER_CLIMB_HEIGHT = 1.5;
+
+/**
+ * 判断「到了水面附近」时碰撞箱抬高的格数（方块）：抬高这么多之后不再与水重叠，才给爬岸的速度，与原版的做法相同。
+ * 在深水里贴着墙按跳因此不会每 tick 都被设成爬岸速度，只按 `WATER_SWIM_UP_SPEED` 上浮。浮在水面时脚底最低在水面下
+ * 约 0.3 格，抬高 0.6 格已经出水。
+ */
+export const WATER_CLIMB_SURFACE = 0.6;
 
 /**
  * 一个 tick 的移动意图。
@@ -214,7 +232,7 @@ export class Player implements PlayerView {
   }
 
   get inWater(): boolean {
-    return overlapsWater(this.blocks, this.hitbox);
+    return overlapsBlock(this.blocks, this.hitbox, isWater);
   }
 
   get eyeInWater(): boolean {
@@ -331,9 +349,10 @@ export class Player implements PlayerView {
       this.y = fall.y;
       this.velocityY = fall.velocityY;
     }
-    // 竖直走完之后在水里，落差从这里重新算起：从高处落进水里，入水那一 tick 就把空中那一段清掉，之后落到池底
-    // 也不受伤。只看竖直走完之后：入水那一 tick 开始时还在空中，竖直这一步按空气里的规则走。
-    if (this.inWater) this.fallHeight.reset(this.y);
+    // 这一 tick 开始时或竖直走完之后在水里，落差从这里重新算起。竖直走完之后的那一次：从高处落进水里，入水那一 tick
+    // 开始时还在空中，竖直这一步按空气里的规则走，要在这里把空中那一段清掉，之后落到池底也不受伤。开始时的那一次：
+    // 上一 tick 水平移动时擦进了水格，这一 tick 竖直一走又离开了水，只看竖直走完之后就漏掉了这次入水。
+    if (swimming || this.inWater) this.fallHeight.reset(this.y);
     // 落差在竖直这一步之后、水平移动之前结算：落地只发生在竖直这一步。放到水平走完之后再看，
     // 同一 tick 里先落到一级台阶、再水平走下它边缘的那一次落地就漏掉了，几级台阶的落差会累计成一段。
     const fell = this.fallHeight.settle(this.y, this.onGround);
@@ -343,21 +362,44 @@ export class Player implements PlayerView {
     // 两个轴分开做碰撞，斜着撞墙时会沿着墙滑过去，而不是整步作废。这一步是移动加上击退，走完
     // 击退衰减一次。
     this.knock = decayedKnockback(this.knock);
-    // 爬岸：在水里按住跳、水平被方块挡住时给一个向上的速度，下一 tick 起往上走，出水之后靠它越过岸边。
-    // 挡没挡住按每个轴走之前的碰撞箱问（`isBlockedAlong`）；拿走完的坐标与起点加位移比不行，
-    // 中心坐标是扫掠落点加回半宽算出来的，没被挡时也可能差一丝。
+    // 爬岸：在水里按住跳、水平被岸挡住时给一个向上的速度，下一 tick 起往上走，出水之后靠它越过岸边。
+    // 挡没挡住按每个轴走之前的碰撞箱问（`isBlockedAlong`）。用走完之后的坐标与起点加位移比不行：
+    // 中心坐标是扫掠落点加回半宽算出来的，没被挡时也会有微小的舍入误差。
     const climb = swimming && intent.jump;
-    let blocked = climb && isBlockedAlong(this.blocks, this.hitbox, 'x', move.x);
+    const blockedX = climb && isBlockedAlong(this.blocks, this.hitbox, 'x', move.x);
     this.x = this.movedAlong('x', move.x);
-    blocked ||= climb && isBlockedAlong(this.blocks, this.hitbox, 'z', move.z);
+    const blockedZ = climb && isBlockedAlong(this.blocks, this.hitbox, 'z', move.z);
     this.z = this.movedAlong('z', move.z);
-    if (blocked) this.velocityY = WATER_CLIMB_SPEED;
+    if ((blockedX && this.canClimbOut('x', move.x)) || (blockedZ && this.canClimbOut('z', move.z))) {
+      this.velocityY = WATER_CLIMB_SPEED;
+    }
     return fell;
+  }
+
+  /**
+   * 沿 axis 走 delta 时挡住玩家的是不是爬得上去的岸：已经浮到水面附近（碰撞箱抬高 `WATER_CLIMB_SURFACE` 后不与水重叠），
+   * 而且挡住的东西不高于脚底加 `WATER_CLIMB_HEIGHT`。
+   */
+  private canClimbOut(axis: 'x' | 'z', delta: number): boolean {
+    const nearSurface = !overlapsBlock(
+      this.blocks,
+      hitboxAt({ x: this.x, y: this.y + WATER_CLIMB_SURFACE, z: this.z }, PLAYER_WIDTH, PLAYER_HEIGHT),
+      isWater,
+    );
+    return (
+      nearSurface &&
+      clearsAfterRising(this.blocks, this.position, PLAYER_WIDTH, PLAYER_HEIGHT, WATER_CLIMB_HEIGHT, axis, delta)
+    );
   }
 
   /**
    * 在水里竖直走一步：按住跳先加上浮速度，再把下沉夹在 `WATER_MAX_SINK_SPEED` 以内，按这个速度移动；撞上东西
    * 速度清零，再乘阻力、减重力。与 `fallStep` 同样是「先移动再更新速度」。
+   *
+   * 不复用 `fallStep`，原因有两条。一是更新速度的运算顺序不同：`fallStep` 是先减重力再乘阻力，这里与原版在水里一样是
+   * 先乘阻力再减重力，按这个顺序从静止起收敛到的下沉速度正好是重力除以（1 − 阻力），即 `WATER_MAX_SINK_SPEED`；
+   * 按 `fallStep` 的顺序会收敛到 0.08。二是移动之前多了加上浮速度与夹住下沉上限两步。`fallStep` 由掉落物与僵尸共用，
+   * 为了玩家在水里的这两处差别加参数，会让「只改玩家」的边界变得不清楚。
    */
   private swimVertically(jump: boolean): void {
     const velocity = Math.max(this.velocityY + (jump ? WATER_SWIM_UP_SPEED : 0), -WATER_MAX_SINK_SPEED);
@@ -402,23 +444,6 @@ function sweptAlong({ min, max }: Hitbox, delta: HorizontalDelta): Hitbox {
     max: { x: max.x + Math.max(delta.x, 0), y: max.y, z: max.z + Math.max(delta.z, 0) },
   };
 }
-
-/**
- * 碰撞箱与水格重叠出体积。取边界时与碰撞扫掠同一个容差：贴着水格的面不算，钳位算出的那一丝舍入误差也不算。
- */
-function overlapsWater(blocks: BlockView, { min, max }: Hitbox): boolean {
-  for (let x = Math.floor(min.x + OVERLAP_EPSILON); x < max.x - OVERLAP_EPSILON; x++) {
-    for (let y = Math.floor(min.y + OVERLAP_EPSILON); y < max.y - OVERLAP_EPSILON; y++) {
-      for (let z = Math.floor(min.z + OVERLAP_EPSILON); z < max.z - OVERLAP_EPSILON; z++) {
-        if (isWater(blocks.getBlock(x, y, z))) return true;
-      }
-    }
-  }
-  return false;
-}
-
-/** `overlapsWater` 取边界的容差，与 physics.ts 的 `TOUCH_EPSILON` 同一个量级与理由。 */
-const OVERLAP_EPSILON = 1e-9;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));

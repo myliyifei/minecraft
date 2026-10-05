@@ -7,6 +7,7 @@ import { fallDamage, Health } from './health';
 import { ItemType } from './item';
 import { hashCoords } from './noise';
 import {
+  clearsAfterRising,
   decayedKnockback,
   FallTracker,
   fallStep,
@@ -618,8 +619,7 @@ class Zombie implements ZombieView {
 
   /** 碰撞箱抬高 1 格之后，沿 axis 走 delta 还会不会被挡：不会就说明挡住的只有 1 格高。 */
   private canStepUp(blocks: BlockView, axis: 'x' | 'z', delta: number): boolean {
-    const raised = hitboxAt({ x: this.x, y: this.y + 1, z: this.z }, ZOMBIE_WIDTH, ZOMBIE_HEIGHT);
-    return !isBlockedAlong(blocks, raised, axis, delta);
+    return clearsAfterRising(blocks, { x: this.x, y: this.y, z: this.z }, ZOMBIE_WIDTH, ZOMBIE_HEIGHT, 1, axis, delta);
   }
 }
 

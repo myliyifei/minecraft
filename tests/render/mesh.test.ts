@@ -16,6 +16,7 @@ import {
   buildChunkMesh,
   meshTiles,
   warmUpChunkMeshes,
+  type ChunkMeshData,
   type MeshData,
   type MeshView,
 } from '../../src/render/mesh';
@@ -36,8 +37,14 @@ function blocksOnly(getBlock: MeshView['getBlock']): MeshView {
   return { getBlock, skyLightAt: () => 0, blockLightAt: () => 0, chunkAt: () => undefined };
 }
 
+/** 网格的不透明部分：水与冰之外的方块都在这里（#83）。 */
 function meshOf({ chunk, view }: MeshInput): MeshData {
-  return buildChunkMesh(chunk, view);
+  return buildChunkMesh(chunk, view).opaque;
+}
+
+/** 网格构建顺带输出的发光方块。 */
+function glowingOf({ chunk, view }: MeshInput): ChunkMeshData['glowingBlocks'] {
+  return buildChunkMesh(chunk, view).glowingBlocks;
 }
 
 /** 区块内外处处都是同一种方块，用来构造「被完全包围」的极端情形。 */
@@ -411,15 +418,15 @@ describe('网格构建顺带输出发光方块（#59）', () => {
     const world = new World(flatTestTerrain);
     for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 1)) world.loadChunk(cx, cz);
     world.setBlock(2, FLAT_GROUND_Y + 1, 2, BlockType.LitFurnace);
-    expect(meshOf(fromWorld(world, 0, 0)).glowingBlocks).toEqual([
+    expect(glowingOf(fromWorld(world, 0, 0))).toEqual([
       { block: BlockType.LitFurnace, x: 2, y: FLAT_GROUND_Y + 1, z: 2 },
     ]);
     world.setBlock(2, FLAT_GROUND_Y + 1, 2, BlockType.Furnace);
-    expect(meshOf(fromWorld(world, 0, 0)).glowingBlocks).toEqual([]);
+    expect(glowingOf(fromWorld(world, 0, 0))).toEqual([]);
   });
 
   it('平地上没有发光方块，列表是空的', () => {
-    expect(meshOf(uniform(BlockType.Stone)).glowingBlocks).toEqual([]);
+    expect(glowingOf(uniform(BlockType.Stone))).toEqual([]);
   });
 });
 
@@ -749,7 +756,7 @@ describe('顶点光照的取样：六个面、区块边角，每格的等级各�
       blockLightAt: (x, yy, z) => levelsAt(x, yy, z)[1],
       chunkAt: () => undefined,
     };
-    return { mesh: buildChunkMesh(chunk, view, smoothLighting), isStone };
+    return { mesh: buildChunkMesh(chunk, view, smoothLighting).opaque, isStone };
   }
 
   /**

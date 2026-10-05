@@ -38,6 +38,15 @@ export function isTerrainBlock(block: BlockType): boolean {
   return !NON_TERRAIN.has(block);
 }
 
+/**
+ * 水塘列（#81）：列顶地表方块查询是水的列。地表高度按挖水塘之前算（CONTEXT.md「地表高度」），所以这一列地表高度那一格
+ * 挖成了水，最高的地形方块是塘底（沙子），不高于地表高度。假定「地表高度那一格是草方块、石头等地形方块」的断言跳过它们，
+ * 水塘本身的断言在 tests/core/pond.test.ts。
+ */
+export function isPondColumn(terrain: Pick<Terrain, 'surfaceBlockAt'>, x: number, z: number): boolean {
+  return terrain.surfaceBlockAt(x, z) === BlockType.Water;
+}
+
 /** 采样线沿哪个轴走。 */
 export type Axis = 'x' | 'z';
 

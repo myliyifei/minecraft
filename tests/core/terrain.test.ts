@@ -3,7 +3,7 @@ import { BlockType } from '../../src/core/block';
 import type { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { Biome, createTerrain } from '../../src/core/terrain';
-import { NON_TERRAIN } from '../helpers/terrain-survey';
+import { isPondColumn, NON_TERRAIN } from '../helpers/terrain-survey';
 import { STONE_LAYER } from '../helpers/stone-layer';
 import { expectSurfaceBlocksDefined, SNOWY_GRASS } from '../helpers/surface-rules';
 
@@ -80,7 +80,7 @@ describe('地形对象生成的区块', () => {
     expect(firstDifference(generate(0, 0), generate(1, 0))).not.toBeNull();
   });
 
-  it('每一列自上而下是 草方块（冰雪是雪草方块）→ 泥土（3–4 层）→ 石层（这一块横跨平原与冰雪，#76）', () => {
+  it('每一列自上而下是 草方块（冰雪是雪草方块）→ 泥土（3–4 层）→ 石层（这一块横跨平原与冰雪，#76；水塘列除外，#81）', () => {
     expectSurfaceBlocksDefined();
     const chunk = generate(-2, 4);
     const tops = new Set<BlockType>();
@@ -88,6 +88,7 @@ describe('地形对象生成的区块', () => {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
         const x = -2 * CHUNK_SIZE + lx;
         const z = 4 * CHUNK_SIZE + lz;
+        if (isPondColumn(terrain, x, z)) continue;
         const surface = surfaceAt(x, z);
         const expected = terrain.biomeAt(x, z) === Biome.Snowy ? SNOWY_GRASS : BlockType.Grass;
         expect(chunk.get(lx, surface, lz), `(${x}, ${z})`).toBe(expected);
@@ -104,11 +105,12 @@ describe('地形对象生成的区块', () => {
     expect([...tops].sort()).toEqual([BlockType.Grass, SNOWY_GRASS].sort());
   });
 
-  it('泥土层数在 3 与 4 之间变化，不是一个定值', () => {
+  it('泥土层数在 3 与 4 之间变化，不是一个定值（水塘列除外，#81）', () => {
     const chunk = generate(0, 0);
     const depths = new Set<number>();
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+        if (isPondColumn(terrain, lx, lz)) continue;
         depths.add(dirtDepthBelow(chunk, lx, surfaceAt(lx, lz), lz));
       }
     }

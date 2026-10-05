@@ -16,6 +16,7 @@ import {
   hasOverhang,
   highestTerrainY,
   isInterior,
+  isPondColumn,
   isTerrainBlock,
   SURVEY_SEEDS,
   surveyLines,
@@ -212,13 +213,20 @@ describe('确定性：各群系的区块', () => {
 });
 
 describe('地表高度查询与生成结果一致', () => {
-  it.each(SURVEY_SEEDS)('种子 %i：每个区块 256 列（含区块边缘），地表高度查询等于那一列最高的地形方块', (seed) => {
+  it.each(SURVEY_SEEDS)('种子 %i：每个区块 256 列（含区块边缘），地表高度查询等于那一列最高的地形方块（水塘列按挖之前）', (seed) => {
     expectAllBiomesFound(seed);
     const terrain = createTerrain(seed);
     const wrong: string[] = [];
     eachColumn(seed, (chunk, lx, lz, { x, z }) => {
       const expected = terrain.surfaceHeightAt(x, z);
       const actual = highestTerrainY(chunk, lx, lz);
+      if (isPondColumn(terrain, x, z)) {
+        // 水塘列（#81）：地表高度是挖之前的值，那一格是水，最高的地形方块是塘底
+        if (actual > expected || chunk.get(lx, expected, lz) !== BlockType.Water) {
+          wrong.push(`水塘列 (${x}, ${z})：查询 ${expected}，最高的地形方块 ${actual}，那一格 ${chunk.get(lx, expected, lz)}`);
+        }
+        return;
+      }
       if (actual !== expected) wrong.push(`(${x}, ${z})：查询 ${expected}，生成 ${actual}`);
     });
     expect(wrong).toEqual([]);

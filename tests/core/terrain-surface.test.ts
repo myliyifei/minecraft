@@ -13,6 +13,7 @@ import {
   columnIn,
   gridColumns,
   isInterior,
+  isPondColumn,
   isTerrainBlock,
   SURVEY_SEEDS,
   surveyLines,
@@ -311,11 +312,14 @@ interface SegmentTop {
 /**
  * 一列里每一段露天的顶面：最高的那一段在地表高度（上面可能是树）；其下每一格地形方块、上面是空气、水或冰的，
  * 是悬垂下方那一段（或洞里）的顶面。
+ *
+ * 水塘列（#81）地表高度那一格挖成了水，没有「最高那一段」：塘底是上面是水的一段，与水下的段一样按深浅铺沙子。
  */
 function segmentTops(terrain: Terrain, { chunk, lx, lz, x, z }: ColumnInChunk): SegmentTop[] {
   const surface = terrain.surfaceHeightAt(x, z);
-  const tops: SegmentTop[] = [{ y: surface, above: chunk.get(lx, surface + 1, lz), highest: true }];
-  for (let y = surface - 1; y > WORLD_MIN_Y; y--) {
+  const pond = isPondColumn(terrain, x, z);
+  const tops: SegmentTop[] = pond ? [] : [{ y: surface, above: chunk.get(lx, surface + 1, lz), highest: true }];
+  for (let y = pond ? surface : surface - 1; y > WORLD_MIN_Y; y--) {
     if (!isTerrainBlock(chunk.get(lx, y, lz))) continue;
     const above = chunk.get(lx, y + 1, lz);
     if (above === BlockType.Air || above === BlockType.Water || above === BlockType.Ice) {
@@ -391,7 +395,8 @@ describe('列顶地表方块查询与生成一致（#76）', () => {
     for (const column of columnsOf(seed, [...s.mountains, ...s.highMountains])) {
       const { chunk, lx, lz, x, z } = column;
       const onEdge = lx === 0 || lx === CHUNK_SIZE - 1 || lz === 0 || lz === CHUNK_SIZE - 1;
-      if (!onEdge || !isSteep(terrain, x, z)) continue;
+      // 水塘列（#81）列顶是水，不是陡坡的石头
+      if (!onEdge || !isSteep(terrain, x, z) || isPondColumn(terrain, x, z)) continue;
       const surface = terrain.surfaceHeightAt(x, z);
       if (surface < SEA_LEVEL) continue;
       steepEdge++;
@@ -418,7 +423,7 @@ describe('露天、不是陡坡的顶面按群系铺（#76）', () => {
     for (const column of columnsOf(seed, far)) {
       const { chunk, lx, lz, x, z } = column;
       const surface = terrain.surfaceHeightAt(x, z);
-      if (surface < SEA_LEVEL || isSteep(terrain, x, z)) continue;
+      if (surface < SEA_LEVEL || isSteep(terrain, x, z) || isPondColumn(terrain, x, z)) continue;
       const biome = terrain.biomeAt(x, z);
       const expected = inlandTopBlock(biome, surface);
       const actual = chunk.get(lx, surface, lz);
@@ -472,7 +477,7 @@ describe('陡坡露石头（#76）', () => {
       for (const column of columnsOf(seed, [...s.mountains, ...s.highMountains])) {
         const { chunk, lx, lz, x, z } = column;
         const surface = terrain.surfaceHeightAt(x, z);
-        if (surface < SEA_LEVEL || !isSteep(terrain, x, z)) continue;
+        if (surface < SEA_LEVEL || !isSteep(terrain, x, z) || isPondColumn(terrain, x, z)) continue;
         steep++;
         const top = chunk.get(lx, surface, lz);
         const below = chunk.get(lx, surface - 1, lz);

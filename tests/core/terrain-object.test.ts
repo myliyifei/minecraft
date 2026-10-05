@@ -4,7 +4,7 @@ import type { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, DEFAULT_SEED, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { Biome, createTerrain } from '../../src/core/terrain';
 import { chunkOf, localOf } from '../../src/core/world';
-import { NON_TERRAIN } from '../helpers/terrain-survey';
+import { isPondColumn, NON_TERRAIN } from '../helpers/terrain-survey';
 import { LOGS } from '../helpers/trees';
 
 /**
@@ -136,7 +136,7 @@ describe('地形对象的三个查询是纯函数', () => {
 });
 
 describe('地表高度与列顶地表方块的查询与生成结果一致', () => {
-  it('查询值就是那一列最高的地形方块的 y，其上只有空气、水、冰与树', () => {
+  it('查询值就是那一列最高的地形方块的 y，其上只有空气、水、冰与树（水塘列按挖之前：那一格是水，塘底不高于它）', () => {
     for (const seed of SEEDS) {
       const terrain = createTerrain(seed);
       for (const [cx, cz] of CHUNKS) {
@@ -146,6 +146,12 @@ describe('地表高度与列顶地表方块的查询与生成结果一致', () =
           const z = cz * CHUNK_SIZE + lz;
           const surface = terrain.surfaceHeightAt(x, z);
           const where = `种子 ${seed}，列 (${x}, ${z})`;
+          if (isPondColumn(terrain, x, z)) {
+            // 水塘列（#81）：地表高度是挖之前的值，那一格是水，最高的地形方块是塘底
+            expect(chunk.get(lx, surface, lz), where).toBe(BlockType.Water);
+            expect(highestTerrainY(chunk, lx, lz), where).toBeLessThanOrEqual(surface);
+            continue;
+          }
           expect(highestTerrainY(chunk, lx, lz), where).toBe(surface);
         }
       }

@@ -57,7 +57,7 @@ export function isPlantBlock(block: BlockType): boolean {
 }
 
 /**
- * 四种方块与两种物品的编号都已定义。编号未定义时后面的断言可能因为两边都是 undefined 而碰巧成立，
+ * 四种方块与两种物品的编号都已定义。编号未定义时后面的断言可能因为两边都是 undefined 而偶然成立，
  * 所以每个用到新编号的测试先调它。
  */
 export function expectPlantsDefined(): void {

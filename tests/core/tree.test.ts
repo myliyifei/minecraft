@@ -457,7 +457,7 @@ describe.each([
     );
   };
 
-  /** 树连同它周围一圈的方块，摊成可比较的字符串。 */
+  /** 树连同它周围一圈的方块，转换成可比较的字符串。 */
   function dumpAround(world: World, tree: Tree): string[] {
     const cells = footprint(tree);
     const reach = Math.max(...cells.map(({ dx, dz }) => Math.max(Math.abs(dx), Math.abs(dz)))) + 1;

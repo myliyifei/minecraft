@@ -32,7 +32,7 @@ export const NEW_SURFACE_BLOCKS: ReadonlyArray<readonly [string, BlockType]> = [
 ];
 
 /**
- * 三种新方块与两种新物品的编号都已定义。编号未定义时后面的断言可能因为两边都是 undefined 而碰巧成立，
+ * 三种新方块与两种新物品的编号都已定义。编号未定义时后面的断言可能因为两边都是 undefined 而偶然成立，
  * 所以每个用到新编号的测试先调它。
  */
 export function expectSurfaceBlocksDefined(): void {
@@ -53,7 +53,7 @@ export const STEEP_RISE = 3;
 /** 雪线：高山的顶面 y 不小于它铺雪草方块。 */
 export const SNOW_LINE_Y = 150;
 
-/** 被水盖住的顶面 y 不小于它铺沙子（上面最多 7 格水），更低铺沙砾。 */
+/** 被水覆盖的顶面 y 不小于它铺沙子（上面最多 7 格水），更低铺沙砾。 */
 export const SHALLOW_MIN_Y = 56;
 
 /** 沙滩的地表最高在海平面之上几格。 */
@@ -83,7 +83,7 @@ export function isSteep(terrain: Terrain, x: number, z: number): boolean {
   return maxNeighborRise(terrain, x, z) >= STEEP_RISE;
 }
 
-/** 被水盖住的顶面应铺的方块：浅处沙子，深处沙砾。 */
+/** 被水覆盖的顶面应铺的方块：浅处沙子，深处沙砾。 */
 export function underwaterFloorAt(y: number): BlockType {
   return y >= SHALLOW_MIN_Y ? SAND : GRAVEL;
 }

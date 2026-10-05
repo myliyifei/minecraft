@@ -21,11 +21,11 @@ interface ColumnInfo {
   readonly block: BlockType;
 }
 
-/** 大海的列：海底在海平面以下，顶上是石头（被水盖住的地面，#76 之后是沙子或沙砾，都不是草方块也不是水）。 */
+/** 大海的列：海底在海平面以下，顶上是石头（被水覆盖的地面，#76 之后是沙子或沙砾，都不是草方块也不是水）。 */
 const OCEAN: ColumnInfo = { biome: Biome.Ocean, height: SEA_LEVEL - 15, block: BlockType.Stone };
 /** 合格的出生列：平原、草方块、高于海平面。 */
 const PLAINS_GRASS: ColumnInfo = { biome: Biome.Plains, height: SEA_LEVEL + 5, block: BlockType.Grass };
-/** 高山的草坡：陆地，但群系不是平原。 */
+/** 高山上列顶是草方块的坡：陆地，但群系不是平原。 */
 const MOUNTAIN_GRASS: ColumnInfo = { biome: Biome.Mountains, height: SEA_LEVEL + 40, block: BlockType.Grass };
 /** 平原上列顶不是草方块的列（陡坡露石；#76 之后的沙滩同理）。 */
 const PLAINS_STONE: ColumnInfo = { biome: Biome.Plains, height: SEA_LEVEL + 3, block: BlockType.Stone };

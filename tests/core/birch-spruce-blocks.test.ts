@@ -266,7 +266,7 @@ describe.each(BUILDS)('两种新树叶的天光（%s）', (_name, build) => {
     expect(world.skyLightAt(0, G + 1, 0)).toBe(12);
   });
 
-  it('两种新原木与新木板不透光：一层 25×25 之下正中只剩从边缘横着绕进来的光，离最近的露天格 13 格，是 2', () => {
+  it('两种新原木与新木板是不透明方块：一层 25×25 之下正中只剩从边缘横着绕进来的光，离最近的露天格 13 格，是 2', () => {
     expectAllDefined();
     for (const block of NEW_SPECIES.flatMap((s) => [s.log, s.planks])) {
       const world = build(box([-12, G + 5, -12], [12, G + 5, 12], block));

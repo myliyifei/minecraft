@@ -13,7 +13,7 @@ import { MOUNTAIN_RELIEF, OCEAN_CONTINENTALNESS } from './terrain-density';
  * 起伏当场求）取样本，两边调同一个 `highestTopBlock`，所以查询值与生成结果逐列一致，区块边缘的列也是。
  *
  * 最高那一段（地表高度那一格）的优先次序：
- * 1. 被水盖住（地表低于海平面）：顶面 y ≥ SHALLOW_FLOOR_MIN_Y 是沙子，更低是沙砾，不论群系。
+ * 1. 被水覆盖（地表低于海平面）：顶面 y ≥ SHALLOW_FLOOR_MIN_Y 是沙子，更低是沙砾，不论群系。
  * 2. 陡坡：与东南西北四个相邻列的地表高度差最大的那个 ≥ STEEP_RISE，石头，不铺泥土。
  * 3. 海岸：地表不高于 BEACH_MAX_Y 的列。平原在 BEACH_REACH 格内有大海时是沙滩（沙子），高山是石头岸，
  *    冰雪不算海岸、照规则 4 铺雪草方块；
@@ -32,7 +32,7 @@ export const STEEP_RISE = 3;
 /** 雪线：高山的顶面 y 不小于它铺雪草方块（CONTEXT.md「雪线」约 y 150）。 */
 export const SNOW_LINE_Y = 150;
 
-/** 被水盖住的顶面 y 不小于它铺沙子（上面最多 7 格水），更低铺沙砾。 */
+/** 被水覆盖的顶面 y 不小于它铺沙子（上面最多 7 格水），更低铺沙砾。 */
 export const SHALLOW_FLOOR_MIN_Y = 56;
 
 /** 沙滩与石头岸的地表最高 y：海平面之上 4 格。岸边的平原基准高度是海平面之上 1 到 5 格，这一条几乎不起作用。 */
@@ -78,7 +78,7 @@ function axisOffsets(reach: number): ReadonlyArray<readonly [number, number]> {
 
 const LANDWARD_OFFSETS = axisOffsets(BEACH_REACH);
 
-/** 被水盖住的顶面：浅处沙子，深处沙砾。 */
+/** 被水覆盖的顶面：浅处沙子，深处沙砾。 */
 export function underwaterFloorAt(y: number): BlockType {
   return y >= SHALLOW_FLOOR_MIN_Y ? BlockType.Sand : BlockType.Gravel;
 }
@@ -186,7 +186,7 @@ export interface ColumnCover {
 
 /**
  * 铺一列的地表：自上而下，上方不是石头（空气、水或冰）的每一段石头，顶层换成规则给的方块，其下 depth 层换成
- * 泥土或沙子，那一段不够厚时到段底为止。第一段是最高那一段，顶层用 `highest`；其下各段被水盖住时按深浅铺沙子
+ * 泥土或沙子，那一段不够厚时到段底为止。第一段是最高那一段，顶层用 `highest`；其下各段被水覆盖时按深浅铺沙子
  * 或沙砾，否则按群系与那一段顶面的 y 铺。
  */
 export function coverColumn(chunk: Chunk, lx: number, lz: number, cover: ColumnCover): void {

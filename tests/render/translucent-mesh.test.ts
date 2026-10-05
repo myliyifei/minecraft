@@ -219,7 +219,7 @@ describe('水与冰的剔除看相邻两格的组合（#83）', () => {
     expect(faceCount(mesh.opaque)).toBe(6);
   });
 
-  it('水上面压着石头：水没有顶面，也就没有顶面的背面', () => {
+  it('水上方是石头：水没有顶面，也就没有顶面的背面', () => {
     const mesh = sparseMesh([
       [8, Y, 8, BlockType.Water],
       [8, Y + 1, 8, BlockType.Stone],
@@ -268,7 +268,7 @@ describe('水与冰的剔除看相邻两格的组合（#83）', () => {
     expect(faceCount(mesh.translucent)).toBe(6);
   });
 
-  it('被石头整个包住的一格水一个面都不出，石头朝水的六个面都在', () => {
+  it('六个邻格都是石头的一格水一个面都不出，石头朝水的六个面都在', () => {
     const cells: Cell[] = [[8, Y, 8, BlockType.Water]];
     for (const [dx, dy, dz] of [
       [1, 0, 0],
@@ -346,7 +346,7 @@ describe('邻区块要不要重建与网格的剔除是同一个判定（#83）'
 
   /**
    * 隔壁区块网格里地面以上的那些面，两部分都算，不含光照：只看面变没变。地面以下与区块侧边上那些面
-   * 与这一格无关，不比，省得每次都序列化整个区块。
+   * 与这一格无关，不比，以免每次都序列化整个区块。
    */
   function facesAboveGround(world: World): string[] {
     const mesh = buildChunkMesh(world.chunkAt(NEIGHBOR_CX, 0)!, world);

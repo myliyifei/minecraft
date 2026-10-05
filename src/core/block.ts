@@ -634,7 +634,7 @@ export function supportHolds(block: BlockType, support: BlockType): boolean {
 
 /**
  * 一格方块周围可能贴着它的方块在哪：支撑表里出现过的偏移反过来，即上方与四侧，相对那一格。下方不算——
- * 没有倒挂的火把与植物。世界把一格换掉之后按它查邻格（`World.setBlock`）。
+ * 没有贴在上方那格底面的火把与植物。世界把一格换掉之后按它查邻格（`World.setBlock`）。
  */
 export const SUPPORT_ATTACH_OFFSETS: readonly Vec3[] = Object.freeze(
   [...new Map(Object.values(SUPPORTS).map(({ offset }) => [`${offset.x},${offset.y},${offset.z}`, offset])).values()].map(

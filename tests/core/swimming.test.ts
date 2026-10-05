@@ -176,7 +176,7 @@ describe('在水里的下沉与上浮（#77）', () => {
     for (let i = 2; i < ys.length; i++) expect(ys[i]!, `第 ${i + 1} tick`).toBeGreaterThan(ys[i - 1]!);
   });
 
-  it('一直按住跳会浮到水面：头露出水面，但不会从开阔的水面上蹦出去', () => {
+  it('一直按住跳会浮到水面：头露出水面，但不会从开阔的水面上跳出水面', () => {
     const game = core();
     tank(game);
     const ys = heights(game, JUMP, 300);
@@ -271,7 +271,7 @@ describe('从水里爬上岸（#77）', () => {
   it('深水底部被一格高的台阶挡住：离水面还远时不给爬岸的速度，按住跳只按水里的上浮速度升起来', () => {
     const game = core();
     tank(game);
-    // 水箱底部朝 −Z 那一排垫一格石头，成为一级台阶；先沉到箱底
+    // 水箱底部朝 −Z 那一排放一格石头，成为一级台阶；先沉到箱底
     fill(game, [-1, 1], [G - 14, G - 14], [-1, -1], BlockType.Stone);
     heights(game, IDLE_INTENT, 200);
     // 落点与箱底之间只差碰撞扫掠容差以内的舍入误差
@@ -345,9 +345,9 @@ describe('落进水里不受摔落伤害（#77）', () => {
     expect(game.player.position.y).toBeLessThan(FLAT_STAND_Y);
   });
 
-  it('从 20 格高处落进铺在草地上的一层水里，同一 tick 入水并落到水底，生命值也不变', () => {
+  it('从 20 格高处落进铺在草方块上的一层水里，同一 tick 入水并落到水底，生命值也不变', () => {
     const game = core(pillarTerrain(PILLAR));
-    // 一层水铺在草地上（G + 1），石柱那一格留给下面拆
+    // 一层水铺在草方块上（G + 1），石柱那一格留给下面拆
     fill(game, [-2, 2], [G + 1, G + 1], [-2, 2], BlockType.Water);
     fill(game, [0, 0], [G + 1, G + PILLAR], [0, 0], BlockType.Air);
     game.setBlock(0, G + 1, 0, BlockType.Water);
@@ -357,14 +357,14 @@ describe('落进水里不受摔落伤害（#77）', () => {
       game.tick();
       if (game.player.onGround && !wasInWater && game.player.inWater) landedFromAir = true;
     }
-    // 场景搭对了：入水与落到草地上是同一 tick，这一 tick 开始时还在空中
+    // 场景搭对了：入水与落到草方块上是同一 tick，这一 tick 开始时还在空中
     expect(landedFromAir).toBe(true);
     expect(game.player.position.y).toBe(FLAT_STAND_Y);
     expect(game.health.points).toBe(MAX_HEALTH);
   });
 
-  it('下落途中水平走进一层悬空的水、碰撞箱只擦进水格一点，下一 tick 就离开了水，落到地上也不扣血', () => {
-    // 石柱旁边 G + 4 那一层摆一片悬空的水；第 23 tick 起按 W，那一 tick 水平移动之后碰撞箱顶端擦进水格约 0.03 格，
+  it('下落途中水平走进一层悬空的水、碰撞箱只伸进水格一点，下一 tick 就离开了水，落到地上也不扣血', () => {
+    // 石柱旁边 G + 4 那一层摆一片悬空的水；第 23 tick 起按 W，那一 tick 水平移动之后碰撞箱顶端伸进水格约 0.03 格，
     // 下一 tick 下沉 0.1 格就离开了水。在水里的那一刻落差就该从那里重新算起（复现方法来自 #77 的审查）
     const game = core(pillarTerrain(PILLAR));
     fill(game, [-2, 2], [G + 4, G + 4], [-3, -1], BlockType.Water);
@@ -375,13 +375,13 @@ describe('落进水里不受摔落伤害（#77）', () => {
       game.tick();
       if (game.player.inWater) wetTicks++;
     }
-    // 场景搭对了：只有一个 tick 结束时在水里，最后落在草地上
+    // 场景搭对了：只有一个 tick 结束时在水里，最后落在草方块上
     expect(wetTicks).toBe(1);
     expect(game.player.position.y).toBe(FLAT_STAND_Y);
     expect(game.health.points).toBe(MAX_HEALTH);
   });
 
-  it('对照：同样高度落在草地上扣血', () => {
+  it('对照：同样高度落在草方块上扣血', () => {
     const game = fallFromPillar(false);
     expect(game.player.position.y).toBe(FLAT_STAND_Y);
     expect(game.health.points).toBeLessThan(MAX_HEALTH);
@@ -478,7 +478,7 @@ describe('只改玩家：僵尸与掉落物在水里照旧（#77 回归检查）
     return trace;
   }
 
-  it('僵尸落进水坑与落进同样的空坑逐 tick 一样：沉到坑底，照常受摔落伤害', () => {
+  it('僵尸落进灌了水的坑与落进同样的空坑逐 tick 一样：沉到坑底，照常受摔落伤害', () => {
     const wet = zombieTrace(BlockType.Water);
     const dry = zombieTrace(BlockType.Air);
     expect(wet).toEqual(dry);
@@ -503,7 +503,7 @@ describe('只改玩家：僵尸与掉落物在水里照旧（#77 回归检查）
     return trace;
   }
 
-  it('掉落物落进水坑与落进同样的空坑逐 tick 一样：沉到坑底', () => {
+  it('掉落物落进灌了水的坑与落进同样的空坑逐 tick 一样：沉到坑底', () => {
     const wet = dropTrace(BlockType.Water);
     const dry = dropTrace(BlockType.Air);
     expect(wet).toEqual(dry);

@@ -824,7 +824,7 @@ describe('出生列周围 7 格内没有水塘', () => {
     return coords;
   }
 
-  it('平地上把出生列挪到某个水塘的中心列：那个水塘不再出现，出生列周围 7 格内没有水塘列', () => {
+  it('平地上把出生列移到某个水塘的中心列：那个水塘不再出现，出生列周围 7 格内没有水塘列', () => {
     const far = pondsIn(flatPlacement(314_159, () => Biome.Plains, 80, FAR_SPAWN), FLAT_CHUNKS);
     expect(far.length).toBeGreaterThan(0);
     const wrong: string[] = [];
@@ -836,7 +836,7 @@ describe('出生列周围 7 格内没有水塘', () => {
     expect(wrong).toEqual([]);
   });
 
-  it('真实地形上把出生列挪到某个水塘的中心列：出生列周围 7 格内没有水塘列', () => {
+  it('真实地形上把出生列移到某个水塘的中心列：出生列周围 7 格内没有水塘列', () => {
     const wrong: string[] = [];
     let moved = 0;
     for (const seed of SURVEY_SEEDS) {
@@ -852,7 +852,7 @@ describe('出生列周围 7 格内没有水塘', () => {
     expect(wrong).toEqual([]);
   });
 
-  it('避让只到 7 格附近：平地上出生列挪到水塘中心后，8 到 24 格（切比雪夫距离）之间仍有水塘列', () => {
+  it('避让只到 7 格附近：平地上出生列移到水塘中心后，8 到 24 格（切比雪夫距离）之间仍有水塘列', () => {
     const far = pondsIn(flatPlacement(314_159, () => Biome.Plains, 80, FAR_SPAWN), FLAT_CHUNKS);
     let ringColumns = 0;
     for (const pond of far.slice(0, 8)) {

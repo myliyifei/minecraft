@@ -765,7 +765,7 @@ export class GameCore implements BlockEdit, BlockStateView {
    *
    * 从最高的非空气方块（`highestBlockY`）往下跳过不实心的方块：火把（#56）、地表植物（#80）。玩家穿得过它们，站在火把顶上
    * 就会掉下去，插在高处墙上的一支足以让重生摔死。树冠是实心的，会把出生点抬到树冠的高度，所以
-   * 出生点那一带干脆不长树，见 `TREE_SPAWN_CLEARANCE`。
+   * 出生点周围不长树，见 `TREE_SPAWN_CLEARANCE`。
    *
    * 出生列所在区块没加载时读不出那一列（「未加载即空气」），就用进入世界时的出生点。这时那个区块一定
    * 没改过：改过的区块卸载后仍留在世界里（ADR-0008），`respawn` 先把它放回来再问这里。

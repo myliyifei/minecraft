@@ -197,7 +197,7 @@ describe('平地上的水塘', () => {
 });
 
 describe('真实地形的出生列旁本来会有水塘的种子', () => {
-  /** 这几个种子把出生列挪远时，出生列周围 7 格内有水塘列（种子 1 到 60 里找出来的）。 */
+  /** 这几个种子把出生列移远时，出生列周围 7 格内有水塘列（种子 1 到 60 里找出来的）。 */
   const SEEDS = [16, 34, 35];
 
   it.each(SEEDS)('种子 %i：出生列周围 7 格内列顶地表方块查询都不是水，生成结果里地表高度那一格也都不是水', (seed) => {
@@ -209,7 +209,7 @@ describe('真实地形的出生列旁本来会有水塘的种子', () => {
       for (let cz = chunkOf(spawn.z - 7); cz <= chunkOf(spawn.z + 7); cz++) coords.push({ cx, cz });
     }
     const wouldBe = pondsIn({ ...terrain, spawnColumn: FAR_SPAWN }, coords).flatMap((p) => p.columns.filter(near));
-    expect(wouldBe.length, '出生列挪远时 7 格内的水塘列').toBeGreaterThan(0);
+    expect(wouldBe.length, '出生列移远时 7 格内的水塘列').toBeGreaterThan(0);
 
     const wrong: string[] = [];
     const chunks = new Map(coords.map(({ cx, cz }) => [`${cx},${cz}`, terrain.generateChunk(cx, cz)]));

@@ -327,7 +327,7 @@ function leaves(color, holes) {
   };
 }
 
-/** 木板：四条横板，板与板之间一条深色接缝，每条板上错开一处竖向的短接缝。 */
+/** 木板：四条横板，板与板之间一条深色缝隙，每条板上错开一处竖向的短缝隙。 */
 function planks(board, seamColor) {
   return (x, y, rand) => {
     const seam = y % 4 === 3 || (x === (Math.floor(y / 4) * 5) % TILE_PX && y % 4 !== 3);

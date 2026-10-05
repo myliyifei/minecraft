@@ -118,7 +118,7 @@ const XP_ABSORB_TICKS = TICK_RATE;
  * 默认种子下、会写进原点区块的第一棵树（三种树中的任一种，#79）。树根不一定落在原点区块里，但一定在页面
  * 进入世界时就等好了的那一片内（见 SPAWN_READY_RADIUS）。
  *
- * 在 Node 这一侧用同一份地形对象算出来，再拿去核对页面里的世界——两边对得上，就说明
+ * 在 Node 这一侧用同一份地形对象算出来，再用来核对页面里的世界——两边一致，就说明
  * Worker 生成的区块与核心认的是同一个世界（ADR-0003）。
  */
 function spawnAreaTree(): Tree {
@@ -495,7 +495,7 @@ test('页面打开后是由默认种子生成的地形', async ({ page }) => {
   expect(mismatched).toEqual([]);
 
   const heights = columns.map(({ surface }) => surface);
-  // 出现多种高度才算「起伏」，而不是一片硬编码平地。高度范围与群系的断言在 tests/core/terrain-biomes.test.ts（#75）
+  // 出现多种高度才算「起伏」，而不是一片固定高度的平地。高度范围与群系的断言在 tests/core/terrain-biomes.test.ts（#75）
   expect(new Set(heights).size).toBeGreaterThan(1);
 });
 
@@ -2878,7 +2878,7 @@ test('背包里只有 2 块橡木板加 2 块白桦木板：配方书里工作�
   expect(errors).toEqual([]);
 });
 
-test('调试句柄放下白桦与云杉的六种方块：区块网格用上第 49 到 56 格；头顶一层白桦树叶之下天光 14，再垫一层云杉树叶是 13（#85）', async ({
+test('调试句柄放下白桦与云杉的六种方块：区块网格用上第 49 到 56 格；头顶一层白桦树叶之下天光 14，再加一层云杉树叶是 13（#85）', async ({
   page,
 }) => {
   const seen = await page.evaluate(

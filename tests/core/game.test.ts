@@ -270,7 +270,7 @@ describe('GameCore 的地形形态', () => {
 
   it('没有树的列上 highestBlockY 就是草方块的高度', () => {
     const core = sampleCore();
-    // 出生点那一带不长树（见 TREE_SPAWN_CLEARANCE），最高的方块就是地表那层草
+    // 出生点那一带不长树（见 TREE_SPAWN_CLEARANCE），最高的方块就是地表那层草方块
     for (const [x, z] of [
       [0, 0],
       [1, -1],

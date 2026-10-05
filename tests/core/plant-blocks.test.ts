@@ -155,7 +155,7 @@ describe('四种植物的掉落、物品与落点', () => {
     }
   });
 
-  it('连锁挖掘里同一种植物连成一片，不同种的植物不算同一类型', () => {
+  it('连锁挖掘里同一种植物连成一片，不同种类的植物不算同一类型', () => {
     expectPlantsDefined();
     const world = worldWithBlocks(
       [[0, 80, 0], SHORT_GRASS],

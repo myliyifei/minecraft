@@ -13,7 +13,7 @@ export interface ChunkMaterials {
 interface ChunkEntry extends ChunkCoord {
   readonly opaque?: THREE.Mesh;
   readonly translucent?: THREE.Mesh;
-  /** 网格构建时顺带记下的发光方块，粒子从这里冒（`ChunkMeshData.glowingBlocks`）。 */
+  /** 网格构建时同时记下的发光方块，粒子在这些方块处生成（`ChunkMeshData.glowingBlocks`）。 */
   readonly glowingBlocks: readonly GlowingBlock[];
 }
 

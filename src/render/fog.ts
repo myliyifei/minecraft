@@ -22,7 +22,7 @@ export interface Fog {
 /** 水下雾的颜色（sRGB）：偏深的蓝色。 */
 export const UNDERWATER_FOG_COLOR: Rgb = [0.05, 0.15, 0.45];
 
-/** 水下雾从这个距离（方块）开始混入：交互距离以内看得清。 */
+/** 水下雾从这个距离（方块）开始混入：眼前 1 格以内不混入雾色。 */
 export const UNDERWATER_FOG_NEAR = 1;
 
 /**

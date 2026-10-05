@@ -491,8 +491,8 @@ function tilePixels(atlas: { rgba: Uint8Array; width: number }, tile: number): U
 }
 
 /**
- * 扩图集之前（提交 8c817e1，8x8）各张贴图像素的 SHA-256 前 16 位，写死成字面量。
- * 扩到 8x16 只加行、不挪格（#73）：这些格的像素必须原样留着。以后有意重画某张贴图时，改这里对应的那一行。
+ * 扩图集之前（提交 8c817e1，8x8）各张贴图像素的 SHA-256 前 16 位，直接写成字面量。
+ * 扩到 8x16 只加行、不移动已有的格（#73）：这些格的像素必须原样留着。以后有意重画某张贴图时，改这里对应的那一行。
  */
 const PIXELS_BEFORE_8X16: ReadonlyArray<readonly [tile: number, sha256Prefix: string]> = [
   [0, '3530389234c33f05'],

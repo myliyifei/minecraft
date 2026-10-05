@@ -207,7 +207,7 @@ export function buildChunkMesh(chunk: ChunkView, view: MeshView, smoothLighting 
 }
 
 /**
- * 扫一遍区块：整格方块的暴露面写进 `opaqueBuffers` 或 `translucentBuffers`，发光方块、火把与地表植物的下标记进
+ * 遍历区块：整格方块的暴露面写进 `opaqueBuffers` 或 `translucentBuffers`，发光方块、火把与地表植物的下标记进
  * `glowing`、`torches`、`plants`。
  *
  * 单独一个函数，只做整数与 TypedArray 上的事：建火把细杆、建发光方块的对象都在它外面（见 `warmUpChunkMeshes`）。

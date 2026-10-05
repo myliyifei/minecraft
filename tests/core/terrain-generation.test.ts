@@ -171,7 +171,7 @@ function expectAllBiomesFound(seed: number): void {
   expect(s.mountains.length, `种子 ${seed} 的高山区块数`).toBeGreaterThan(0);
 }
 
-/** 逐区块、逐列走一遍。 */
+/** 逐区块、逐列遍历。 */
 function eachColumn(seed: number, visit: (chunk: Chunk, lx: number, lz: number, column: ColumnCoord) => void): void {
   for (const coord of allChunks(seed)) {
     const chunk = chunkAt(seed, coord);

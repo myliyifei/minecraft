@@ -42,7 +42,7 @@ function one(item: ItemType): ItemStack {
   return { item, count: 1 };
 }
 
-/** 橡木板、白桦木板、云杉木板，写成一个字母好让图案对齐。 */
+/** 橡木板、白桦木板、云杉木板，写成一个字母，使图案对齐。 */
 const [O, B, P] = ALL_PLANKS as [ItemType, ItemType, ItemType];
 
 describe('三种原木各自合成自己的 4 块木板', () => {

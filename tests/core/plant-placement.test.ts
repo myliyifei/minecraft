@@ -94,7 +94,7 @@ describe('视线与地表植物的命中盒', () => {
     ['三格外瞄准上排花瓣', 3.5, 0.53],
   ] as const)('平地上的花，%s：目标是花，不是后面的地面', (_name, eyeX, height) => {
     expectPlantsDefined();
-    // 花瓣画在第 7 到 12 行（高 0.25 到 0.5625），瞄准点取上排花瓣与花心的高度（贴图与命中盒的对齐另见 plant-mesh 测试）
+    // 花瓣画在第 7 到 12 行（高 0.25 到 0.5625），视线对准的高度取上排花瓣与花心那一段（贴图与命中盒的对齐另见 plant-mesh 测试）
     for (const flower of [DANDELION, POPPY]) {
       const world = flatTestWorld();
       world.setBlock(0, S, 0, flower);

@@ -10,17 +10,21 @@ import { ItemType } from '../src/core/item';
 import { MAX_PITCH } from '../src/core/player';
 import type { Snapshot } from '../src/core/snapshot';
 import type { Vec3 } from '../src/core/vec3';
-import { keyLabel } from '../src/input/keybindings';
+import { DEFAULT_KEY_BINDINGS, keyLabel } from '../src/input/keybindings';
 import { gunzipChunk } from '../src/storage/chunk-codec';
 import { decodeWorldBlob, encodeWorldFile, type WorldFile } from '../src/storage/world-file';
 import { STRINGS } from '../src/ui/strings';
 import { worldFileOf } from '../tests/helpers/world-file';
+import { changedCells, checkSeventhSliceTerrain, expectStep, SEVENTH_SLICE_ARGS, seventhSliceSteps } from './seventh-slice';
 import { createWorld, pressEscape, waitForWorld, waitForWorldList } from './world-list';
 
 /*
  * 第六切片的全流程跑在生产构建的预览上（#71）。生产构建没有调试句柄，读不到核心，而无头 Chromium 锁着指针时
  * 越来越慢，用真实鼠标挖放既慢又对不准。所以世界里的动作（挖、放、扔、插火把、把世界时刻改到夜里）在 Node 里用同一份核心
  * 做好，编码成导出文件，经界面导入；要比对的状态一律经界面导出、在 Node 里解码。界面上的操作都点真实的按钮。
+ *
+ * 第七切片的全流程（#82）同样做法：游水塘、往水里放方块、挖冰、挖花再种下、砍白桦合成工作台在 Node 里用 seventh-slice.ts 的
+ * 步骤函数做（与 dev 那条同一组），自动跳跃上台阶用真实按键在生产构建里走。水下雾要读渲染器的 `sky`，生产构建读不到，只在 dev 里核对。
  */
 
 /** 改跳跃键用的那颗键。 */
@@ -277,5 +281,89 @@ test('生产构建的全流程：设置改键位与视距并保留；新建世�
   await deathButtons.click();
   await waitForWorldList(page);
   expect(new Set(await entryIds(page))).toEqual(new Set([createdId, importedId]));
+  expect(errors).toEqual([]);
+});
+
+/** 在生产构建里按住前进键的时长（毫秒）。无头 Chromium 锁着指针时 tick 跟不上实时，实测约走 3 格；台阶在 2 格外，上层铺了 8 格。 */
+const WALK_UP_MS = 1200;
+
+/**
+ * 在 Node 里用同一份核心把第七切片全流程在世界里的各步做完（与 dev 全流程同一组步骤函数），每一步按同样的断言核对，
+ * 最后停在台阶前面朝它：自动跳跃那一步留给生产构建里的真实按键。
+ */
+function seventhSlicePlayed() {
+  const terrain = checkSeventhSliceTerrain();
+  const core = newCore(Difficulty.Normal);
+  expect({ ...core.player.position }).toEqual(terrain.spawn);
+  const steps = seventhSliceSteps(core, SEVENTH_SLICE_ARGS);
+  expectStep.swimToPondCenter(steps.swimToPondCenter(), terrain);
+  for (const name of ['placeInWater', 'climbOutEast', 'mineIce', 'pickFlower', 'chopBirch', 'craftTable'] as const) {
+    expectStep[name](steps[name](), terrain);
+  }
+  const step = expectStep.buildStep(steps.buildStep());
+  return { terrain, step, snapshot: core.snapshot() };
+}
+
+test('生产构建的第七切片全流程：新建世界出生在平原的草方块上；导入在 Node 里游过水塘、往水里放圆石、挖冰、挖花再种下、砍白桦合成工作台的世界，回到游戏按住前进键自动跳上台阶；保存并退出再进入、导出再导入，改动都在原处（#82）', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(60_000);
+
+  // 新建世界、保存并退出、导出：玩家在 Node 里地形对象算出的出生点（平原、列顶草方块）
+  const { terrain, step, snapshot } = seventhSlicePlayed();
+  await createWorld(page, { name: '新建的第七切片', seed: String(DEFAULT_SEED) });
+  await expect(pauseMenu(page)).toBeVisible();
+  await saveAndExit(page);
+  const [createdId] = await entryIds(page);
+  const created = await exportId(page, createdId!);
+  expect(created.state.player.position).toEqual(terrain.spawn);
+
+  // 导入在 Node 里玩过的世界，回到游戏按住前进键朝台阶走：脚底高了一格、走过了台阶那一面
+  const importedId = await importSnapshot(page, testInfo, snapshot, '第七切片');
+  await enterId(page, importedId);
+  await resume(page);
+  await page.keyboard.down(DEFAULT_KEY_BINDINGS.forward);
+  await page.waitForTimeout(WALK_UP_MS);
+  await page.keyboard.up(DEFAULT_KEY_BINDINGS.forward);
+  await pressEscape(page);
+  await expect(pauseMenu(page)).toBeVisible();
+  await saveAndExit(page);
+  const walked = await exportId(page, importedId);
+  expect(walked.state.ticks).toBeGreaterThan(snapshot.ticks);
+  const { position } = walked.state.player;
+  // 走多远由帧率决定，只要求站到了台阶上：脚底高一格，碰撞箱中心越过了台阶那一面
+  expect(position.y).toBe(step.feet + 1);
+  expect(position.z).toBeLessThan(step.stepFace);
+
+  // 改过的几格都在导出的文件里
+  const changed = changedCells(terrain, step);
+  const expected = Object.fromEntries(Object.entries(changed).map(([name, { block }]) => [name, block]));
+  const blocksIn = async (file: WorldFile) =>
+    Object.fromEntries(await Promise.all(Object.entries(changed).map(async ([name, { cell }]) => [name, await blockIn(file, cell)] as const)));
+  expect(await blocksIn(walked)).toEqual(expected);
+
+  // 保存并退出再进入（不回到游戏）：导出的与上次完全相同
+  await enterId(page, importedId);
+  await saveAndExit(page);
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    entryWithId(page, importedId).getByRole('button', { name: STRINGS.exportWorld }).click(),
+  ]);
+  const exportedPath = await download.path();
+  const reentered = await decodeWorldBlob(new Blob([await readFile(exportedPath)]));
+  if (!reentered.ok) throw new Error(reentered.reason);
+  expect(await comparable(reentered.file)).toEqual(await comparable(walked));
+
+  // 导出再导入：把刚下载的文件导入，副本进入、保存并退出再导出，与原世界相同
+  const known = new Set(await entryIds(page));
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: STRINGS.importWorld }).click()]);
+  await chooser.setFiles(exportedPath);
+  await expect(entries(page)).toHaveCount(known.size + 1);
+  const copyId = (await entryIds(page)).find((id) => !known.has(id))!;
+  await enterId(page, copyId);
+  await saveAndExit(page);
+  const copy = await exportId(page, copyId);
+  expect(await comparable(copy)).toEqual(await comparable(walked));
+  expect(await blocksIn(copy)).toEqual(expected);
   expect(errors).toEqual([]);
 });

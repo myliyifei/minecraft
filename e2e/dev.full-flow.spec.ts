@@ -8,12 +8,15 @@ import { MAX_PITCH } from '../src/core/player';
 import type { Vec3 } from '../src/core/vec3';
 import { DEFAULT_KEY_BINDINGS, keyLabel } from '../src/input/keybindings';
 import { STRINGS } from '../src/ui/strings';
-import { GROUND_ARGS, createWorld, fallToDeath, pressEscape, resumeGame, waitForWorld, waitForWorldList } from './world-list';
+import { changedCells, checkSeventhSliceTerrain, expectStep, stepInPage, type StepReadback } from './seventh-slice';
+import { GROUND_ARGS, createWorld, fallToDeath, ignorePause, pressEscape, resumeGame, waitForWorld, waitForWorldList } from './world-list';
 
 /*
  * 第六切片的全流程（#71）：全程在同一个浏览器上下文里，从空的世界列表走到导出再导入，IndexedDB 与 localStorage
  * 一路累积。世界里的动作经调试句柄交给核心，界面上的操作都点真实的按钮。生产构建上的同一条流程在
  * prod.full-flow.spec.ts。
+ *
+ * 第七切片的全流程（#82）是另一条用例，世界里的各步写在 seventh-slice.ts，与生产构建那条共用。
  */
 
 /** 改跳跃键用的那颗键。 */
@@ -301,5 +304,125 @@ test('全流程：空列表新建世界，挖、放、扔、插火把后 Esc，�
   await settingsScreen(page).getByRole('button', { name: STRINGS.done }).click();
   await enterId(page, originalId!);
   expect(await page.evaluate(() => window.__VOXEL__!.core.viewRadius)).toBe(NEW_VIEW_RADIUS);
+  expect(errors).toEqual([]);
+});
+
+/** 不理会暂停、等出生列周围 3×3 个区块（全流程走到的地方都在里面）到位，再回到暂停菜单。之后世界只由同步的 tick 推进。 */
+async function settleAroundSpawn(page: Page): Promise<void> {
+  await ignorePause(page);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const core = window.__VOXEL__!.core;
+          for (let cx = -1; cx <= 1; cx++) for (let cz = -1; cz <= 1; cz++) if (!core.isChunkLoaded(cx, cz)) return false;
+          return true;
+        }),
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+  await page.evaluate(() => window.__VOXEL__!.setIgnorePause(false));
+  await expect(pauseMenu(page)).toBeVisible();
+}
+
+/** 画一帧，读回 `sky`：眼睛在不在水下、雾开没开。 */
+function skyAfterRender(page: Page): Promise<{ underwater: boolean; fogEnabled: boolean }> {
+  return page.evaluate(() => {
+    const { renderer } = window.__VOXEL__!;
+    renderer.render(1);
+    const { underwater, fogEnabled } = renderer.sky;
+    return { underwater, fogEnabled };
+  });
+}
+
+/** 再进入之后要一致的：改过的几格、tick、玩家、背包与选中格、掉落物。 */
+function observeSeventh(page: Page, cells: readonly Vec3[]) {
+  return page.evaluate((cells) => {
+    const core = window.__VOXEL__!.core;
+    const { position, yaw, pitch } = core.player;
+    return {
+      blocks: cells.map(({ x, y, z }) => core.getBlock(x, y, z)),
+      ticks: core.tickCount,
+      player: { position: { ...position }, yaw, pitch },
+      inventory: Array.from({ length: core.inventory.size }, (_, i) => {
+        const stack = core.inventory.slot(i);
+        return stack ? { ...stack } : null;
+      }),
+      selectedSlot: core.inventory.selectedSlot,
+      drops: core.drops.all().map(({ id, item, count, position, age }) => ({ id, item, count, age, position: { ...position } })),
+    };
+  }, cells);
+}
+
+test('第七切片全流程：新建世界出生在平原的草方块上，走进水塘沉到水下（sky 报告在水下、雾开启），往水里放圆石，挖冰变水，挖花再种下，砍白桦用白桦木板与橡木板合成工作台，自动跳跃上台阶；保存并退出再进入、导出再导入，改动都在原处（#82）', async ({
+  page,
+}) => {
+  // 不锁定指针：世界里的每一步都在一次同步的 evaluate 里推进 tick（seventh-slice.ts）
+  test.setTimeout(60_000);
+  const terrain = checkSeventhSliceTerrain();
+
+  // 新建世界：出生点是 Node 里地形对象算出的出生列（平原、列顶草方块）最高实心方块的顶面
+  await createWorld(page, { name: '第七切片', seed: String(DEFAULT_SEED) });
+  await expect(pauseMenu(page)).toBeVisible();
+  await settleAroundSpawn(page);
+  const spawn = await page.evaluate(
+    ({ x, y, z }) => {
+      const core = window.__VOXEL__!.core;
+      return { position: { ...core.player.position }, ground: core.getBlock(Math.floor(x), y - 1, Math.floor(z)) };
+    },
+    terrain.spawn,
+  );
+  expect(spawn.position).toEqual(terrain.spawn);
+  expect(spawn.ground).toBe(BlockType.Grass);
+  expect(await skyAfterRender(page)).toEqual({ underwater: false, fogEnabled: false });
+
+  // 走到水边游进去，沉到塘底：sky 读回报告在水下，雾开启
+  const swim = await stepInPage(page, 'swimToPondCenter');
+  expectStep.swimToPondCenter(swim, terrain);
+  expect(await skyAfterRender(page)).toEqual({ underwater: true, fogEnabled: true });
+
+  const steps: Record<string, StepReadback> = {};
+  for (const name of ['placeInWater', 'climbOutEast', 'mineIce', 'pickFlower', 'chopBirch', 'craftTable'] as const) {
+    steps[name] = await stepInPage(page, name);
+    expectStep[name](steps[name]!, terrain);
+  }
+  // 出水之后不再在水下
+  expect(await skyAfterRender(page)).toEqual({ underwater: false, fogEnabled: false });
+
+  // 自动跳跃：搭一格高的台阶，朝它走，脚底高一格、走过了台阶那一面
+  const step = expectStep.buildStep(await stepInPage(page, 'buildStep'));
+  const walked = await stepInPage(page, 'walkUpStep');
+  expect(walked.position.y).toBe(step.feet + 1);
+  expect(walked.position.z).toBeLessThan(step.stepFace - 1);
+
+  const changed = changedCells(terrain, step);
+  const cells = Object.values(changed).map(({ cell }) => cell);
+  const before = await observeSeventh(page, cells);
+  expect(Object.fromEntries(Object.keys(changed).map((name, i) => [name, before.blocks[i]]))).toEqual(
+    Object.fromEntries(Object.entries(changed).map(([name, { block }]) => [name, block])),
+  );
+
+  // 保存并退出再进入：改动都在原处
+  await saveAndExit(page);
+  const [originalId] = await entryIds(page);
+  await enterId(page, originalId!);
+  await expect(pauseMenu(page)).toBeVisible();
+  expect(await observeSeventh(page, cells)).toEqual(before);
+
+  // 导出再导入：副本进入后与原世界相同
+  await saveAndExit(page);
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    entryNamed(page, '第七切片').getByRole('button', { name: STRINGS.exportWorld }).click(),
+  ]);
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser'),
+    page.getByRole('button', { name: STRINGS.importWorld }).click(),
+  ]);
+  await chooser.setFiles(await download.path());
+  await expect(entries(page)).toHaveCount(2);
+  const [copyId] = (await entryIds(page)).filter((id) => id !== originalId);
+  await enterId(page, copyId!);
+  expect(await observeSeventh(page, cells)).toEqual(before);
   expect(errors).toEqual([]);
 });

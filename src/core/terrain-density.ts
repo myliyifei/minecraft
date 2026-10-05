@@ -63,15 +63,16 @@ export function climateAt(seed: number, x: number, z: number): Climate {
   };
 }
 
-function continentalnessAt(seed: number, x: number, z: number): number {
+/** 三层群系参数各自单独求：群系按大陆度、起伏、温度依次判断，判出来就不必再求后面的层（`terrain.ts`）。 */
+export function continentalnessAt(seed: number, x: number, z: number): number {
   return fbm2(seed ^ CONTINENTALNESS_SALT, x / CONTINENTALNESS_SCALE, z / CONTINENTALNESS_SCALE, CLIMATE_OCTAVES);
 }
 
-function reliefAt(seed: number, x: number, z: number): number {
+export function reliefAt(seed: number, x: number, z: number): number {
   return fbm2(seed ^ RELIEF_SALT, x / RELIEF_SCALE, z / RELIEF_SCALE, CLIMATE_OCTAVES);
 }
 
-function temperatureAt(seed: number, x: number, z: number): number {
+export function temperatureAt(seed: number, x: number, z: number): number {
   return fbm2(seed ^ TEMPERATURE_SALT, x / TEMPERATURE_SCALE, z / TEMPERATURE_SCALE, CLIMATE_OCTAVES);
 }
 
@@ -328,23 +329,8 @@ function gridCell(coord: number): { g: number; f: number } {
   return { g, f: (coord - g * GRID_XZ) / GRID_XZ };
 }
 
-/**
- * 一列最高的地形方块的 y（密度为正的最高一格）。只求这一列四角的格点，不生成区块。
- *
- * 铺地表只把石头换成草方块与泥土、嵌矿脉只替换石头，都不改哪一格是地形方块，所以这就是铺好地表之后
- * 那一列的地表高度。
- */
-export function densitySurfaceHeight(seed: number, x: number, z: number): number {
-  const { g: gx, f: fx } = gridCell(x);
-  const { g: gz, f: fz } = gridCell(z);
-  const corners = cornersOf(
-    new GridColumn(seed, gx, gz),
-    new GridColumn(seed, gx + 1, gz),
-    new GridColumn(seed, gx, gz + 1),
-    new GridColumn(seed, gx + 1, gz + 1),
-    fx,
-    fz,
-  );
+/** 一列最高的地形方块的 y：自上而下扫到第一格地形方块。单列查询与区块边外那一圈列都走这里。 */
+function surfaceOf(corners: ColumnCorners): number {
   let surface = WORLD_MIN_Y;
   scanColumn(corners, topOf(corners), WORLD_MIN_Y + 1, (y, solid) => {
     if (!solid) return true;
@@ -355,43 +341,105 @@ export function densitySurfaceHeight(seed: number, x: number, z: number): number
 }
 
 /**
- * 区块里每一列（下标 `lz * CHUNK_SIZE + lx`）按密度扫描过的范围。
+ * 一列最高的地形方块的 y（密度为正的最高一格）。只求这一列四角的格点，不生成区块。
+ *
+ * 铺地表只替换地形方块的种类（石头换成草方块、泥土、沙子等）、嵌矿脉只替换石头，都不改哪一格是地形方块，
+ * 所以这就是铺好地表之后那一列的地表高度。
+ */
+export function densitySurfaceHeight(seed: number, x: number, z: number): number {
+  const { g: gx, f: fx } = gridCell(x);
+  const { g: gz, f: fz } = gridCell(z);
+  return surfaceOf(
+    cornersOf(
+      new GridColumn(seed, gx, gz),
+      new GridColumn(seed, gx + 1, gz),
+      new GridColumn(seed, gx, gz + 1),
+      new GridColumn(seed, gx + 1, gz + 1),
+      fx,
+      fz,
+    ),
+  );
+}
+
+/** 地表高度窗口的边长：区块本身加四周各一列（铺地表判陡坡要看东南西北四个相邻列）。 */
+export const HEIGHT_WINDOW = CHUNK_SIZE + 2;
+
+/**
+ * 区块里每一列（下标 `lz * CHUNK_SIZE + lx`）按密度扫描过的范围，与区块连同四周一圈列的地表高度。
  * `top` 之上一定是空气；`solidTop` 及以下整段是石头，从上往下扫到这里为止就不会再遇到露天的顶面。
+ * `heights` 的下标是 `(lz + 1) * HEIGHT_WINDOW + (lx + 1)`，lx、lz 从 −1 到 CHUNK_SIZE；四个角上的列不求，
+ * 留 `WORLD_MIN_Y`。值与 `densitySurfaceHeight` 逐列相同。
  */
 export interface DensityExtent {
   readonly tops: Int16Array;
   readonly solidTops: Int16Array;
+  readonly heights: Int16Array;
 }
 
-/** 按密度把区块里的地形方块写成石头，其余保持空气；最底层不动（调用方写基岩）。 */
+/**
+ * 按密度把区块里的地形方块写成石头，其余保持空气；最底层不动（调用方写基岩）。
+ *
+ * 顺带求出区块四周那一圈 64 列的地表高度：格点多取一圈（区块本身的 5×5 根之外再加四条边上各 5 根），
+ * 与区块共用边上那一排格点的缓存，比逐列调 `densitySurfaceHeight`（每列新建 4 根格点竖列）省得多。
+ */
 export function fillDensity(seed: number, chunk: Chunk): DensityExtent {
   const gx0 = (chunk.cx * CHUNK_SIZE) >> GRID_XZ_SHIFT;
   const gz0 = (chunk.cz * CHUNK_SIZE) >> GRID_XZ_SHIFT;
-  const grid: GridColumn[] = [];
-  for (let i = 0; i < CHUNK_GRID; i++) {
-    for (let k = 0; k < CHUNK_GRID; k++) grid.push(new GridColumn(seed, gx0 + k, gz0 + i));
+  // 格点下标 k、i 从 −1 到 CHUNK_GRID：四周多一圈，四个角上那 4 根用不到，不建。
+  const span = CHUNK_GRID + 2;
+  const grid: Array<GridColumn | undefined> = new Array<GridColumn | undefined>(span * span);
+  for (let i = -1; i <= CHUNK_GRID; i++) {
+    for (let k = -1; k <= CHUNK_GRID; k++) {
+      const corner = (i === -1 || i === CHUNK_GRID) && (k === -1 || k === CHUNK_GRID);
+      if (!corner) grid[(i + 1) * span + (k + 1)] = new GridColumn(seed, gx0 + k, gz0 + i);
+    }
   }
-  const at = (k: number, i: number): GridColumn => grid[i * CHUNK_GRID + k]!;
+  const at = (k: number, i: number): GridColumn => grid[(i + 1) * span + (k + 1)]!;
+  const cornersAt = (lx: number, lz: number): ColumnCorners => {
+    const k = lx >> GRID_XZ_SHIFT;
+    const i = lz >> GRID_XZ_SHIFT;
+    const fx = (lx - k * GRID_XZ) / GRID_XZ;
+    const fz = (lz - i * GRID_XZ) / GRID_XZ;
+    return cornersOf(at(k, i), at(k + 1, i), at(k, i + 1), at(k + 1, i + 1), fx, fz);
+  };
 
   const tops = new Int16Array(CHUNK_SIZE * CHUNK_SIZE);
   const solidTops = new Int16Array(CHUNK_SIZE * CHUNK_SIZE);
+  const heights = new Int16Array(HEIGHT_WINDOW * HEIGHT_WINDOW).fill(WORLD_MIN_Y);
   for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-    const i = lz >> GRID_XZ_SHIFT;
-    const fz = (lz - i * GRID_XZ) / GRID_XZ;
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-      const k = lx >> GRID_XZ_SHIFT;
-      const fx = (lx - k * GRID_XZ) / GRID_XZ;
-      const corners = cornersOf(at(k, i), at(k + 1, i), at(k, i + 1), at(k + 1, i + 1), fx, fz);
+      const corners = cornersAt(lx, lz);
       const solidTop = Math.max(WORLD_MIN_Y, solidTopOf(corners));
       const top = Math.max(solidTop, topOf(corners));
       chunk.fillColumn(lx, lz, WORLD_MIN_Y + 1, solidTop, BlockType.Stone);
+      // 扫到的第一格地形方块就是地表高度；整段都没有时是 solidTop（它及以下整段实心）。
+      let surface = solidTop;
+      let found = false;
       scanColumn(corners, top, solidTop + 1, (y, solid) => {
-        if (solid) chunk.set(lx, y, lz, BlockType.Stone);
+        if (solid) {
+          chunk.set(lx, y, lz, BlockType.Stone);
+          if (!found) {
+            surface = y;
+            found = true;
+          }
+        }
         return true;
       });
       tops[lz * CHUNK_SIZE + lx] = top;
       solidTops[lz * CHUNK_SIZE + lx] = solidTop;
+      heights[(lz + 1) * HEIGHT_WINDOW + (lx + 1)] = surface;
     }
   }
-  return { tops, solidTops };
+  // 四周那一圈列：只求地表高度，不写区块。
+  for (let n = 0; n < CHUNK_SIZE; n++) {
+    for (const [lx, lz] of [
+      [-1, n],
+      [CHUNK_SIZE, n],
+      [n, -1],
+      [n, CHUNK_SIZE],
+    ] as const) {
+      heights[(lz + 1) * HEIGHT_WINDOW + (lx + 1)] = surfaceOf(cornersAt(lx, lz));
+    }
+  }
+  return { tops, solidTops, heights };
 }

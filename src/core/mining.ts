@@ -1,11 +1,12 @@
 import {
-  BlockType,
+  blockAfterMining,
   blockDrop,
   blockExperience,
   isBreakable,
   miningTicks,
   wearsToolWhenMined,
   type BlockEdit,
+  type BlockType,
 } from './block';
 import { blockStateContents, type BlockStateView } from './block-state';
 import { chainConnectedBlocks } from './chain-mining';
@@ -90,7 +91,7 @@ const NO_CHAIN: readonly Vec3[] = Object.freeze([]);
  * 到空处）进度就归零，松开再按也从零开始。原版也是这样：挖到一半移开视线，回来
  * 得重挖。
  *
- * 挖穿的那一刻方块变成空气，掉落表里有东西的方块同时在原地掉出一个掉落物、一个经验球
+ * 挖穿的那一刻方块变成空气（冰变成水，`blockAfterMining`，#74），掉落表里有东西的方块同时在原地掉出一个掉落物、一个经验球
  * ——挖掘只管把两样交给 `DropSink` 与 `XpOrbSink`，之后怎么落、怎么飞、怎么被收走是
  * `Drops` 与 `XpOrbs` 的事。掉落与经验各算各的：空手挖石头什么都不掉，经验照给。
  *
@@ -227,21 +228,22 @@ export class Mining implements MiningView {
   }
 
   /**
-   * 挖掉一格：变成空气，掉落表里有东西就在原地掉出一个掉落物，有经验就再生成一个经验球。
+   * 挖掉一格：变成空气（冰变成水，`blockAfterMining`），掉落表里有东西就在原地掉出一个掉落物，有经验就再生成一个经验球。
+   * 连锁挖掘逐格走这里，所以连锁挖掉一片冰每一格都变成水。
    * 返回挖掉的是哪种方块，没挖掉（空气、挖不动）时 undefined——耐久按挖掉的块里损耗工具的那些算。
    * 挖不挖得动看 `isBreakable`：空气不是挖掘目标，火把硬度 0 却挖得动。
    *
    * 方块种类当场重读而不是沿用连锁开始时记下的：那之后世界可能被别处改过（区块卸载、
    * 外部写入），已经不在了的格子直接跳过，不会凭空掉出东西，也不算一块。
    *
-   * 带方块状态的方块（熔炉）还要把状态里装着的东西掉出来。状态得在写成空气之前读：那一下
+   * 带方块状态的方块（熔炉）还要把状态里装着的东西掉出来。状态得在写入之前读：那一下
    * 写入会让世界把这条状态删掉（ADR-0011）。
    */
   private breakBlock(x: number, y: number, z: number, tool: MiningTool): BlockType | undefined {
     const block = this.blocks.getBlock(x, y, z);
     if (!isBreakable(block)) return undefined;
     const state = this.blocks.blockStateAt(x, y, z);
-    this.blocks.setBlock(x, y, z, BlockType.Air);
+    this.blocks.setBlock(x, y, z, blockAfterMining(block));
     // 掉落物与经验球都落在方块原来那一格里。什么都不掉的方块（树叶、空手挖的石头）
     // 只是没有掉落物，经验照给——两样各查自己那一列。掉什么看手上的工具合格不合格（持镐挖石头掉圆石）。
     const drop = blockDrop(block, tool);

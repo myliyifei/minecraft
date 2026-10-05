@@ -43,7 +43,7 @@ export const BlockType = {
   WallTorchNegZ: 17,
   WallTorchPosZ: 18,
   /**
-   * 白桦与云杉（#85）：各有原木、树叶、木板三种方块，数值与橡树那三种相同（`log`、`leaves`、`planks`）。
+   * 白桦与云杉（#85）：各有原木、树叶、木板三种方块，数值与橡树那三种相同（`log`、`LEAVES`、`planks`）。
    * 三种树的同一种方块是不同的方块，不是外观变体：连锁挖掘里互不算同一类型（`baseBlock` 归到自己）。
    */
   BirchLog: 19,

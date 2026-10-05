@@ -46,7 +46,7 @@ function one(item: ItemType): ItemStack {
 const [O, B, P] = ALL_PLANKS as [ItemType, ItemType, ItemType];
 
 describe('三种原木各自合成自己的 4 块木板', () => {
-  it.each(named(ALL_SPECIES))('%s原木摆在 2x2 的任意一格都出 4 块同种木板', (_name, species) => {
+  it.each(named(ALL_SPECIES))('%s原木摆在 2x2 的任意一格都出 4 块自己那种木板', (_name, species) => {
     expectDefined(species);
     for (let index = 0; index < 4; index++) {
       const contents = Array<ItemType | undefined>(4).fill(undefined);
@@ -55,7 +55,7 @@ describe('三种原木各自合成自己的 4 块木板', () => {
     }
   });
 
-  it.each(named(NEW_SPECIES))('%s原木摆在 3x3 正中也出 4 块同种木板', (_name, species) => {
+  it.each(named(NEW_SPECIES))('%s原木摆在 3x3 正中也出 4 块自己那种木板', (_name, species) => {
     expectDefined(species);
     expect(matchRecipe(laid(THREE_BY_THREE, [[], [undefined, species.logItem]]), THREE_BY_THREE)).toEqual(
       stack(species.planksItem, 4),

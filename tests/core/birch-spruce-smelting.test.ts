@@ -16,7 +16,7 @@ import { ALL_SPECIES, NEW_SPECIES, expectDefined, named } from '../helpers/wood-
 /**
  * 白桦与云杉的燃料与熔炼（#85）：燃烧时长与熔炼经验与橡木相同。
  *
- * 数值写死字面值，不从燃料表反读：原木与木板各 300 tick，原木炼出木炭、每件 2 点经验，每件 200 tick。
+ * 数值按字面值写，不从燃料表反读：原木与木板各 300 tick，原木炼出木炭、每件 2 点经验，每件 200 tick。
  */
 const WOOD_BURN_TICKS = 300;
 const CHARCOAL_EXPERIENCE = 2;

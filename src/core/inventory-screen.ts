@@ -43,7 +43,7 @@ interface CursorHold {
  * 配方书（见 CONTEXT.md）里的一条：哪条配方，此刻材料够不够。
  *
  * 「够不够」把背包 36 格与网格里的材料合计，光标物品不计入——光标上那一堆是玩家正拿着
- * 要放到别处的，不该被配方书顺手用掉。一组物品按组里每一种的合计判断（`hasIngredients`）：
+ * 要放到别处的，配方书不应把它当作材料用掉。一组物品按组里每一种的合计判断（`hasIngredients`）：
  * 2 块橡木板加 2 块白桦木板够做工作台。
  */
 export interface RecipeBookEntry {
@@ -367,8 +367,8 @@ export class InventoryScreen implements InventoryScreenView {
    * 合计（`RecipeBookEntry`、`hasIngredients`），不足的那条点了没有任何反应。界面关着、没有网格、
    * 下标指不到配方时同样没有任何反应。
    *
-   * 写明单个物品的格子先填、一组物品的格子后填，各自仍按格号从小到大：组的格子先填可能把某个单个物品
-   * 格要的那种物品拿走。现有配方里组与单个物品不重叠（木板组与木棍），两种顺序填出来一样。
+   * 只按格号一轮填完是正确的，前提是同一条配方里组与组、组与单个物品不重叠（见 `ItemGroup`）：
+   * 组的格子取走的物品不会是别的格子要的那种。
    *
    * 网格里的物品退不完背包（36 格全满）时不填入材料，退不回去的留在原格：材料够是按
    * 「网格里的也算」判的，退不回去就取不到，硬填会把两处的材料混在一起。
@@ -385,13 +385,11 @@ export class InventoryScreen implements InventoryScreenView {
     if (!this.returnGrid(grid)) return;
 
     const layout = layoutRecipe(recipe, crafting);
-    for (const groups of [false, true]) {
-      for (let i = 0; i < layout.length; i++) {
-        const ingredient = layout[i];
-        if (ingredient === undefined || (typeof ingredient !== 'number') !== groups) continue;
-        const item = this.takeOneFromSlots(ingredient);
-        if (item !== undefined) grid.setSlot(i, { item, count: 1 });
-      }
+    for (let i = 0; i < layout.length; i++) {
+      const ingredient = layout[i];
+      if (ingredient === undefined) continue;
+      const item = this.takeOneFromSlots(ingredient);
+      if (item !== undefined) grid.setSlot(i, { item, count: 1 });
     }
   }
 
@@ -415,7 +413,7 @@ export class InventoryScreen implements InventoryScreenView {
 
   /**
    * 从背包格号最小的、满足这份材料的那一堆里拿走 1 个，返回拿走的是哪种物品。调用方已确认背包里有；
-   * 万一没有返回 undefined。
+   * 找不到时返回 undefined。
    */
   private takeOneFromSlots(ingredient: Ingredient): ItemType | undefined {
     for (let i = 0; i < this.slots.size; i++) {

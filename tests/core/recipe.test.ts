@@ -3,6 +3,7 @@ import { ItemType, type ItemStack } from '../../src/core/item';
 import {
   RECIPES,
   ingredientCounts,
+  ingredientMatches,
   layoutRecipe,
   recipesFor,
   matchRecipe,
@@ -664,5 +665,18 @@ describe('配方要哪些材料', () => {
       ingredients: [ItemType.Dirt, ItemType.Dirt],
     };
     expect(ingredientCounts(pair)).toEqual(new Map([[ItemType.Dirt, 2]]));
+  });
+});
+
+describe('配方表里的材料互不重叠（#85）', () => {
+  it('同一条配方里任一物品最多满足一种材料：组与组、组与单个物品没有共同的物品', () => {
+    // 配方书判材料够不够（hasIngredients）与按格号一轮填入（InventoryScreen.clickRecipe）都以此为前提
+    for (const recipe of RECIPES) {
+      const ingredients = [...ingredientCounts(recipe).keys()];
+      for (const item of Object.values(ItemType)) {
+        const satisfied = ingredients.filter((ingredient) => ingredientMatches(ingredient, item));
+        expect(satisfied.length, `成品 ${recipe.result.item} 的配方里物品 ${item}`).toBeLessThanOrEqual(1);
+      }
+    }
   });
 });

@@ -37,9 +37,9 @@ import {
 /**
  * 白桦与云杉的六种方块（#85）：挖掘、掉落、经验、透光、放置与连锁挖掘。
  *
- * 数值按父 spec #72 的方块表写死字面值：原木硬度 2、斧、掉自己、经验 60；木板硬度 2、斧、掉自己、经验 30；
+ * 数值按父 spec #72 的方块表按字面值写：原木硬度 2、斧、掉自己、经验 60；木板硬度 2、斧、掉自己、经验 30；
  * 树叶硬度 0.2、没有合格工具、什么都不掉、经验 30。耗时按公式向上取整（硬度 × 30 ÷ 倍率）换算：
- * 硬度 2 空手 60 tick、木斧（倍率 2）30 tick、石斧（倍率 4）15 tick；硬度 0.2 拿什么都是 6 tick。
+ * 硬度 2 空手 60 tick、木斧（倍率 2）30 tick、石斧（倍率 4）15 tick；硬度 0.2 空手与任何工具都是 6 tick。
  */
 
 function tool(toolClass: ToolClass, material: ToolMaterial, speed: number): MiningTool {
@@ -209,7 +209,7 @@ describe('连锁挖掘：三种原木不算同一类型（父 spec #72）', () =
     return [[cell.x, cell.y, cell.z], block];
   }
 
-  it('一根树干自下而上两格橡木、两格白桦、两格云杉：从哪一段开始都只连上同种的那两格', () => {
+  it('一根树干自下而上两格橡木、两格白桦、两格云杉：从哪一段开始都只连上同一类型的那两格', () => {
     expectAllDefined();
     const blocks = [OAK.log, OAK.log, BIRCH.log, BIRCH.log, SPRUCE.log, SPRUCE.log];
     const world = worldWithBlocks(...blocks.map((block, i) => at(above(i), block)));
@@ -218,7 +218,7 @@ describe('连锁挖掘：三种原木不算同一类型（父 spec #72）', () =
     expect(chainConnectedBlocks(world, above(4))).toEqual([above(4), above(5)]);
   });
 
-  it('同种的白桦原木照常连成一片：一根 5 格白桦树干整根连上', () => {
+  it('同一类型的白桦原木照常整根相连：一根 5 格白桦树干全部连上', () => {
     expectDefined(BIRCH);
     const cells = Array.from({ length: 5 }, (_, i) => above(i));
     const world = worldWithBlocks(...cells.map((cell) => at(cell, BIRCH.log)));

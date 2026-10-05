@@ -93,8 +93,9 @@ export const SPRUCE_TRUNK_MAX = 9;
 export const SPRUCE_CANOPY_RADIUS = 3;
 
 /**
- * 所有树种中最大的树冠半径。区块扫描「树冠还能伸进来」的树格时按它扩一圈（ADR-0005）：按橡树的 2 扩，
- * 树根离区块边 3 格的云杉，最外一圈树叶就不会写进邻区块。
+ * 所有树种中最大的树冠半径。区块扫描「树冠还能伸进来」的树格时按它扩一圈（ADR-0005），再按每棵树自己的半径
+ * 判断伸不伸进区块（`reachesChunk`）。区块边长是树格边长的两倍、边界对齐，半径 1 到 8 扫到的树格其实相同；
+ * 按最大半径扩，是为了这个结论不依赖两个边长的取值。
  */
 export const MAX_CANOPY_RADIUS = Math.max(OAK_CANOPY_RADIUS, SPRUCE_CANOPY_RADIUS);
 

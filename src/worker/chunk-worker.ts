@@ -1,4 +1,4 @@
-import { createTerrain } from '../core/terrain';
+import { createTerrain, type Terrain } from '../core/terrain';
 import type { ChunkRequest, ChunkResponse } from './protocol';
 
 /**
@@ -20,11 +20,23 @@ interface WorkerScope {
 
 const scope = globalThis as unknown as WorkerScope;
 
-// 不缓存地形对象：`createTerrain(seed)` 现在只是在闭包里记下种子，代价可以忽略，而 Worker
-// 因此一点可变状态都没有——同一个请求任何时候处理都得到同样的区块（ADR-0003）。
+/**
+ * 按种子缓存的地形对象。三维密度的地形对象构造时不算东西，但它是群系参数与出生列（#84）这类按种子准备的
+ * 东西的归宿，每条消息重建一次就每条消息重算一次（ADR-0021）。
+ *
+ * 一个世界只有一个种子，所以只留最近一个：换种子（进了另一个世界）时换掉。地形对象是纯函数的集合，
+ * 缓存与否不改变任何一条请求的结果（ADR-0003）。
+ */
+let cached: Terrain | undefined;
+
+function terrainFor(seed: number): Terrain {
+  if (cached?.seed !== seed) cached = createTerrain(seed);
+  return cached;
+}
+
 scope.onmessage = ({ data }) => {
   const { seed, cx, cz } = data;
-  const chunk = createTerrain(seed).generateChunk(cx, cz);
+  const chunk = terrainFor(seed).generateChunk(cx, cz);
   // 转移 buffer 而不是复制：这一块内存交给主线程之后，Worker 这边就不再持有它。
   scope.postMessage({ cx, cz, blocks: chunk.blocks }, [chunk.blocks.buffer]);
 };

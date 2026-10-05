@@ -31,7 +31,8 @@ import {
   WALK_STEP,
 } from '../src/core/player';
 import { Biome, createTerrain } from '../src/core/terrain';
-import { OAK_CANOPY_RADIUS, treesTouching, type Tree } from '../src/core/tree';
+import { MAX_CANOPY_RADIUS, plantTree, treesTouching, type Tree } from '../src/core/tree';
+import { Chunk } from '../src/core/chunk';
 import type { Vec3 } from '../src/core/vec3';
 import {
   DEFAULT_KEY_BINDINGS,
@@ -114,7 +115,7 @@ const DROP_SETTLE_TICKS = 8;
 const XP_ABSORB_TICKS = TICK_RATE;
 
 /**
- * 默认种子下、会写进原点区块的第一棵橡树。树根不一定落在原点区块里，但一定在页面
+ * 默认种子下、会写进原点区块的第一棵树（三种树中的任一种，#79）。树根不一定落在原点区块里，但一定在页面
  * 进入世界时就等好了的那一片内（见 SPAWN_READY_RADIUS）。
  *
  * 在 Node 这一侧用同一份地形对象算出来，再拿去核对页面里的世界——两边对得上，就说明
@@ -122,7 +123,7 @@ const XP_ABSORB_TICKS = TICK_RATE;
  */
 function spawnAreaTree(): Tree {
   const tree = treesTouching(DEFAULT_TERRAIN, 0, 0)[0];
-  if (!tree) throw new Error('默认种子的原点区块附近应有一棵橡树');
+  if (!tree) throw new Error('默认种子的原点区块附近应有一棵树');
   return tree;
 }
 
@@ -151,7 +152,7 @@ type WalkDirection = 'forward' | 'back';
  * 逐个 tick 走而不是一次 `core.tick(n)`：区块是异步回填的，一整段跑在同一个任务里
  * 就一个区块也等不到，玩家会走进还没生成的地方。边走边跳是因为真实地形上相邻两列可能
  * 差一格，光走会被那一格挡住；往前挪不动就侧身让一步、侧身也挪不动就换另一边，是因为
- * 平原上散布着橡树，树干与低垂的树冠都是实心的。挡路的规避与 tests/core/game.test.ts
+ * 平原上散布着橡树与白桦，树干与低垂的树冠都是实心的。挡路的规避与 tests/core/game.test.ts
  * 的 `walkForwardPastTrees` 是同一套。
  */
 async function walkTicks(
@@ -420,35 +421,53 @@ test('新建世界后出生点站在出生列的草方块上，那一列的群�
   expect(state.aboveSpawn).toBe(BlockType.Air);
 });
 
-test('页面里长着由种子生成的橡树，树干与树冠都在', async ({ page }) => {
+/**
+ * 一棵树在空区块里的样子：把它平移到区块 (0, 0) 的正中种下去，按相对树干的 (dx, dy) 读出 dz = 0 那一竖排。
+ * 键是「dx,dy」，dy 相对树根，只含非空气格。
+ */
+function treeSlice(tree: Tree): Map<string, number> {
+  const center = 8;
+  const chunk = new Chunk(0, 0);
+  plantTree(chunk, { ...tree, x: center, z: center });
+  const cells = new Map<string, number>();
+  for (let dy = -1; dy <= tree.trunkHeight + 2; dy++) {
+    for (let dx = -MAX_CANOPY_RADIUS; dx <= MAX_CANOPY_RADIUS; dx++) {
+      const block = chunk.get(center + dx, tree.rootY + dy, center);
+      if (block !== BlockType.Air) cells.set(`${dx},${dy}`, block);
+    }
+  }
+  return cells;
+}
+
+test('页面里长着由种子生成的树，树干与树冠都在', async ({ page }) => {
   const expected = spawnAreaTree();
-  // 树的坐标要当参数传进 evaluate：页面里没有 Node 这一侧的模块。
+  // 期望的形状在 Node 这一侧种进一个空区块里读出：树种由种子决定，原点附近的第一棵可能是橡树或白桦
+  const slice = treeSlice(expected);
+  const log = slice.get('0,0');
+  const leaves = slice.get(`0,${expected.trunkHeight}`);
+  if (log === undefined || leaves === undefined) throw new Error('树干最下面一格与树干顶上一格都应有方块');
+  // 树的坐标与要读的格当参数传进 evaluate：页面里没有 Node 这一侧的模块。
+  const offsets = [...slice.keys()].map((key) => key.split(',').map(Number) as [number, number]);
   const tree = await page.evaluate(
-    ({ x, z, rootY, trunkHeight, radius }) => {
+    ({ x, z, rootY, trunkHeight, offsets }) => {
       const core = window.__VOXEL__!.core;
       // 地面、整根树干、树干顶上那一格
       const column: number[] = [];
       for (let y = rootY - 1; y <= rootY + trunkHeight; y++) {
         column.push(core.getBlock(x, y, z));
       }
-      // 树冠最宽那一层，横向取一整行
-      const canopy: number[] = [];
-      const top = rootY + trunkHeight - 1;
-      for (let dx = -radius; dx <= radius; dx++) canopy.push(core.getBlock(x + dx, top - 1, z));
-      return { column, canopy };
+      // 过树干的那一竖排里，空区块里种出来是非空气的那些格
+      const slice = offsets.map(([dx, dy]) => core.getBlock(x + dx, rootY + dy, z));
+      return { column, slice };
     },
-    { ...expected, radius: OAK_CANOPY_RADIUS },
+    { ...expected, offsets },
   );
 
-  const { OakLog: log, OakLeaves: leaves, Grass: grass } = BlockType;
   // 自下而上：草地、连续原木、树干顶上一格树叶
-  expect(tree.column).toEqual([grass, ...Array<number>(expected.trunkHeight).fill(log), leaves]);
-  // 树冠比树干宽：最宽那一层左右各伸出 OAK_CANOPY_RADIUS 格树叶
-  expect(tree.canopy).toEqual([
-    ...Array<number>(OAK_CANOPY_RADIUS).fill(leaves),
-    log,
-    ...Array<number>(OAK_CANOPY_RADIUS).fill(leaves),
-  ]);
+  expect(tree.column).toEqual([BlockType.Grass, ...Array<number>(expected.trunkHeight).fill(log), leaves]);
+  // 树冠比树干宽，页面里过树干的那一竖排与空区块里种出来的逐格相同
+  expect(tree.slice).toEqual([...slice.values()]);
+  expect(Math.max(...offsets.map(([dx]) => Math.abs(dx)))).toBeGreaterThan(1);
 });
 
 test('页面打开后是由默认种子生成的地形', async ({ page }) => {

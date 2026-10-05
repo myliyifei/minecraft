@@ -30,7 +30,7 @@ import {
   WALK_SPEED,
   WALK_STEP,
 } from '../src/core/player';
-import { createTerrain } from '../src/core/terrain';
+import { Biome, createTerrain } from '../src/core/terrain';
 import { OAK_CANOPY_RADIUS, oakTreesTouching, type OakTree } from '../src/core/tree';
 import type { Vec3 } from '../src/core/vec3';
 import {
@@ -392,6 +392,29 @@ test('调试句柄能读到核心的方块状态', async ({ page }) => {
       aboveSpawn: core.getBlock(spawn.x, spawn.y + 1, spawn.z),
     };
   });
+  expect(state.underSpawn).toBe(BlockType.Grass);
+  expect(state.atSpawn).toBe(BlockType.Air);
+  expect(state.aboveSpawn).toBe(BlockType.Air);
+});
+
+test('新建世界后出生点站在出生列的草方块上，那一列的群系是平原', async ({ page }) => {
+  // 出生列与群系在 Node 这一侧用同一份地形对象算出（#84），再拿去核对页面里的世界
+  const column = DEFAULT_TERRAIN.spawnColumn;
+  expect(DEFAULT_TERRAIN.biomeAt(column.x, column.z)).toBe(Biome.Plains);
+  const state = await page.evaluate(() => {
+    const core = window.__VOXEL__!.core;
+    const spawn = core.spawnPoint;
+    return {
+      spawn,
+      position: core.player.position,
+      underSpawn: core.getBlock(spawn.x, spawn.y - 1, spawn.z),
+      atSpawn: core.getBlock(spawn.x, spawn.y, spawn.z),
+      aboveSpawn: core.getBlock(spawn.x, spawn.y + 1, spawn.z),
+    };
+  });
+  expect(state.spawn.x).toBe(column.x + 0.5);
+  expect(state.spawn.z).toBe(column.z + 0.5);
+  expect(state.position).toEqual(state.spawn);
   expect(state.underSpawn).toBe(BlockType.Grass);
   expect(state.atSpawn).toBe(BlockType.Air);
   expect(state.aboveSpawn).toBe(BlockType.Air);

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, DEFAULT_SEED, WORLD_MIN_Y } from '../../src/core/constants';
-import { Biome, createTerrain } from '../../src/core/terrain';
+import { createTerrain, type Terrain } from '../../src/core/terrain';
 import {
   OAK_CANOPY_RADIUS,
   OAK_MIN_SPACING,
@@ -22,6 +22,7 @@ import {
   World,
   type ChunkCoord,
 } from '../../src/core/world';
+import { flatTerrain } from '../helpers/flat-terrain';
 import { isTerrainBlock } from '../helpers/terrain-survey';
 
 // 两个与 DEFAULT_SEED 无关的种子：树的性质不该只在默认种子下成立。
@@ -194,10 +195,69 @@ describe('橡树的分布', () => {
 
   it('出生点那一列不会被树冠盖住', () => {
     for (const seed of [SEED, OTHER_SEED, DEFAULT_SEED]) {
+      const spawn = createTerrain(seed).spawnColumn;
       const tooClose = oakTreesIn(seed, SCAN_RADIUS)
-        .filter((t) => Math.max(Math.abs(t.x), Math.abs(t.z)) <= OAK_SPAWN_CLEARANCE)
+        .filter((t) => Math.max(Math.abs(t.x - spawn.x), Math.abs(t.z - spawn.z)) <= OAK_SPAWN_CLEARANCE)
         .map((t) => `(${t.x}, ${t.z})`);
       expect(tooClose).toEqual([]);
+    }
+  });
+});
+
+/**
+ * 树避开的是出生列周围 7 格，不是原点（#84）。真实地形的出生列几乎总是原点，所以这里把平地那一份地形对象的出生列
+ * 换到别处，直接问 `oakTreesTouching`：平地上处处是平原、地表一样高，哪里长不长树只由种子决定。
+ */
+describe('橡树避开出生列', () => {
+  /** 出生列换到这里：远离原点，x 正、z 负。 */
+  const SPAWN = { x: 208, z: -192 };
+  /** 换出生列用的种子：够多，原点与新出生列附近才一定有种子本该长树。 */
+  const CLEARANCE_SEEDS = Array.from({ length: 24 }, (_, i) => 1_000 + i * 7_919);
+
+  /** 平地地形对象，出生列换成 spawn。 */
+  function flatWithSpawn(seed: number, spawn: { x: number; z: number }): Terrain {
+    return { ...flatTerrain(seed), spawnColumn: spawn };
+  }
+
+  /** 树根落在 (x, z) 周围 OAK_SPAWN_CLEARANCE 格内的树（切比雪夫距离）。 */
+  function treesNear(placement: Terrain, x: number, z: number): OakTree[] {
+    const found = new Map<string, OakTree>();
+    for (let cx = chunkOf(x - OAK_SPAWN_CLEARANCE); cx <= chunkOf(x + OAK_SPAWN_CLEARANCE); cx++) {
+      for (let cz = chunkOf(z - OAK_SPAWN_CLEARANCE); cz <= chunkOf(z + OAK_SPAWN_CLEARANCE); cz++) {
+        for (const tree of oakTreesTouching(placement, cx, cz)) {
+          if (Math.max(Math.abs(tree.x - x), Math.abs(tree.z - z)) <= OAK_SPAWN_CLEARANCE) {
+            found.set(`${tree.x},${tree.z}`, tree);
+          }
+        }
+      }
+    }
+    return [...found.values()];
+  }
+
+  it('出生列在别处时，出生列周围 7 格内没有树根', () => {
+    for (const seed of CLEARANCE_SEEDS) {
+      const near = treesNear(flatWithSpawn(seed, SPAWN), SPAWN.x, SPAWN.z).map((t) => `(${t.x}, ${t.z})`);
+      expect(near, `种子 ${seed}`).toEqual([]);
+    }
+  });
+
+  it('出生列在别处时，原点周围 7 格不再特殊：有的种子在那里长树', () => {
+    const seedsWithTreeAtOrigin = CLEARANCE_SEEDS.filter(
+      (seed) => treesNear(flatWithSpawn(seed, SPAWN), 0, 0).length > 0,
+    );
+    expect(seedsWithTreeAtOrigin.length).toBeGreaterThan(0);
+  });
+
+  it('只空出出生列那一片：出生列在原点时原点附近没有树，别处的树与出生列在更远处时一样', () => {
+    // 对照：出生列放在离两处都很远的地方，原点与 SPAWN 附近的树都不受它影响
+    const ELSEWHERE = { x: -500, z: 500 };
+    for (const seed of CLEARANCE_SEEDS) {
+      const atOrigin = flatWithSpawn(seed, { x: 0, z: 0 });
+      const atSpawn = flatWithSpawn(seed, SPAWN);
+      const elsewhere = flatWithSpawn(seed, ELSEWHERE);
+      expect(treesNear(atOrigin, 0, 0), `种子 ${seed}`).toEqual([]);
+      expect(treesNear(atSpawn, 0, 0), `种子 ${seed}`).toEqual(treesNear(elsewhere, 0, 0));
+      expect(treesNear(atOrigin, SPAWN.x, SPAWN.z), `种子 ${seed}`).toEqual(treesNear(elsewhere, SPAWN.x, SPAWN.z));
     }
   });
 });
@@ -317,7 +377,8 @@ describe('树叶只往空气里长', () => {
       z > tree.z ? LEDGE_BASE_Y + LEDGE_STEP : LEDGE_BASE_Y;
 
     const chunk = groundOnly(cx, cz, surfaceAt);
-    plantOakTrees({ seed: SEED, biomeAt: () => Biome.Plains, surfaceHeightAt: surfaceAt }, chunk);
+    // 平地那一份地形对象换掉地表高度：群系是平原，出生列是原点（树离原点远，不受出生列影响）
+    plantOakTrees({ ...flatTerrain(SEED), surfaceHeightAt: surfaceAt }, chunk);
 
     const eaten: string[] = [];
     let planted = 0;

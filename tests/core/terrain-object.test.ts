@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import type { Chunk } from '../../src/core/chunk';
-import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
+import { CHUNK_SIZE, DEFAULT_SEED, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { Biome, createTerrain } from '../../src/core/terrain';
+import { chunkOf, localOf } from '../../src/core/world';
 import { NON_TERRAIN } from '../helpers/terrain-survey';
 
 /**
@@ -14,6 +15,9 @@ import { NON_TERRAIN } from '../helpers/terrain-survey';
 
 // 与 DEFAULT_SEED 无关的几个种子：地形对象的性质不该只在默认种子下成立。
 const SEEDS = [314_159, 777, -42];
+
+/** 出生列周围不长树的半径（切比雪夫距离，CONTEXT.md「出生点」、父 spec #72）。 */
+const SPAWN_CLEARANCE = 7;
 
 /**
  * 一批区块，每个区块里取四角、四边中点与正中的列：区块边缘的列最容易出错（树冠与查询都要跨到邻区块）。
@@ -175,7 +179,7 @@ describe('群系查询', () => {
   });
 });
 
-describe('列顶地表方块与出生列的最简实现（#76、#84 改）', () => {
+describe('列顶地表方块的最简实现（#76 改）', () => {
 
   it('列顶地表方块总是草方块（#76 改为按铺地表的规则）', () => {
     for (const seed of SEEDS) {
@@ -183,8 +187,64 @@ describe('列顶地表方块与出生列的最简实现（#76、#84 改）', () 
       for (const [x, z] of sampleColumns()) expect(terrain.surfaceBlockAt(x, z)).toBe(BlockType.Grass);
     }
   });
+});
 
-  it('出生列是原点（#84 改为螺旋搜索）', () => {
-    for (const seed of SEEDS) expect(createTerrain(seed).spawnColumn).toEqual({ x: 0, z: 0 });
+/**
+ * 真实地形的出生列（#84）。搜索规则本身用假查询断言，在 tests/core/spawn-column.test.ts；这里断言真实地形上的结果。
+ * 真实地形的原点总是平原，这几条在出生列仍是原点的实现上也成立，它们守的是螺旋搜索换上之后别把这些性质弄丢。
+ */
+describe('出生列', () => {
+  const ALL_SEEDS = [...SEEDS, DEFAULT_SEED, 555, 20_260_101];
+
+  it('多个种子下出生列的群系是平原、列顶地表方块是草方块，坐标是 16 的倍数', () => {
+    for (const seed of ALL_SEEDS) {
+      const terrain = createTerrain(seed);
+      const { x, z } = terrain.spawnColumn;
+      const where = `种子 ${seed}，出生列 (${x}, ${z})`;
+      expect(terrain.biomeAt(x, z), where).toBe(Biome.Plains);
+      expect(terrain.surfaceBlockAt(x, z), where).toBe(BlockType.Grass);
+      expect(Math.abs(x % 16), where).toBe(0);
+      expect(Math.abs(z % 16), where).toBe(0);
+      expect(Math.max(Math.abs(x), Math.abs(z)), where).toBeLessThanOrEqual(1024);
+    }
+  });
+
+  it('生成结果里出生列地表高度那一格是草方块', () => {
+    for (const seed of ALL_SEEDS) {
+      const terrain = createTerrain(seed);
+      const { x, z } = terrain.spawnColumn;
+      const chunk = terrain.generateChunk(chunkOf(x), chunkOf(z));
+      expect(chunk.get(localOf(x), terrain.surfaceHeightAt(x, z), localOf(z)), `种子 ${seed}`).toBe(BlockType.Grass);
+    }
+  });
+
+  it('同一种子构造两次得到同一列；同一个地形对象读两次是同一个结果，不重算', () => {
+    for (const seed of ALL_SEEDS) {
+      const terrain = createTerrain(seed);
+      expect(createTerrain(seed).spawnColumn).toEqual(terrain.spawnColumn);
+      expect(terrain.spawnColumn).toBe(terrain.spawnColumn);
+    }
+  });
+
+  it('出生列周围 7 格内没有原木', () => {
+    for (const seed of ALL_SEEDS) {
+      const terrain = createTerrain(seed);
+      const { x: sx, z: sz } = terrain.spawnColumn;
+      const logs: string[] = [];
+      for (let cx = chunkOf(sx - SPAWN_CLEARANCE); cx <= chunkOf(sx + SPAWN_CLEARANCE); cx++) {
+        for (let cz = chunkOf(sz - SPAWN_CLEARANCE); cz <= chunkOf(sz + SPAWN_CLEARANCE); cz++) {
+          const chunk = terrain.generateChunk(cx, cz);
+          for (let x = sx - SPAWN_CLEARANCE; x <= sx + SPAWN_CLEARANCE; x++) {
+            for (let z = sz - SPAWN_CLEARANCE; z <= sz + SPAWN_CLEARANCE; z++) {
+              if (chunkOf(x) !== cx || chunkOf(z) !== cz) continue;
+              for (let y = WORLD_MIN_Y; y <= WORLD_MAX_Y; y++) {
+                if (chunk.get(localOf(x), y, localOf(z)) === BlockType.OakLog) logs.push(`(${x}, ${y}, ${z})`);
+              }
+            }
+          }
+        }
+      }
+      expect(logs, `种子 ${seed}`).toEqual([]);
+    }
   });
 });

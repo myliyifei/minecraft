@@ -7,8 +7,8 @@ import type { Terrain } from '../../src/core/terrain';
 import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTerrain } from '../helpers/flat-terrain';
 
 /**
- * 核心只接一个地形对象（#73）：构造选项 `terrain` 由本世界的种子造出地形对象，区块由它的生成器给出。出生点
- * 现在仍取原点那一列，核心还不读 `spawnColumn`，#84 才改为出生列。
+ * 核心只接一个地形对象（#73）：构造选项 `terrain` 由本世界的种子造出地形对象，区块由它的生成器给出，出生点站在
+ * 它的出生列（`spawnColumn`）上（#84）。平地那一份的出生列是原点；换掉出生列的用例守住「核心读的是出生列，不是原点」。
  *
  * 种子取 555：真实地形在原点那一列的地表是 y = 67，与平地（y = 70）不同。核心若还按真实地形生成区块，
  * 出生点与列顶的断言都会对不上。
@@ -20,6 +20,18 @@ describe('核心用传入的地形对象', () => {
     const core = new GameCore({ seed: SEED, viewRadius: 1, terrain: flatTerrain });
     expect(core.spawnPoint).toEqual({ x: 0.5, y: FLAT_STAND_Y, z: 0.5 });
     expect(core.player.position).toEqual({ x: 0.5, y: FLAT_STAND_Y, z: 0.5 });
+  });
+
+  it('平地那一份地形对象换掉出生列：核心出生在那一列上，那一列所在的区块已加载', () => {
+    // 出生列所在区块 (2, −2) 在原点视距 1 的范围之外：核心若还按原点加载、取出生点，这里对不上
+    const core = new GameCore({
+      seed: SEED,
+      viewRadius: 1,
+      terrain: (seed: number): Terrain => ({ ...flatTerrain(seed), spawnColumn: { x: 40, z: -24 } }),
+    });
+    expect(core.isChunkLoaded(2, -2)).toBe(true);
+    expect(core.spawnPoint).toEqual({ x: 40.5, y: FLAT_STAND_Y, z: -23.5 });
+    expect(core.player.position).toEqual({ x: 40.5, y: FLAT_STAND_Y, z: -23.5 });
   });
 
   it('区块由地形对象的生成器给出：已加载的范围里每一列都是平地', () => {

@@ -341,25 +341,28 @@ describe('GameCore 的光照查询', () => {
 });
 
 describe('GameCore 的出生点', () => {
-  it('出生点在地表之上，脚下是实心方块、脚位与头位是空气', () => {
+  it('出生点在出生列的地表之上，脚下是草方块、脚位与头位是空气', () => {
     const core = sampleCore();
     const spawn = core.spawnPoint;
-    expect(spawn.y).toBe(surfaceAt(0, 0) + 1);
+    const { x, z } = DEFAULT_TERRAIN.spawnColumn;
+    expect(spawn.y).toBe(surfaceAt(x, z) + 1);
     expect(core.getBlock(spawn.x, spawn.y - 1, spawn.z)).toBe(BlockType.Grass);
     expect(core.getBlock(spawn.x, spawn.y, spawn.z)).toBe(BlockType.Air);
     expect(core.getBlock(spawn.x, spawn.y + 1, spawn.z)).toBe(BlockType.Air);
   });
 
-  it('出生点落在方块中心', () => {
+  it('出生点落在出生列那一格的中心', () => {
     const spawn = sampleCore().spawnPoint;
-    expect(spawn.x).toBe(0.5);
-    expect(spawn.z).toBe(0.5);
+    const { x, z } = DEFAULT_TERRAIN.spawnColumn;
+    expect(spawn.x).toBe(x + 0.5);
+    expect(spawn.z).toBe(z + 0.5);
   });
 
-  it('换种子后出生点跟着地形走', () => {
+  it('换种子后出生点跟着地形走：站在那个种子的出生列上', () => {
     const core = sampleCore({ seed: 555 });
-    // #84 改：出生列不再固定在原点，改为站在 createTerrain(555).spawnColumn 那一列上
-    expect(core.spawnPoint.y).toBe(createTerrain(555).surfaceHeightAt(0, 0) + 1);
+    const terrain = createTerrain(555);
+    const { x, z } = terrain.spawnColumn;
+    expect(core.spawnPoint).toEqual({ x: x + 0.5, y: terrain.surfaceHeightAt(x, z) + 1, z: z + 0.5 });
   });
 });
 

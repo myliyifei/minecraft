@@ -2,12 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { CHUNK_BLOCK_COUNT } from '../../src/core/chunk';
 import { WORLD_MAX_Y } from '../../src/core/constants';
+import { GameCore } from '../../src/core/game';
 import { MAX_HEALTH } from '../../src/core/health';
 import { INVENTORY_SIZE } from '../../src/core/inventory';
 import { ItemType } from '../../src/core/item';
 import { SNAPSHOT_FORMAT_VERSION, TERRAIN_VERSION } from '../../src/core/snapshot';
 import { CHUNK_COORD_LIMIT } from '../../src/core/world';
-import { gzipChunk } from '../../src/storage/chunk-codec';
+import { gunzipChunk, gzipChunk } from '../../src/storage/chunk-codec';
 import {
   decodeWorldBlob,
   decodeWorldFile,
@@ -18,6 +19,7 @@ import {
   WORLD_FILE_MAX_JSON_BYTES,
   type WorldFile,
 } from '../../src/storage/world-file';
+import { FLAT_GROUND_Y, flatTerrain } from '../helpers/flat-terrain';
 import { editedSnapshot, worldFileOf } from '../helpers/world-file';
 
 /** 文件开头的魔数（issue #70）。 */
@@ -248,6 +250,35 @@ describe('导入校验：任一不符返回失败，不抛出', () => {
     const unknown = Math.max(...Object.values(BlockType)) + 1;
     expect(await rejected(rawFile({ json, chunks: [{ cx: 0, cz: 0, data: await chunkOf(unknown) }] }))).toBe(true);
     expect(await rejected(rawFile({ json, chunks: [{ cx: 0, cz: 0, data: await chunkOf(255) }] }))).toBe(true);
+  });
+
+  it('导入校验认得水与冰的编号：整个区块是水或冰的文件导得进来，解出的区块就是那种方块（#74）', async () => {
+    const file = { ...(await worldFileOf(editedSnapshot())), blockStates: [] };
+    for (const [name, block] of [
+      ['水', BlockType.Water],
+      ['冰', BlockType.Ice],
+    ] as const) {
+      const withChunk = { ...file, chunks: [{ cx: 0, cz: 0, data: await chunkOf(block) }] };
+      const back = await decoded(encoded(withChunk));
+      const blocks = await gunzipChunk(back.chunks[0]!.data);
+      expect(blocks.every((id) => id === block), `${name}的区块`).toBe(true);
+    }
+  });
+
+  it('带水与冰的已改区块导出再导入：记录相同，再编码一次逐字节相同（#74）', async () => {
+    const game = new GameCore({ viewRadius: 1, terrain: flatTerrain });
+    game.setBlock(3, FLAT_GROUND_Y - 1, 3, BlockType.Water);
+    game.setBlock(3, FLAT_GROUND_Y, 3, BlockType.Ice);
+    const file = await worldFileOf(game.snapshot());
+    expect(file.chunks).toHaveLength(1);
+
+    const bytes = encoded(file);
+    const back = await decoded(bytes);
+    expect(back).toEqual(file);
+    expect(new Uint8Array(encoded(back))).toEqual(new Uint8Array(bytes));
+    const blocks = await gunzipChunk(back.chunks[0]!.data);
+    expect(blocks).toContain(BlockType.Water);
+    expect(blocks).toContain(BlockType.Ice);
   });
 
   it('区块坐标重复或超出世界的区块坐标范围', async () => {

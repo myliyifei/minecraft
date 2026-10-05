@@ -243,6 +243,37 @@ describe('光源旁不生成（#55）', () => {
   });
 });
 
+describe('水面与冰面（#74）', () => {
+  /** 把 24 到 48 格的整个圆环（外加玩家周围 16 格以外的方形四角）在平地之上铺一层 block。 */
+  function sheetOver(game: GameCore, block: BlockType): GameCore {
+    for (let x = -48; x <= 48; x++) {
+      for (let z = -48; z <= 48; z++) {
+        if (Math.hypot(x, z) < 16) continue;
+        expect(game.setBlock(x, FLAT_STAND_Y, z, block)).toBe(true);
+      }
+    }
+    return game;
+  }
+
+  it('24 到 48 格的地面铺一层水：列顶是水，夜晚 2000 tick 一只都没有', () => {
+    const game = atNight(sheetOver(core(), BlockType.Water));
+    expect(game.highestBlockY(30, 0)).toBe(FLAT_STAND_Y);
+    expect(game.getBlock(30, FLAT_STAND_Y, 0)).toBe(BlockType.Water);
+    expect(spawnsOver(game, 2000)).toEqual([]);
+  });
+
+  it('同一片换成冰：冰面实心，夜晚生成在冰面上', () => {
+    const game = atNight(sheetOver(core(), BlockType.Ice));
+    const spawned = spawnsOver(game, 2000);
+    expect(spawned.length).toBeGreaterThan(0);
+    for (const { tick, position } of spawned) {
+      const label = `第 ${tick} tick 生成的那只`;
+      expect(position.y, label).toBe(FLAT_STAND_Y + 1);
+      expect(game.getBlock(Math.floor(position.x), FLAT_STAND_Y, Math.floor(position.z)), label).toBe(BlockType.Ice);
+    }
+  });
+});
+
 describe('黄昏与黎明的边界（#55）', () => {
   /** 世界时刻 t 那一 tick 正好是一次生成尝试：拨到 t 之前 20 tick 再推进 20 tick，返回生成了几只。 */
   function attemptAt(t: number): number {
@@ -376,6 +407,29 @@ describe('候选列（Zombies.spawnNaturally）', () => {
     far.setBlock(bx + toward * 14, by, bz, BlockType.Torch);
     expect(far.blockLightAt(bx, by, bz)).toBe(0);
     expect(attempt(tick, NIGHT_SKY_DARKENING, far)?.position).toEqual(plain.position);
+  });
+
+  it('候选列的列顶是水时放弃（#74）：平地上那一列盖一格或两格水，这一次都不生成', () => {
+    const tick = ZOMBIE_SPAWN_INTERVAL;
+    const plain = attempt(tick)!;
+    const [bx, by, bz] = [Math.floor(plain.position.x), plain.position.y, Math.floor(plain.position.z)];
+
+    for (const depth of [1, 2]) {
+      const pool = flatTestWorld(3);
+      for (let d = 0; d < depth; d++) pool.setBlock(bx, by + d, bz, BlockType.Water);
+      expect(pool.highestBlockY(bx, bz), `${depth} 格水`).toBe(by + depth - 1);
+      expect(attempt(tick, NIGHT_SKY_DARKENING, pool), `${depth} 格水`).toBeUndefined();
+    }
+  });
+
+  it('候选列的列顶是冰时照常生成（#74）：冰面实心，生成在冰面上一格', () => {
+    const tick = ZOMBIE_SPAWN_INTERVAL;
+    const plain = attempt(tick)!;
+    const [bx, by, bz] = [Math.floor(plain.position.x), plain.position.y, Math.floor(plain.position.z)];
+
+    const frozen = flatTestWorld(3);
+    frozen.setBlock(bx, by, bz, BlockType.Ice);
+    expect(attempt(tick, NIGHT_SKY_DARKENING, frozen)?.position).toEqual({ ...plain.position, y: by + 1 });
   });
 
   it('列顶在世界最高一层时不生成：上面那一格不在光照数组里；低一层照常生成', () => {

@@ -103,15 +103,45 @@ describe.each(BUILDS)('天光的形状（%s）', (_name, build) => {
     // 边缘一格：旁边露天那格横着传进来是 14
     expect(twoLayers.skyLightAt(-12, G + 1, 0)).toBe(14);
   });
+
+  it('水面下第 n 格的天光是 15 − n（#74）', () => {
+    // 25×25、6 格深的一池水，摆在平地之上；中央离边缘 12 格，从池边横着传进来的光比竖直穿过的暗
+    const depth = 6;
+    const world = build(box([-12, G + 1, -12], [12, G + depth, 12], BlockType.Water));
+    expect(world.skyLightAt(0, G + depth + 1, 0), '水面之上').toBe(15);
+    for (let n = 1; n <= depth; n++) {
+      expect(world.skyLightAt(0, G + depth + 1 - n, 0), `水面下第 ${n} 格`).toBe(15 - n);
+    }
+    // 池底那块草方块是不透明方块
+    expect(world.skyLightAt(0, G, 0)).toBe(0);
+  });
+
+  it('冰同理：冰层本身 14、冰下的水每格再减 1；两层冰之下 13（#74）', () => {
+    // 结冰的水面：最上面一层是冰，下面 5 格水
+    const depth = 6;
+    const frozen = build([
+      ...box([-12, G + 1, -12], [12, G + depth - 1, 12], BlockType.Water),
+      ...box([-12, G + depth, -12], [12, G + depth, 12], BlockType.Ice),
+    ]);
+    expect(frozen.skyLightAt(0, G + depth + 1, 0), '冰面之上').toBe(15);
+    for (let n = 1; n <= depth; n++) {
+      expect(frozen.skyLightAt(0, G + depth + 1 - n, 0), `冰面下第 ${n} 格`).toBe(15 - n);
+    }
+
+    const twoLayers = build(box([-12, G + 5, -12], [12, G + 6, 12], BlockType.Ice));
+    expect(twoLayers.skyLightAt(0, G + 6, 0)).toBe(14);
+    expect(twoLayers.skyLightAt(0, G + 5, 0)).toBe(13);
+    expect(twoLayers.skyLightAt(0, G + 1, 0)).toBe(13);
+  });
 });
 
 describe('增量更新等于从头算', () => {
-  it('随机放与挖 200 次（石头、树叶、空气混合）之后所有已加载区块逐格相同，中途每 5 次也相同', () => {
+  it('随机放与挖 200 次（石头、树叶、水、冰、空气混合，#74 加入水与冰）之后所有已加载区块逐格相同，中途每 5 次也相同', () => {
     // 原点周围 2×2 个区块：随机的范围跨过它们共用的那个角，跨区块的传播与撤光都会走到
     const world = new World(flatTestTerrain);
     for (const [cx, cz] of [[-1, -1], [-1, 0], [0, -1], [0, 0]]) world.loadChunk(cx, cz);
     const random = seededRandom(52);
-    const blocks = [BlockType.Air, BlockType.Stone, BlockType.OakLeaves];
+    const blocks = [BlockType.Air, BlockType.Stone, BlockType.OakLeaves, BlockType.Water, BlockType.Ice];
     for (let n = 0; n < 200; n++) {
       // 范围跨过原点那个区块角，地面以下挖坑、地面以上盖顶都会出现
       const x = Math.floor(random() * 12) - 6;

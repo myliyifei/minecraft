@@ -75,11 +75,21 @@ describe('方块到贴图格号的映射表', () => {
     expect(new Set([off.top, off.side, off.front, lit.front]).size).toBe(4);
   });
 
-  it('图集是 8x16，128 格里现在用了 54 格（#73 从 8 行扩到 16 行，#85 加白桦与云杉 8 格）', () => {
+  it('图集是 8x16，128 格里现在用了 56 格（#73 从 8 行扩到 16 行，#85 加白桦与云杉 8 格，#74 加水与冰两格）', () => {
     expect(ATLAS_COLS).toBe(8);
     expect(ATLAS_ROWS).toBe(16);
-    expect(Object.keys(TILE)).toHaveLength(54);
-    expect(new Set(Object.values(TILE)).size).toBe(54);
+    expect(Object.keys(TILE)).toHaveLength(56);
+    expect(new Set(Object.values(TILE)).size).toBe(56);
+  });
+
+  it('水与冰接在火焰之后各占一格：水第 47 格、冰第 48 格，六面同一张，现有格号不变（#74）', () => {
+    // #85 的白桦与云杉从第 49 格起，与水与冰的格号不重叠
+    expect(TILE.water).toBe(47);
+    expect(TILE.ice).toBe(48);
+    expect(BLOCK_TILES[BlockType.Water]).toEqual({ top: TILE.water, bottom: TILE.water, side: TILE.water });
+    expect(BLOCK_TILES[BlockType.Ice]).toEqual({ top: TILE.ice, bottom: TILE.ice, side: TILE.ice });
+    const earlier = Object.values(TILE).filter((tile) => tile < TILE.water);
+    expect(Math.max(...earlier)).toBe(TILE.flame);
   });
 
   it('粒子的烟与火焰两格接在火把之后（#59），不是任何方块或物品的贴图', () => {
@@ -543,6 +553,18 @@ describe('图集 PNG 的像素（#73）', () => {
 
   it.each(PIXELS_BEFORE_8X16)('第 %i 格的像素与扩图集之前相同', (tile, sha256Prefix) => {
     expect(createHash('sha256').update(tilePixels(atlas, tile)).digest('hex').slice(0, 16)).toBe(sha256Prefix);
+  });
+
+  it('水与冰那两格画了东西：不是全透明，两格也不相同（#74）', () => {
+    for (const [name, tile] of [
+      ['水', TILE.water],
+      ['冰', TILE.ice],
+    ] as const) {
+      const pixels = tilePixels(atlas, tile);
+      const alphas = Array.from({ length: pixels.length / 4 }, (_, i) => pixels[i * 4 + 3]!);
+      expect(alphas.some((alpha) => alpha > 0), `${name}（第 ${tile} 格）`).toBe(true);
+    }
+    expect(tilePixels(atlas, TILE.water)).not.toEqual(tilePixels(atlas, TILE.ice));
   });
 
   it('TILE 表里没有的格全透明：第 64 格以后与没用的格都是空的', () => {

@@ -13,6 +13,8 @@ import {
   blockUse,
   dropFor,
   isBreakable,
+  isOpaque,
+  isSolid,
   miningTicks,
   miningTicksFor,
   placedBlock,
@@ -75,8 +77,9 @@ describe('方块的硬度表', () => {
     }
   });
 
-  it('除空气与火把外每种方块都有正的硬度；火把硬度 0（#56）', () => {
+  it('除空气与火把外每种方块都有正的硬度；火把硬度 0（#56）；水挖不到，不在此列（#74）', () => {
     for (const block of Object.values(BlockType)) {
+      if (block === BlockType.Water) continue;
       const { hardness } = BLOCKS[block];
       if (block === BlockType.Air || baseBlock(block) === BlockType.Torch) {
         expect(hardness, `方块 ${block} 的硬度`).toBe(0);
@@ -86,8 +89,9 @@ describe('方块的硬度表', () => {
     }
   });
 
-  it('只有基岩挖不动', () => {
+  it('只有基岩挖不动；水挖不到，由 isBreakable 回答，硬度一列怎么填不规定（#74）', () => {
     for (const block of Object.values(BlockType)) {
+      if (block === BlockType.Water) continue;
       const unbreakable = BLOCKS[block].hardness === UNBREAKABLE;
       expect(unbreakable, `方块 ${block}`).toBe(block === BlockType.Bedrock);
     }
@@ -546,13 +550,15 @@ describe('方块表的发光等级与透光方式两列（issue #51）', () => {
     }
   });
 
-  it('三种树叶是树叶式，空气与火把不衰减，其余都是不透明', () => {
+  it('三种树叶、水与冰是树叶式（#85、#74），空气与火把不衰减，其余都是不透明', () => {
     const passages: Partial<Record<BlockType, LightPassage>> = {
       [BlockType.Air]: LightPassage.Clear,
       [BlockType.OakLeaves]: LightPassage.Leaves,
       // 白桦与云杉的树叶与橡树叶同一种透光方式（#85）
       [BlockType.BirchLeaves]: LightPassage.Leaves,
       [BlockType.SpruceLeaves]: LightPassage.Leaves,
+      [BlockType.Water]: LightPassage.Leaves,
+      [BlockType.Ice]: LightPassage.Leaves,
     };
     for (const block of Object.values(BlockType)) {
       const torch = baseBlock(block) === BlockType.Torch;
@@ -651,5 +657,76 @@ describe('挖掘耗时看手上的工具', () => {
       const held = tool(toolClass, STONE);
       expect(miningTicks(BlockType.OakLeaves, held), `持 ${toolClass}`).toBe(bare);
     }
+  });
+});
+
+describe('水与冰的方块表（#74）', () => {
+  const WOODEN_PICKAXE = tool(ToolClass.Pickaxe, WOODEN);
+
+  /** 能拿在手上挖东西的各种情形：空手、木镐、石镐、铁镐、木斧、木铲。 */
+  const TOOLS: Array<[string, MiningTool]> = [
+    ['空手', BARE_HAND],
+    ['木镐', WOODEN_PICKAXE],
+    ['石镐', tool(ToolClass.Pickaxe, STONE)],
+    ['铁镐', tool(ToolClass.Pickaxe, IRON)],
+    ['木斧', tool(ToolClass.Axe, WOODEN)],
+    ['木铲', tool(ToolClass.Shovel, WOODEN)],
+  ];
+
+  it('水不实心、不是不透明、挖不到', () => {
+    expect(isSolid(BlockType.Water)).toBe(false);
+    expect(isOpaque(BlockType.Water)).toBe(false);
+    expect(isBreakable(BlockType.Water)).toBe(false);
+  });
+
+  it('冰实心、不是不透明、挖得动', () => {
+    expect(isSolid(BlockType.Ice)).toBe(true);
+    expect(isOpaque(BlockType.Ice)).toBe(false);
+    expect(isBreakable(BlockType.Ice)).toBe(true);
+  });
+
+  it('冰硬度 0.5：空手 15 tick，不需要工具，所以不是每点硬度 100 tick 那一档', () => {
+    expect(BLOCKS[BlockType.Ice].hardness).toBe(0.5);
+    expect(miningTicks(BlockType.Ice, BARE_HAND)).toBe(15);
+    expect(BLOCKS[BlockType.Ice].requiresTool).toBe(false);
+  });
+
+  it('冰的合格工具是镐：持木镐 8 tick（15 ÷ 2 向上取整），持木斧与空手一样是 15 tick', () => {
+    expect(BLOCKS[BlockType.Ice].qualifiedToolClass).toBe(ToolClass.Pickaxe);
+    expect(miningTicks(BlockType.Ice, WOODEN_PICKAXE)).toBe(8);
+    expect(miningTicks(BlockType.Ice, tool(ToolClass.Axe, WOODEN))).toBe(15);
+  });
+
+  it('冰拿什么挖都不掉东西，经验照普通方块给 30 点', () => {
+    for (const [name, held] of TOOLS) expect(blockDrop(BlockType.Ice, held), name).toBeNull();
+    expect(blockExperience(BlockType.Ice)).toBe(30);
+  });
+
+  it('水不掉东西，也不给经验：它不是挖掘目标', () => {
+    for (const [name, held] of TOOLS) expect(blockDrop(BlockType.Water, held), name).toBeNull();
+    expect(blockExperience(BlockType.Water)).toBe(0);
+  });
+
+  it('水与冰都没有物品：没有哪种物品放下去是水或冰', () => {
+    for (const item of Object.values(ItemType)) {
+      expect(placedBlock(item), `物品 ${item}`).not.toBe(BlockType.Water);
+      expect(placedBlock(item), `物品 ${item}`).not.toBe(BlockType.Ice);
+    }
+  });
+
+  it('水与冰不发光、不带方块状态、不可使用，各自归到自己', () => {
+    for (const block of [BlockType.Water, BlockType.Ice]) {
+      expect(BLOCKS[block].lightEmission, `方块 ${block}`).toBe(0);
+      expect(blockStateKind(block), `方块 ${block}`).toBe(BlockStateKind.None);
+      expect(blockUse(block), `方块 ${block}`).toBe(BlockUse.None);
+      expect(baseBlock(block), `方块 ${block}`).toBe(block);
+    }
+  });
+
+  it('水与冰的编号互不相同，也不与已有的方块重复', () => {
+    const ids = Object.values(BlockType);
+    expect(ids).toContain(BlockType.Water);
+    expect(ids).toContain(BlockType.Ice);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

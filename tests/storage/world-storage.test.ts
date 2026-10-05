@@ -101,6 +101,33 @@ describe('存档的写与读（ADR-0018）', () => {
     expect(sorted(await loaded(storage, 'a'))).toEqual(sorted(snapshot));
   });
 
+  it('带水与冰的已改区块写盘再读回逐字节相同，构造出的核心里水与冰都在原处（#74）', async () => {
+    const { open } = fixture();
+    const storage = await open();
+    const game = new GameCore({ viewRadius: 1, terrain: flatTerrain });
+    // 原点区块里挖一个两格深的坑灌水、水面结冰；隔壁区块单放一格水
+    for (const [x, z] of [[3, 3], [4, 3], [3, 4], [4, 4]]) {
+      game.setBlock(x, G - 1, z, BlockType.Water);
+      game.setBlock(x, G, z, BlockType.Ice);
+    }
+    game.setBlock(-2, G + 1, 5, BlockType.Water);
+    const snapshot = game.snapshot();
+    expect(snapshot.editedChunks.map(({ cx, cz }) => `${cx},${cz}`).sort()).toEqual(['-1,0', '0,0']);
+
+    expect(await storage.saveWorld('a', '湖', snapshot)).toEqual({ ok: true });
+    const back = sorted(await loaded(storage, 'a'));
+    expect(back).toEqual(sorted(snapshot));
+    for (const chunk of back.editedChunks) {
+      const original = snapshot.editedChunks.find(({ cx, cz }) => cx === chunk.cx && cz === chunk.cz)!;
+      expect(chunk.blocks, `区块 (${chunk.cx}, ${chunk.cz})`).toEqual(original.blocks);
+    }
+
+    const restored = new GameCore({ viewRadius: 1, terrain: flatTerrain, restore: back });
+    expect(restored.getBlock(3, G - 1, 3)).toBe(BlockType.Water);
+    expect(restored.getBlock(4, G, 4)).toBe(BlockType.Ice);
+    expect(restored.getBlock(-2, G + 1, 5)).toBe(BlockType.Water);
+  });
+
   it('读回的快照能直接构造核心，方块与玩家都在', async () => {
     const { open } = fixture();
     const storage = await open();

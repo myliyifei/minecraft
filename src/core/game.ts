@@ -18,14 +18,13 @@ import { placeBlock } from './placement';
 import { IDLE_INTENT, Player, type MoveIntent, type PlayerView } from './player';
 import type { Snapshot } from './snapshot';
 import { streamChunks } from './streaming';
-import { createTerrain, type Terrain } from './terrain';
+import { createTerrain, type ColumnCoord, type Terrain } from './terrain';
 import { effectiveSkyLight, isNightAt, skyDarkeningAt, timeOfDayAt, wrapTimeOfDay } from './time-of-day';
 import type { Vec3 } from './vec3';
 import { XpOrbs, type XpOrbsView } from './xp-orb';
 import { Zombies, type ZombiesView } from './zombie';
 import {
   chunkOf,
-  ORIGIN_CHUNK,
   World,
   type ChunkCoord,
   type ChunkSource,
@@ -111,9 +110,13 @@ export class GameCore implements BlockEdit, BlockStateView {
   private readonly furnaceScreenState: InventoryScreen;
   private readonly miningState: Mining;
   private readonly attackState: Attack;
+  /** 出生列（见 CONTEXT.md「出生点」），取自地形对象。出生点总在这一列上。 */
+  private readonly spawnColumn: ColumnCoord;
+  /** 出生列所在的区块。构造时以它为中心先加载，重生时先把它放回世界。 */
+  private readonly spawnChunk: ChunkCoord;
   /**
-   * 进入世界时的出生点。原点区块卸载了又没改过时，出生点就是它：地形是种子的纯函数（ADR-0003），
-   * 重新生成出来与进入世界时一样。见 `spawnPoint`。
+   * 进入世界时的出生点（首次出生点，ADR-0018）。出生列所在区块卸载了又没改过时，出生点就是它：地形是种子的
+   * 纯函数（ADR-0003），重新生成出来与进入世界时一样。见 `spawnPoint`。
    */
   private readonly firstSpawn: Vec3;
   private ticks = 0;
@@ -158,25 +161,26 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.radius = options.viewRadius ?? DEFAULT_VIEW_RADIUS;
     // 支撑没了的火把交给掉落物（`World.dropDetachedTorches`）。掉落物要拿世界算碰撞，比世界晚建，
     // 所以这里传一个转发给掉落物的函数。世界在这个构造函数里只加载区块、不写方块，调用到它时掉落物已经建好。
-    // 出生点仍取原点那一列，#84 改为地形对象的出生列。
     const terrain = (options.terrain ?? createTerrain)(this.worldSeed);
+    this.spawnColumn = terrain.spawnColumn;
+    this.spawnChunk = { cx: chunkOf(this.spawnColumn.x), cz: chunkOf(this.spawnColumn.z) };
     this.world = new World(terrain.generateChunk, {
       spawnInBlock: (stack, x, y, z) => this.dropsState.spawnInBlock(stack, x, y, z),
     });
     if (restore) {
       // 读档：已改区块先进已改区块表再流式加载，加载时就复用它们。加载的是玩家周围；出生点取快照里的，
-      // 原点那一列这时可能还没加载，按「未加载即空气」重算就错了。
+      // 出生列这时可能还没加载，按「未加载即空气」重算就错了。
       this.world.restore(restore.editedChunks, restore.blockStates);
       this.firstSpawn = restore.firstSpawn;
       this.playerState = new Player(this.world, this.firstSpawn);
       this.playerState.restore(restore.player);
       streamChunks(this.world, this.playerChunk, this.radius);
     } else {
-      // 出生点要先有地形才算得出来，所以先加载原点周围，玩家最后造。
+      // 出生点要先有地形才算得出来，所以先加载出生列所在区块周围，玩家最后造。
       // 来源当场给不出区块时（浏览器里 Worker 还在生成）这里只加载得到已经就绪的那些，
-      // 其余由 tick 补上——所以浏览器那一侧要先把出生点那一带备好，见 src/world-session.ts。
-      streamChunks(this.world, ORIGIN_CHUNK, this.radius);
-      this.firstSpawn = this.originColumnTop();
+      // 其余由 tick 补上——所以浏览器那一侧要先把出生列那一带备好，见 src/world-session.ts。
+      streamChunks(this.world, this.spawnChunk, this.radius);
+      this.firstSpawn = this.spawnColumnTop();
       this.playerState = new Player(this.world, this.firstSpawn);
     }
     this.dropsState = new Drops(this.world, this.worldSeed);
@@ -535,9 +539,9 @@ export class GameCore implements BlockEdit, BlockStateView {
    */
   respawn(): void {
     if (!this.healthState.dead || deletesWorldOnDeath(this.worldDifficulty)) return;
-    // 原点区块改过又卸载了，要先放回世界：出生点按改过之后的方块算。没改过又还没送到的，
+    // 出生列所在区块改过又卸载了，要先放回世界：出生点按改过之后的方块算。没改过又还没送到的，
     // 出生点就是进入世界时那一个（`spawnPoint`），玩家在那里等区块送到（ADR-0013）。
-    this.world.loadChunk(ORIGIN_CHUNK.cx, ORIGIN_CHUNK.cz);
+    this.world.loadChunk(this.spawnChunk.cx, this.spawnChunk.cz);
     this.playerState.respawnAt(this.spawnPoint);
     this.healthState.reset();
     this.intent = IDLE_INTENT;
@@ -736,25 +740,26 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
-   * 出生点：世界原点那一列最高实心方块的顶面，落在方块中心。重生也回到这里。
+   * 出生点：出生列（地形对象的 `spawnColumn`）最高实心方块的顶面，落在方块中心。重生也回到这里。
    *
    * 从最高的非空气方块（`highestBlockY`）往下跳过不实心的火把（#56）：玩家穿得过火把，站在它顶上
    * 就会掉下去，插在高处墙上的一支足以让重生摔死。树冠是实心的，会把出生点抬到树冠的高度，所以
    * 出生点那一带干脆不长树，见 `OAK_SPAWN_CLEARANCE`。
    *
-   * 原点区块没加载时读不出那一列（「未加载即空气」），就用进入世界时的出生点。这时原点区块一定
+   * 出生列所在区块没加载时读不出那一列（「未加载即空气」），就用进入世界时的出生点。这时那个区块一定
    * 没改过：改过的区块卸载后仍留在世界里（ADR-0008），`respawn` 先把它放回来再问这里。
    */
   get spawnPoint(): Vec3 {
-    if (!this.world.isChunkLoaded(ORIGIN_CHUNK.cx, ORIGIN_CHUNK.cz)) return this.firstSpawn;
-    return this.originColumnTop();
+    if (!this.world.isChunkLoaded(this.spawnChunk.cx, this.spawnChunk.cz)) return this.firstSpawn;
+    return this.spawnColumnTop();
   }
 
-  /** 世界原点那一列此刻最高实心方块的顶面中心。 */
-  private originColumnTop(): Vec3 {
-    let y = this.highestBlockY(0, 0);
-    while (y >= WORLD_MIN_Y && !isSolid(this.world.getBlock(0, y, 0))) y--;
-    return { x: 0.5, y: y + 1, z: 0.5 };
+  /** 出生列此刻最高实心方块的顶面中心。 */
+  private spawnColumnTop(): Vec3 {
+    const { x, z } = this.spawnColumn;
+    let y = this.highestBlockY(x, z);
+    while (y >= WORLD_MIN_Y && !isSolid(this.world.getBlock(x, y, z))) y--;
+    return { x: x + 0.5, y: y + 1, z: z + 0.5 };
   }
 
   /** 一个 tick 的全部逻辑。 */

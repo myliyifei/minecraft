@@ -21,8 +21,10 @@ export const SNAPSHOT_FORMAT_VERSION = 1;
 /**
  * 地形算法的版本。已改区块整块存，没改过的区块读档时按种子重新生成：地形算法一变，新生成的区块与存下来的
  * 已改区块就不一致（ADR-0008），所以它与格式版本一样写进元数据、读档时比对。改 `terrain.ts` 的生成结果时加 1。
+ *
+ * 版本 1 是前六个切片的二维平原；版本 2 是三维密度地形与四种群系（ADR-0021，#75）。
  */
-export const TERRAIN_VERSION = 1;
+export const TERRAIN_VERSION = 2;
 
 /** 世界的持续状态。 */
 export interface Snapshot {

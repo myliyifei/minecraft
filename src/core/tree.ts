@@ -33,8 +33,18 @@ export interface TreePlacement {
 /** 树干能长在哪些列顶地表方块上（CONTEXT.md「树」）：沙滩、陡坡的石头、水底的沙子与沙砾都不长。 */
 const TREE_GROUND: ReadonlySet<BlockType> = new Set([BlockType.Grass, BlockType.SnowyGrass]);
 
-/** 一棵橡树。位置与形状全由种子决定，所以这几个数就足以描述它。 */
-export interface OakTree {
+/**
+ * 树种（CONTEXT.md「树」）。写法同 `Biome`：同名的类型是这几个值的联合。
+ */
+export const TreeSpecies = {
+  Oak: 'oak',
+  Birch: 'birch',
+  Spruce: 'spruce',
+} as const;
+export type TreeSpecies = (typeof TreeSpecies)[keyof typeof TreeSpecies];
+
+/** 一棵树。位置、树种与形状全由种子决定，所以这几个数就足以描述它。 */
+export interface Tree {
   /** 树干所在的列。 */
   readonly x: number;
   readonly z: number;
@@ -42,10 +52,11 @@ export interface OakTree {
   readonly rootY: number;
   /** 树干的原木格数。 */
   readonly trunkHeight: number;
+  readonly species: TreeSpecies;
 }
 
 /** 最上面那格原木的 y。树冠每一层的高度都相对它。 */
-export function oakTrunkTopY(tree: OakTree): number {
+export function trunkTopY(tree: Tree): number {
   return tree.rootY + tree.trunkHeight - 1;
 }
 
@@ -163,7 +174,7 @@ function oakSiteInCell(
   placement: TreePlacement,
   cellX: number,
   cellZ: number,
-): Omit<OakTree, 'rootY'> | undefined {
+): Omit<Tree, 'rootY' | 'species'> | undefined {
   const roll = hashCoords(placement.seed ^ OAK_TREE_SALT, cellX, cellZ);
   if (((roll >>> PRESENCE_SHIFT) & ROLL_MASK) >= OAK_TREE_CHANCE) return undefined;
 
@@ -183,11 +194,11 @@ function oakSiteInCell(
  * 某个树格里的树。这一格不长树、树给邻格让了位、落点是大海、落点的地表不高于海平面，或者落点的列顶地表方块
  * 不是草方块与雪草方块，则 undefined。
  */
-function oakTreeInCell(
+function treeInCell(
   placement: TreePlacement,
   cellX: number,
   cellZ: number,
-): OakTree | undefined {
+): Tree | undefined {
   const site = oakSiteInCell(placement, cellX, cellZ);
   if (!site) return undefined;
 
@@ -205,11 +216,11 @@ function oakTreeInCell(
   if (surface <= SEA_LEVEL) return undefined;
   // 只长在草方块与雪草方块上（#76）：沙滩是沙子，陡坡与石头岸是石头，这些列都不长。
   if (!TREE_GROUND.has(placement.surfaceBlockAt(site.x, site.z))) return undefined;
-  return { ...site, rootY: surface + 1 };
+  return { ...site, rootY: surface + 1, species: TreeSpecies.Oak };
 }
 
 /** 这棵树的树冠有没有伸进以 (originX, originZ) 为角的那个区块。 */
-function reachesChunk(tree: OakTree, originX: number, originZ: number): boolean {
+function reachesChunk(tree: Tree, originX: number, originZ: number): boolean {
   const reaches = (coord: number, origin: number): boolean =>
     coord + OAK_CANOPY_RADIUS >= origin && coord - OAK_CANOPY_RADIUS < origin + CHUNK_SIZE;
   return reaches(tree.x, originX) && reaches(tree.z, originZ);
@@ -224,19 +235,19 @@ function reachesChunk(tree: OakTree, originX: number, originZ: number): boolean 
  *
  * 顺序按树格坐标从小到大，在任何区块里都一样——两棵树写同一格时谁盖住谁因此是确定的。
  */
-export function oakTreesTouching(
+export function treesTouching(
   placement: TreePlacement,
   cx: number,
   cz: number,
-): OakTree[] {
+): Tree[] {
   const originX = cx * CHUNK_SIZE;
   const originZ = cz * CHUNK_SIZE;
-  const trees: OakTree[] = [];
+  const trees: Tree[] = [];
   const lastCellZ = cellOf(originZ + CHUNK_SIZE - 1 + OAK_CANOPY_RADIUS);
   const lastCellX = cellOf(originX + CHUNK_SIZE - 1 + OAK_CANOPY_RADIUS);
   for (let cellZ = cellOf(originZ - OAK_CANOPY_RADIUS); cellZ <= lastCellZ; cellZ++) {
     for (let cellX = cellOf(originX - OAK_CANOPY_RADIUS); cellX <= lastCellX; cellX++) {
-      const tree = oakTreeInCell(placement, cellX, cellZ);
+      const tree = treeInCell(placement, cellX, cellZ);
       if (tree && reachesChunk(tree, originX, originZ)) trees.push(tree);
     }
   }
@@ -244,26 +255,29 @@ export function oakTreesTouching(
 }
 
 /**
- * 把会写进这个区块的橡树种下去。
+ * 把会写进这个区块的树种下去。
  *
  * 要在土石铺好之后调：树叶只往空气里长，得先有地面才知道哪里是空气。
- * 落在区块外的格子由 `Chunk` 自己丢掉，那部分由邻居区块写。
  */
-export function plantOakTrees(placement: TreePlacement, chunk: Chunk): void {
-  const originX = chunk.cx * CHUNK_SIZE;
-  const originZ = chunk.cz * CHUNK_SIZE;
-  for (const tree of oakTreesTouching(placement, chunk.cx, chunk.cz)) {
-    const lx = tree.x - originX;
-    const lz = tree.z - originZ;
-    // 先树冠后树干：两者在树干顶端那几格重叠，原木盖住树叶。
-    plantCanopy(chunk, tree, lx, lz);
-    chunk.fillColumn(lx, lz, tree.rootY, oakTrunkTopY(tree), BlockType.OakLog);
-  }
+export function plantTrees(placement: TreePlacement, chunk: Chunk): void {
+  for (const tree of treesTouching(placement, chunk.cx, chunk.cz)) plantTree(chunk, tree);
+}
+
+/**
+ * 把一棵树落在这个区块里的部分写进去。落在区块外的格子由 `Chunk` 自己丢掉，那部分由邻居区块写。
+ *
+ * 先树冠后树干：两者在树干顶端那几格重叠，原木盖住树叶。
+ */
+export function plantTree(chunk: Chunk, tree: Tree): void {
+  const lx = tree.x - chunk.cx * CHUNK_SIZE;
+  const lz = tree.z - chunk.cz * CHUNK_SIZE;
+  plantCanopy(chunk, tree, lx, lz);
+  chunk.fillColumn(lx, lz, tree.rootY, trunkTopY(tree), BlockType.OakLog);
 }
 
 /** 把树冠写进区块，(lx, lz) 是树干在这个区块里的局部坐标。 */
-function plantCanopy(chunk: Chunk, tree: OakTree, lx: number, lz: number): void {
-  const top = oakTrunkTopY(tree);
+function plantCanopy(chunk: Chunk, tree: Tree, lx: number, lz: number): void {
+  const top = trunkTopY(tree);
   for (const { dy, radius, corners } of OAK_CANOPY_LAYERS) {
     const y = top + dy;
     for (let dz = -radius; dz <= radius; dz++) {

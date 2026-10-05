@@ -17,7 +17,7 @@ import {
 } from './terrain-density';
 import { Biome } from './biome';
 import { BEACH_REACH, coverColumn, highestTopBlock, type SurfaceSamples } from './surface';
-import { plantOakTrees, type SurfaceHeightAt, type TreePlacement } from './tree';
+import { plantTrees, type SurfaceHeightAt, type TreePlacement } from './tree';
 
 import type { ColumnCoord } from './world';
 
@@ -306,7 +306,7 @@ function densityGenerator(queries: Omit<Terrain, 'generateChunk'>): TerrainGener
         return inChunk ? (highest[lz * CHUNK_SIZE + lx] as BlockType) : highestTopBlock(samples, x, z);
       },
     };
-    plantOakTrees(placement, chunk);
+    plantTrees(placement, chunk);
     return chunk;
   };
 }

@@ -31,7 +31,7 @@ import {
   WALK_STEP,
 } from '../src/core/player';
 import { Biome, createTerrain } from '../src/core/terrain';
-import { OAK_CANOPY_RADIUS, oakTreesTouching, type OakTree } from '../src/core/tree';
+import { OAK_CANOPY_RADIUS, treesTouching, type Tree } from '../src/core/tree';
 import type { Vec3 } from '../src/core/vec3';
 import {
   DEFAULT_KEY_BINDINGS,
@@ -120,8 +120,8 @@ const XP_ABSORB_TICKS = TICK_RATE;
  * 在 Node 这一侧用同一份地形对象算出来，再拿去核对页面里的世界——两边对得上，就说明
  * Worker 生成的区块与核心认的是同一个世界（ADR-0003）。
  */
-function spawnAreaTree(): OakTree {
-  const tree = oakTreesTouching(DEFAULT_TERRAIN, 0, 0)[0];
+function spawnAreaTree(): Tree {
+  const tree = treesTouching(DEFAULT_TERRAIN, 0, 0)[0];
   if (!tree) throw new Error('默认种子的原点区块附近应有一棵橡树');
   return tree;
 }

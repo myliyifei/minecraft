@@ -1,25 +1,26 @@
 import { expect, type Page } from '@playwright/test';
 import { BlockType } from '../src/core/block';
-import { DEFAULT_SEED, TICK_RATE, WORLD_MIN_Y } from '../src/core/constants';
+import { DEFAULT_SEED, TICK_RATE } from '../src/core/constants';
 import { PICKUP_DELAY_TICKS } from '../src/core/drop';
 import type { GameCore } from '../src/core/game';
+import { HOTBAR_SIZE } from '../src/core/inventory';
 import { ItemType } from '../src/core/item';
 import { pondsTouching } from '../src/core/pond';
-import { createTerrain } from '../src/core/terrain';
-import { treesTouching } from '../src/core/tree';
+import { Biome, createTerrain } from '../src/core/terrain';
+import { TreeSpecies, treesTouching } from '../src/core/tree';
 import type { Vec3 } from '../src/core/vec3';
-import { chunkOf } from '../src/core/world';
-import { NON_SOLID_BLOCKS } from './world-list';
+import { chunkOf, type ColumnCoord } from '../src/core/world';
+import { GROUND_ARGS } from './world-list';
 
 /*
- * 第七切片全流程（#82）在世界里做的各步。dev.full-flow.spec.ts 经调试句柄把 `seventhSliceSteps` 的源码送进页面，
- * 在页面里的核心上跑；prod.full-flow.spec.ts 在 Node 里用同一份核心跑完再导入。两边做的是同一件事。
+ * 第七切片全流程（#82）在世界里做的各步。dev.full-flow.spec.ts 经调试句柄把 `seventhSliceSteps` 的源码传入页面，
+ * 在页面里的核心上执行；prod.full-flow.spec.ts 在 Node 里用同一份核心执行完再导入。两边做的是同一件事。
  *
  * `seventhSliceSteps` 只用参数：方块与物品编号、坐标都经 `SEVENTH_SLICE_ARGS` 传进来。它的源码要能单独在页面里求值，
  * 函数体里不能引用本模块的任何导入。
  *
  * 地点都在默认种子的出生列（原点）附近，开头由 Node 里同一份地形对象核对（`checkSeventhSliceTerrain`）：
- * #81 交接的水塘 (7..13, 6..12) 水面 y 67，#79 交接的原点区块第一棵树是白桦，水塘东边一株虞美人。
+ * #81 报告的水塘 (7..13, 6..12) 水面 y 67，#79 报告的原点区块第一棵树是白桦，水塘东边一株虞美人。
  */
 
 const TERRAIN = createTerrain(DEFAULT_SEED);
@@ -66,20 +67,23 @@ export interface SeventhSliceArgs {
   };
   readonly nonSolid: readonly number[];
   readonly minY: number;
+  readonly hotbarSize: number;
+  /** 全流程里一直空着的快捷栏格（最后一格），选中它就是空手。 */
+  readonly emptySlot: number;
   readonly pickupTicks: number;
   readonly tickRate: number;
-  readonly pondCenter: { readonly x: number; readonly z: number };
-  readonly pondWest: { readonly x: number; readonly z: number };
-  readonly eastBank: { readonly x: number; readonly z: number };
-  readonly iceColumn: { readonly x: number; readonly z: number };
-  readonly flower: { readonly x: number; readonly z: number };
-  readonly flowerStand: { readonly x: number; readonly z: number };
-  readonly replant: { readonly x: number; readonly z: number };
-  readonly birch: { readonly x: number; readonly z: number };
-  readonly birchStand: { readonly x: number; readonly z: number };
-  readonly detour: ReadonlyArray<{ readonly x: number; readonly z: number }>;
-  readonly stepStart: { readonly x: number; readonly z: number };
-  /** 台阶上层往 −Z 铺多长。prod 用真实按键走，走多远由帧率决定，铺得长一些。 */
+  readonly pondCenter: ColumnCoord;
+  readonly pondWest: ColumnCoord;
+  readonly eastBank: ColumnCoord;
+  readonly iceColumn: ColumnCoord;
+  readonly flower: ColumnCoord;
+  readonly flowerStand: ColumnCoord;
+  readonly replant: ColumnCoord;
+  readonly birch: ColumnCoord;
+  readonly birchStand: ColumnCoord;
+  readonly detour: ReadonlyArray<ColumnCoord>;
+  readonly stepStart: ColumnCoord;
+  /** 台阶上层往 −Z 铺多长。prod 用真实按键走，走多远由帧率决定，所以铺得更长。 */
   readonly stepLength: number;
 }
 
@@ -102,8 +106,9 @@ export const SEVENTH_SLICE_ARGS: SeventhSliceArgs = {
     oakPlanks: ItemType.OakPlanks,
     craftingTable: ItemType.CraftingTable,
   },
-  nonSolid: NON_SOLID_BLOCKS,
-  minY: WORLD_MIN_Y,
+  ...GROUND_ARGS,
+  hotbarSize: HOTBAR_SIZE,
+  emptySlot: HOTBAR_SIZE - 1,
   pickupTicks: PICKUP_DELAY_TICKS,
   tickRate: TICK_RATE,
   pondCenter: POND_CENTER,
@@ -136,7 +141,7 @@ function generated(x: number, y: number, z: number): BlockType {
   return TERRAIN.generateChunk(cx, cz).get(x - cx * 16, y, z - cz * 16) as BlockType;
 }
 
-/** Node 里由地形对象算出、页面与导出文件要对上的那些格。 */
+/** Node 里由地形对象算出、页面与导出文件要与之一致的那些格。 */
 export interface SeventhSliceTerrain {
   readonly spawn: Vec3;
   readonly waterY: number;
@@ -151,15 +156,15 @@ export interface SeventhSliceTerrain {
 }
 
 /**
- * 用 Node 里同一份地形对象复核前序 issue 交接的地点，返回之后要对上的各格。地形改了导致对不上时这里先报出来，
- * 不让后面的步骤在错的地方乱走。
+ * 用 Node 里同一份地形对象复核前序 issue 给出的地点，返回之后要核对的各格。地形改动导致不一致时这里先报出来，
+ * 以免后面的步骤在错误的位置执行。
  */
 export function checkSeventhSliceTerrain(): SeventhSliceTerrain {
   const { spawnColumn } = TERRAIN;
-  const fail = (message: string): never => {
+  function fail(message: string): never {
     throw new Error(`默认种子的地形与 #82 全流程的假设不符：${message}`);
-  };
-  if (TERRAIN.biomeAt(spawnColumn.x, spawnColumn.z) !== 'plains') fail('出生列不是平原');
+  }
+  if (TERRAIN.biomeAt(spawnColumn.x, spawnColumn.z) !== Biome.Plains) fail('出生列不是平原');
   if (TERRAIN.surfaceBlockAt(spawnColumn.x, spawnColumn.z) !== BlockType.Grass) fail('出生列列顶不是草方块');
   const spawnY = TERRAIN.surfaceHeightAt(spawnColumn.x, spawnColumn.z) + 1;
 
@@ -170,10 +175,10 @@ export function checkSeventhSliceTerrain(): SeventhSliceTerrain {
   const floor = pondFloor(POND_CENTER.x, POND_CENTER.z);
   if (pondFloor(POND_WEST.x, POND_WEST.z) !== floor) fail('水塘中心列西边那列的塘底与中心列不同');
   // 至少三格深：沉到塘底时眼睛在水里
-  if (pond!.waterY - floor < 3) fail('水塘中心不到三格深');
+  if (pond.waterY - floor < 3) fail('水塘中心不到三格深');
   if (TERRAIN.surfaceBlockAt(ICE_COLUMN.x, ICE_COLUMN.z) !== BlockType.Water) fail('放冰的那一列不是水塘列');
   if (TERRAIN.surfaceBlockAt(EAST_BANK.x, EAST_BANK.z) !== BlockType.Grass) fail('东岸那一列列顶不是草方块');
-  if (TERRAIN.surfaceHeightAt(EAST_BANK.x, EAST_BANK.z) !== pond!.waterY) fail('东岸的地面与水面不齐，爬不上去');
+  if (TERRAIN.surfaceHeightAt(EAST_BANK.x, EAST_BANK.z) !== pond.waterY) fail('东岸的地面与水面不齐，爬不上去');
 
   const flowerY = TERRAIN.surfaceHeightAt(FLOWER.x, FLOWER.z) + 1;
   if (generated(FLOWER.x, flowerY, FLOWER.z) !== BlockType.Poppy) fail(`(${FLOWER.x}, ${flowerY}, ${FLOWER.z}) 不是虞美人`);
@@ -183,16 +188,16 @@ export function checkSeventhSliceTerrain(): SeventhSliceTerrain {
   if (generated(REPLANT.x, replantY, REPLANT.z) !== BlockType.Air) fail('种花的那一格不是空气');
 
   const [first] = treesTouching(TERRAIN, 0, 0);
-  if (first?.species !== 'birch' || first.x !== BIRCH.x || first.z !== BIRCH.z) fail('原点区块的第一棵树不是那棵白桦');
+  if (first?.species !== TreeSpecies.Birch || first.x !== BIRCH.x || first.z !== BIRCH.z) fail('原点区块的第一棵树不是那棵白桦');
   return {
     spawn: { x: spawnColumn.x + 0.5, y: spawnY, z: spawnColumn.z + 0.5 },
-    waterY: pond!.waterY,
+    waterY: pond.waterY,
     pondFloor: floor,
     placedInWater: { x: POND_WEST.x, y: floor + 1, z: POND_WEST.z },
-    iceCell: { x: ICE_COLUMN.x, y: pond!.waterY, z: ICE_COLUMN.z },
+    iceCell: { x: ICE_COLUMN.x, y: pond.waterY, z: ICE_COLUMN.z },
     flowerCell: { x: FLOWER.x, y: flowerY, z: FLOWER.z },
     replantCell: { x: REPLANT.x, y: replantY, z: REPLANT.z },
-    birchLog: { x: BIRCH.x, y: first!.rootY, z: BIRCH.z },
+    birchLog: { x: BIRCH.x, y: first.rootY, z: BIRCH.z },
   };
 }
 
@@ -203,10 +208,13 @@ export interface StepReadback {
   readonly inWater: boolean;
   readonly eyeInWater: boolean;
   readonly cells: Record<string, number>;
-  readonly target?: { readonly x: number; readonly y: number; readonly z: number } | undefined;
+  readonly target?: Vec3 | undefined;
   readonly inventory: ReadonlyArray<{ readonly item: number; readonly count: number } | null>;
   readonly extra?: unknown;
 }
+
+/** 游到塘底之后、搭台阶之前的各步，dev 与 prod 按这个顺序做、逐步核对。 */
+export const WATER_TO_TABLE_STEPS = ['placeInWater', 'climbOutEast', 'mineIce', 'pickFlower', 'chopBirch', 'craftTable'] as const;
 
 export type StepName = 'swimToPondCenter' | 'placeInWater' | 'climbOutEast' | 'mineIce' | 'pickFlower' | 'chopBirch' | 'craftTable' | 'buildStep' | 'walkUpStep';
 
@@ -214,12 +222,12 @@ export type StepName = 'swimToPondCenter' | 'placeInWater' | 'climbOutEast' | 'm
  * 全流程在世界里的各步，`core` 是核心（页面里的调试句柄或 Node 里的 `GameCore`）。返回一个按步名取的对象，
  * 每一步做完返回读回。整段只用参数，见本文件开头。
  */
-export function seventhSliceSteps(core: GameCore, a: SeventhSliceArgs): Record<StepName, () => StepReadback> {
+export function seventhSliceSteps(core: GameCore, args: SeventhSliceArgs): Record<StepName, () => StepReadback> {
   const idle = { forward: false, back: false, left: false, right: false, jump: false };
   /** 这一列最高的实心方块。 */
   const groundY = (x: number, z: number): number => {
     let y = core.highestBlockY(x, z);
-    while (y >= a.minY && a.nonSolid.includes(core.getBlock(x, y, z))) y--;
+    while (y >= args.minY && args.nonSolid.includes(core.getBlock(x, y, z))) y--;
     return y;
   };
   const inventory = () =>
@@ -270,7 +278,7 @@ export function seventhSliceSteps(core: GameCore, a: SeventhSliceArgs): Record<S
   };
   /** 不按任何键，推进到玩家落地（或在水里沉到底）且不再移动。 */
   const settle = (): void => {
-    for (let i = 0; i < 10 * a.tickRate; i++) {
+    for (let i = 0; i < 10 * args.tickRate; i++) {
       const before = { ...core.player.position };
       core.tick();
       const after = core.player.position;
@@ -299,7 +307,7 @@ export function seventhSliceSteps(core: GameCore, a: SeventhSliceArgs): Record<S
     return cleared;
   };
   const slotOf = (item: number): number => {
-    for (let i = 0; i < 9; i++) if (core.inventory.slot(i)?.item === item) return i;
+    for (let i = 0; i < args.hotbarSize; i++) if (core.inventory.slot(i)?.item === item) return i;
     throw new Error(`快捷栏里没有物品 ${item}`);
   };
   /** 选中 item 那一格，对准 (x, y, z) 的顶面按使用键，返回此刻的目标。 */
@@ -312,7 +320,7 @@ export function seventhSliceSteps(core: GameCore, a: SeventhSliceArgs): Record<S
     return target;
   };
 
-  const center = a.pondCenter;
+  const center = args.pondCenter;
   const floorAtCenter = (): number => groundY(center.x, center.z);
 
   return {
@@ -322,65 +330,66 @@ export function seventhSliceSteps(core: GameCore, a: SeventhSliceArgs): Record<S
       return readback({ eye: { x: Math.floor(x), y: Math.floor(y), z: Math.floor(z) } }, { floor: floorAtCenter() });
     },
     placeInWater() {
-      core.giveItem(a.items.cobblestone, 4);
-      const floor = groundY(a.pondWest.x, a.pondWest.z);
-      const cell = { x: a.pondWest.x, y: floor + 1, z: a.pondWest.z };
+      core.giveItem(args.items.cobblestone, 4);
+      const floor = groundY(args.pondWest.x, args.pondWest.z);
+      const cell = { x: args.pondWest.x, y: floor + 1, z: args.pondWest.z };
       const before = core.getBlock(cell.x, cell.y, cell.z);
-      const target = useOnTop(a.items.cobblestone, a.pondWest.x, floor, a.pondWest.z);
+      const target = useOnTop(args.items.cobblestone, args.pondWest.x, floor, args.pondWest.z);
       return { ...readback({ placed: cell }, { before, floor }), target };
     },
     climbOutEast() {
-      walkTo(a.eastBank.x, a.eastBank.z, true);
-      return readback({}, { ground: groundY(a.eastBank.x, a.eastBank.z) });
+      walkTo(args.eastBank.x, args.eastBank.z, true);
+      return readback({}, { ground: groundY(args.eastBank.x, args.eastBank.z) });
     },
     mineIce() {
-      const x = a.iceColumn.x;
-      const z = a.iceColumn.z;
+      const x = args.iceColumn.x;
+      const z = args.iceColumn.z;
       // 水面那一格：这一列从上往下第一格水
       let y = core.highestBlockY(x, z);
-      while (y >= a.minY && core.getBlock(x, y, z) !== a.blocks.water) y--;
-      core.setBlock(x, y, z, a.blocks.ice);
+      while (y >= args.minY && core.getBlock(x, y, z) !== args.blocks.water) y--;
+      core.setBlock(x, y, z, args.blocks.ice);
       const placed = core.getBlock(x, y, z);
       const drops = core.drops.count;
-      core.selectHotbarSlot(8);
-      mineThrough(x, y, z, a.blocks.ice, 0.9);
-      core.tick(a.pickupTicks + a.tickRate);
+      core.selectHotbarSlot(args.emptySlot);
+      mineThrough(x, y, z, args.blocks.ice, 0.9);
+      core.tick(args.pickupTicks + args.tickRate);
       return readback({ ice: { x, y, z } }, { placed, y, newDrops: core.drops.count - drops });
     },
     pickFlower() {
-      walkTo(a.flowerStand.x, a.flowerStand.z);
-      const flower = { x: a.flower.x, y: groundY(a.flower.x, a.flower.z) + 1, z: a.flower.z };
+      walkTo(args.flowerStand.x, args.flowerStand.z);
+      const flower = { x: args.flower.x, y: groundY(args.flower.x, args.flower.z) + 1, z: args.flower.z };
       const before = core.getBlock(flower.x, flower.y, flower.z);
-      core.selectHotbarSlot(8);
+      core.selectHotbarSlot(args.emptySlot);
       aimAt(flower.x + 0.5, flower.y + 0.25, flower.z + 0.5);
       const minedTarget = core.mining.target ? { ...core.mining.target } : undefined;
       core.setMining(true);
       core.tick();
       core.setMining(false);
-      core.tick(a.pickupTicks + a.tickRate);
+      core.tick(args.pickupTicks + args.tickRate);
       const picked = inventory();
-      const soil = { x: a.replant.x, y: groundY(a.replant.x, a.replant.z), z: a.replant.z };
+      const soil = { x: args.replant.x, y: groundY(args.replant.x, args.replant.z), z: args.replant.z };
       const soilBlock = core.getBlock(soil.x, soil.y, soil.z);
-      const plantTarget = useOnTop(a.items.poppy, soil.x, soil.y, soil.z);
+      const plantTarget = useOnTop(args.items.poppy, soil.x, soil.y, soil.z);
       return readback(
         { flower, replanted: { x: soil.x, y: soil.y + 1, z: soil.z } },
         { before, minedTarget, picked, soilBlock, plantTarget, soil },
       );
     },
     chopBirch() {
-      for (const point of a.detour) walkTo(point.x, point.z);
-      walkTo(a.birchStand.x, a.birchStand.z);
-      const log = { x: a.birch.x, y: groundY(a.birch.x, a.birch.z - 3) + 1, z: a.birch.z };
+      for (const point of args.detour) walkTo(point.x, point.z);
+      walkTo(args.birchStand.x, args.birchStand.z);
+      // 树干那一列最高的实心方块是树冠，原木最下面一格取站立那一列（树冠之外）的地面之上一格
+      const log = { x: args.birch.x, y: groundY(args.birchStand.x, args.birchStand.z) + 1, z: args.birch.z };
       const before = core.getBlock(log.x, log.y, log.z);
-      core.selectHotbarSlot(8);
-      const cleared = mineThrough(log.x, log.y, log.z, a.blocks.birchLog);
+      core.selectHotbarSlot(args.emptySlot);
+      const cleared = mineThrough(log.x, log.y, log.z, args.blocks.birchLog);
       // 原木掉在树干那一列：沿挖开的那条缝走过去拾起
-      walkTo(a.birch.x, a.birch.z - 1);
-      core.tick(a.pickupTicks + a.tickRate);
+      walkTo(args.birch.x, args.birch.z - 1);
+      core.tick(args.pickupTicks + args.tickRate);
       return readback({ log }, { before, cleared });
     },
     craftTable() {
-      core.giveItem(a.items.oakPlanks, 2);
+      core.giveItem(args.items.oakPlanks, 2);
       core.toggleInventory();
       core.tick();
       // 界面上的点击在下一 tick 生效，每点一下推进一 tick 再读
@@ -391,13 +400,13 @@ export function seventhSliceSteps(core: GameCore, a: SeventhSliceArgs): Record<S
       const crafting = () => core.inventoryScreen.crafting!;
       const recipe = (item: number): number => crafting().recipes.findIndex((entry) => entry.recipe.result.item === item);
       // 一根白桦原木出 4 块白桦木板，放进第 30 格
-      click(() => core.clickRecipe(recipe(a.items.birchPlanks)));
+      click(() => core.clickRecipe(recipe(args.items.birchPlanks)));
       const planksOutput = crafting().output ? { ...crafting().output! } : undefined;
       click(() => core.clickCraftingOutput());
       click(() => core.clickSlot(30));
       // 工作台：配方书按三种木板合计判断，点它填入 2 块橡木板与 2 块白桦木板
-      const craftable = crafting().recipes[recipe(a.items.craftingTable)]!.craftable;
-      click(() => core.clickRecipe(recipe(a.items.craftingTable)));
+      const craftable = crafting().recipes[recipe(args.items.craftingTable)]!.craftable;
+      click(() => core.clickRecipe(recipe(args.items.craftingTable)));
       const grid = Array.from({ length: 4 }, (_, i) => crafting().slot(i)?.item ?? null);
       const tableOutput = crafting().output ? { ...crafting().output! } : undefined;
       click(() => core.clickCraftingOutput());
@@ -407,20 +416,20 @@ export function seventhSliceSteps(core: GameCore, a: SeventhSliceArgs): Record<S
       return readback({}, { planksOutput, craftable, grid, tableOutput, open: core.inventoryScreen.open });
     },
     buildStep() {
-      walkTo(a.stepStart.x, a.stepStart.z);
+      walkTo(args.stepStart.x, args.stepStart.z);
       // 与 dev.settings.spec.ts 的 walkIntoStep 同样的台阶：玩家脚下一层石头地面，往 −Z 两格外起高一格
       core.turn(-core.player.yaw, -core.player.pitch);
       const start = core.player.position;
       const bx = Math.floor(start.x);
       const bz = Math.floor(start.z);
       const feet = Math.floor(start.y);
-      const far = 2 + a.stepLength;
+      const far = 2 + args.stepLength;
       for (let dx = -1; dx <= 1; dx++) {
         for (let dz = 1; dz >= -far; dz--) {
-          core.setBlock(bx + dx, feet - 1, bz + dz, a.blocks.stone);
-          for (let dy = 0; dy <= 3; dy++) core.setBlock(bx + dx, feet + dy, bz + dz, a.blocks.air);
+          core.setBlock(bx + dx, feet - 1, bz + dz, args.blocks.stone);
+          for (let dy = 0; dy <= 3; dy++) core.setBlock(bx + dx, feet + dy, bz + dz, args.blocks.air);
         }
-        for (let dz = -3; dz >= -far; dz--) core.setBlock(bx + dx, feet, bz + dz, a.blocks.stone);
+        for (let dz = -3; dz >= -far; dz--) core.setBlock(bx + dx, feet, bz + dz, args.blocks.stone);
       }
       core.tick();
       // 台阶靠玩家那一面在 z = bz − 2
@@ -438,7 +447,7 @@ export function seventhSliceSteps(core: GameCore, a: SeventhSliceArgs): Record<S
 }
 
 /**
- * 在页面里的核心上跑一步：把 `seventhSliceSteps` 的源码送进页面求值。整段在一次同步的 evaluate 里，游戏循环插不进来。
+ * 在页面里的核心上执行一步：把 `seventhSliceSteps` 的源码传入页面求值。整段在一次同步的 evaluate 里，游戏循环不会在其间执行。
  */
 export function stepInPage(page: Page, name: StepName): Promise<StepReadback> {
   return page.evaluate(
@@ -485,92 +494,92 @@ export function countOf(inventory: StepReadback['inventory'], item: number): num
  */
 export const expectStep = {
   /** 走到水边游进去，沉到中心列塘底：脚踩塘底、身子与眼睛都在水里，眼睛那一格是水。 */
-  swimToPondCenter(r: StepReadback, t: SeventhSliceTerrain): void {
-    const extra = r.extra as StepExtras['swimToPondCenter'];
-    expect(extra.floor).toBe(t.pondFloor);
-    expect(r.position.y).toBe(t.pondFloor + 1);
-    expect(r.onGround).toBe(true);
-    expect(r.inWater).toBe(true);
-    expect(r.eyeInWater).toBe(true);
-    expect(r.cells.eye).toBe(BlockType.Water);
+  swimToPondCenter(readback: StepReadback, terrain: SeventhSliceTerrain): void {
+    const extra = readback.extra as StepExtras['swimToPondCenter'];
+    expect(extra.floor).toBe(terrain.pondFloor);
+    expect(readback.position.y).toBe(terrain.pondFloor + 1);
+    expect(readback.onGround).toBe(true);
+    expect(readback.inWater).toBe(true);
+    expect(readback.eyeInWater).toBe(true);
+    expect(readback.cells.eye).toBe(BlockType.Water);
   },
   /** 对着水里那列塘底的顶面放圆石：那一格先是水，放下之后是圆石，背包少一块。 */
-  placeInWater(r: StepReadback, t: SeventhSliceTerrain): void {
-    const extra = r.extra as StepExtras['placeInWater'];
+  placeInWater(readback: StepReadback, terrain: SeventhSliceTerrain): void {
+    const extra = readback.extra as StepExtras['placeInWater'];
     expect(extra.before).toBe(BlockType.Water);
-    expect(r.target).toMatchObject({ x: t.placedInWater.x, y: t.placedInWater.y - 1, z: t.placedInWater.z });
-    expect(r.cells.placed).toBe(BlockType.Cobblestone);
-    expect(countOf(r.inventory, ItemType.Cobblestone)).toBe(3);
+    expect(readback.target).toMatchObject({ x: terrain.placedInWater.x, y: terrain.placedInWater.y - 1, z: terrain.placedInWater.z });
+    expect(readback.cells.placed).toBe(BlockType.Cobblestone);
+    expect(countOf(readback.inventory, ItemType.Cobblestone)).toBe(3);
   },
   /** 按住跳朝东岸游：爬上岸，站在岸上的草方块上，不在水里。 */
-  climbOutEast(r: StepReadback, t: SeventhSliceTerrain): void {
-    const extra = r.extra as StepExtras['climbOutEast'];
-    expect(extra.ground).toBe(t.waterY);
-    expect(r.position.y).toBe(t.waterY + 1);
-    expect(r.onGround).toBe(true);
-    expect(r.inWater).toBe(false);
+  climbOutEast(readback: StepReadback, terrain: SeventhSliceTerrain): void {
+    const extra = readback.extra as StepExtras['climbOutEast'];
+    expect(extra.ground).toBe(terrain.waterY);
+    expect(readback.position.y).toBe(terrain.waterY + 1);
+    expect(readback.onGround).toBe(true);
+    expect(readback.inWater).toBe(false);
   },
   /** 把水面那一格换成冰，空手挖掉：原处是一格水，没有掉落物。 */
-  mineIce(r: StepReadback, t: SeventhSliceTerrain): void {
-    const extra = r.extra as StepExtras['mineIce'];
-    expect(extra.y).toBe(t.iceCell.y);
+  mineIce(readback: StepReadback, terrain: SeventhSliceTerrain): void {
+    const extra = readback.extra as StepExtras['mineIce'];
+    expect(extra.y).toBe(terrain.iceCell.y);
     expect(extra.placed).toBe(BlockType.Ice);
-    expect(r.cells.ice).toBe(BlockType.Water);
+    expect(readback.cells.ice).toBe(BlockType.Water);
     expect(extra.newDrops).toBe(0);
   },
   /** 挖掉那株虞美人拾起来，种到旁边一列的草方块上：原处空了，新处是虞美人，背包里不剩。 */
-  pickFlower(r: StepReadback, t: SeventhSliceTerrain): void {
-    const extra = r.extra as StepExtras['pickFlower'];
+  pickFlower(readback: StepReadback, terrain: SeventhSliceTerrain): void {
+    const extra = readback.extra as StepExtras['pickFlower'];
     expect(extra.before).toBe(BlockType.Poppy);
-    expect(extra.minedTarget).toMatchObject({ ...t.flowerCell });
+    expect(extra.minedTarget).toMatchObject({ ...terrain.flowerCell });
     expect(countOf(extra.picked, ItemType.Poppy)).toBe(1);
-    expect(r.cells.flower).toBe(BlockType.Air);
+    expect(readback.cells.flower).toBe(BlockType.Air);
     expect(extra.soilBlock).toBe(BlockType.Grass);
-    expect(extra.plantTarget).toMatchObject({ x: t.replantCell.x, y: t.replantCell.y - 1, z: t.replantCell.z, normal: { x: 0, y: 1, z: 0 } });
-    expect(r.cells.replanted).toBe(BlockType.Poppy);
-    expect(countOf(r.inventory, ItemType.Poppy)).toBe(0);
+    expect(extra.plantTarget).toMatchObject({ x: terrain.replantCell.x, y: terrain.replantCell.y - 1, z: terrain.replantCell.z, normal: { x: 0, y: 1, z: 0 } });
+    expect(readback.cells.replanted).toBe(BlockType.Poppy);
+    expect(countOf(readback.inventory, ItemType.Poppy)).toBe(0);
   },
   /** 空手砍白桦最下面那格原木（挡在视线上的白桦树叶先挖掉），走过去拾起一根白桦原木。 */
-  chopBirch(r: StepReadback): void {
-    const extra = r.extra as StepExtras['chopBirch'];
+  chopBirch(readback: StepReadback): void {
+    const extra = readback.extra as StepExtras['chopBirch'];
     expect(extra.before).toBe(BlockType.BirchLog);
-    expect(r.cells.log).toBe(BlockType.Air);
+    expect(readback.cells.log).toBe(BlockType.Air);
     for (const cleared of extra.cleared) expect(cleared.endsWith(`:${BlockType.BirchLeaves}`), cleared).toBe(true);
-    expect(countOf(r.inventory, ItemType.BirchLog)).toBe(1);
+    expect(countOf(readback.inventory, ItemType.BirchLog)).toBe(1);
   },
   /**
-   * 背包界面里一根白桦原木做出 4 块白桦木板，再加 2 块橡木板：工作台那条配方够料，点它填入两种木板各 2 块，
+   * 背包界面里一根白桦原木做出 4 块白桦木板，再加 2 块橡木板：工作台那条配方材料足够，点它填入两种木板各 2 块，
    * 做出一个工作台；背包里剩 2 块白桦木板，橡木板用完。
    */
-  craftTable(r: StepReadback): void {
-    const extra = r.extra as StepExtras['craftTable'];
+  craftTable(readback: StepReadback): void {
+    const extra = readback.extra as StepExtras['craftTable'];
     expect(extra.planksOutput).toEqual({ item: ItemType.BirchPlanks, count: 4 });
     expect(extra.craftable).toBe(true);
     const byId = (a: number | null, b: number | null) => (a ?? -1) - (b ?? -1);
     expect([...extra.grid].sort(byId)).toEqual([ItemType.OakPlanks, ItemType.OakPlanks, ItemType.BirchPlanks, ItemType.BirchPlanks].sort(byId));
     expect(extra.tableOutput).toEqual({ item: ItemType.CraftingTable, count: 1 });
     expect(extra.open).toBe(false);
-    expect(countOf(r.inventory, ItemType.CraftingTable)).toBe(1);
-    expect(countOf(r.inventory, ItemType.BirchPlanks)).toBe(2);
-    expect(countOf(r.inventory, ItemType.OakPlanks)).toBe(0);
-    expect(countOf(r.inventory, ItemType.BirchLog)).toBe(0);
+    expect(countOf(readback.inventory, ItemType.CraftingTable)).toBe(1);
+    expect(countOf(readback.inventory, ItemType.BirchPlanks)).toBe(2);
+    expect(countOf(readback.inventory, ItemType.OakPlanks)).toBe(0);
+    expect(countOf(readback.inventory, ItemType.BirchLog)).toBe(0);
   },
   /** 搭好一格高的台阶：脚下是石头，台阶第一格是石头。返回脚底高度与台阶靠玩家那一面的 z。 */
-  buildStep(r: StepReadback): StepExtras['buildStep'] {
-    expect(r.cells.below).toBe(BlockType.Stone);
-    expect(r.cells.stepFirst).toBe(BlockType.Stone);
-    return r.extra as StepExtras['buildStep'];
+  buildStep(readback: StepReadback): StepExtras['buildStep'] {
+    expect(readback.cells.below).toBe(BlockType.Stone);
+    expect(readback.cells.stepFirst).toBe(BlockType.Stone);
+    return readback.extra as StepExtras['buildStep'];
   },
 };
 
 /** 保存并退出再进入、导出再导入之后都要在原处的那几格，与各自应是的方块。 */
-export function changedCells(t: SeventhSliceTerrain, step: StepExtras['buildStep']): Record<string, { cell: Vec3; block: BlockType }> {
+export function changedCells(terrain: SeventhSliceTerrain, step: StepExtras['buildStep']): Record<string, { cell: Vec3; block: BlockType }> {
   return {
-    放进水里的圆石: { cell: t.placedInWater, block: BlockType.Cobblestone },
-    挖冰留下的水: { cell: t.iceCell, block: BlockType.Water },
-    挖掉的花: { cell: t.flowerCell, block: BlockType.Air },
-    种下的花: { cell: t.replantCell, block: BlockType.Poppy },
-    砍掉的白桦原木: { cell: t.birchLog, block: BlockType.Air },
+    放进水里的圆石: { cell: terrain.placedInWater, block: BlockType.Cobblestone },
+    挖冰留下的水: { cell: terrain.iceCell, block: BlockType.Water },
+    挖掉的花: { cell: terrain.flowerCell, block: BlockType.Air },
+    种下的花: { cell: terrain.replantCell, block: BlockType.Poppy },
+    砍掉的白桦原木: { cell: terrain.birchLog, block: BlockType.Air },
     台阶: { cell: { x: SEVENTH_SLICE_ARGS.stepStart.x, y: step.feet, z: step.stepFace - 1 }, block: BlockType.Stone },
   };
 }

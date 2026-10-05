@@ -8,7 +8,7 @@ import { MAX_PITCH } from '../src/core/player';
 import type { Vec3 } from '../src/core/vec3';
 import { DEFAULT_KEY_BINDINGS, keyLabel } from '../src/input/keybindings';
 import { STRINGS } from '../src/ui/strings';
-import { changedCells, checkSeventhSliceTerrain, expectStep, stepInPage, type StepReadback } from './seventh-slice';
+import { changedCells, checkSeventhSliceTerrain, expectStep, stepInPage, type StepReadback, WATER_TO_TABLE_STEPS } from './seventh-slice';
 import { GROUND_ARGS, createWorld, fallToDeath, ignorePause, pressEscape, resumeGame, waitForWorld, waitForWorldList } from './world-list';
 
 /*
@@ -134,13 +134,13 @@ function playInWorld(page: Page): Promise<Spots> {
   );
 }
 
-/** 再进入之后要一致的：三格方块、世界时刻与 tick、玩家、生命、经验、背包与选中格、掉落物、经验球。 */
-function observe(page: Page, spots: Spots) {
-  return page.evaluate((spots) => {
+/** 再进入之后要一致的：cells 那几格方块、世界时刻与 tick、玩家、生命、经验、背包与选中格、掉落物、经验球。 */
+function observe(page: Page, cells: readonly Vec3[]) {
+  return page.evaluate((cells) => {
     const core = window.__VOXEL__!.core;
     const { position, yaw, pitch } = core.player;
     return {
-      blocks: [spots.hole, spots.cobblestone, spots.torch].map(({ x, y, z }) => core.getBlock(x, y, z)),
+      blocks: cells.map(({ x, y, z }) => core.getBlock(x, y, z)),
       ticks: core.tickCount,
       timeOfDay: core.timeOfDay,
       night: core.isNight,
@@ -155,7 +155,12 @@ function observe(page: Page, spots: Spots) {
       drops: core.drops.all().map(({ id, item, count, position, age }) => ({ id, item, count, age, position: { ...position } })),
       xpOrbs: core.xpOrbs.all().map(({ id, amount, position, age }) => ({ id, amount, age, position: { ...position } })),
     };
-  }, spots);
+  }, cells);
+}
+
+/** 第六切片全流程里改过的三格：挖开的洞、放下的圆石、插下的火把。 */
+function spotCells(spots: Spots): Vec3[] {
+  return [spots.hole, spots.cobblestone, spots.torch];
 }
 
 /** 点暂停菜单上的保存并退出，等世界列表显示出来。 */
@@ -206,7 +211,7 @@ test('全流程：空列表新建世界，挖、放、扔、插火把后 Esc，�
   const spots = await playInWorld(page);
   await pressEscape(page);
   await expect(pauseMenu(page)).toBeVisible();
-  const before = await observe(page, spots);
+  const before = await observe(page, spotCells(spots));
   expect(before.blocks).toEqual([BlockType.Air, BlockType.Cobblestone, BlockType.Torch]);
   expect(before.night).toBe(true);
   expect(before.experience).toBeGreaterThan(0);
@@ -217,7 +222,7 @@ test('全流程：空列表新建世界，挖、放、扔、插火把后 Esc，�
     { item: ItemType.Dirt, count: 64 },
   ]);
   await page.waitForTimeout(500);
-  expect(await observe(page, spots)).toEqual(before);
+  expect(await observe(page, spotCells(spots))).toEqual(before);
 
   // 保存并退出 → 再进入：洞、方块、掉落物、火把、世界时刻、背包、经验都与退出前相同
   await saveAndExit(page);
@@ -225,7 +230,7 @@ test('全流程：空列表新建世界，挖、放、扔、插火把后 Esc，�
   const [originalId] = await entryIds(page);
   await enterId(page, originalId!);
   await expect(pauseMenu(page)).toBeVisible();
-  expect(await observe(page, spots)).toEqual(before);
+  expect(await observe(page, spotCells(spots))).toEqual(before);
 
   // 另一个标签页进入同一个世界：被拒，提示已在另一个标签页打开
   const other = await page.context().newPage();
@@ -251,7 +256,7 @@ test('全流程：空列表新建世界，挖、放、扔、插火把后 Esc，�
   await expect(entries(page)).toHaveCount(2);
   const [copyId] = (await entryIds(page)).filter((id) => id !== originalId);
   await enterId(page, copyId!);
-  expect(await observe(page, spots)).toEqual(before);
+  expect(await observe(page, spotCells(spots))).toEqual(before);
   await saveAndExit(page);
 
   // 极限世界摔死：死亡画面只有删除世界，点了回到列表，这个世界不在了
@@ -335,25 +340,6 @@ function skyAfterRender(page: Page): Promise<{ underwater: boolean; fogEnabled: 
   });
 }
 
-/** 再进入之后要一致的：改过的几格、tick、玩家、背包与选中格、掉落物。 */
-function observeSeventh(page: Page, cells: readonly Vec3[]) {
-  return page.evaluate((cells) => {
-    const core = window.__VOXEL__!.core;
-    const { position, yaw, pitch } = core.player;
-    return {
-      blocks: cells.map(({ x, y, z }) => core.getBlock(x, y, z)),
-      ticks: core.tickCount,
-      player: { position: { ...position }, yaw, pitch },
-      inventory: Array.from({ length: core.inventory.size }, (_, i) => {
-        const stack = core.inventory.slot(i);
-        return stack ? { ...stack } : null;
-      }),
-      selectedSlot: core.inventory.selectedSlot,
-      drops: core.drops.all().map(({ id, item, count, position, age }) => ({ id, item, count, age, position: { ...position } })),
-    };
-  }, cells);
-}
-
 test('第七切片全流程：新建世界出生在平原的草方块上，走进水塘沉到水下（sky 报告在水下、雾开启），往水里放圆石，挖冰变水，挖花再种下，砍白桦用白桦木板与橡木板合成工作台，自动跳跃上台阶；保存并退出再进入、导出再导入，改动都在原处（#82）', async ({
   page,
 }) => {
@@ -382,7 +368,7 @@ test('第七切片全流程：新建世界出生在平原的草方块上，走�
   expect(await skyAfterRender(page)).toEqual({ underwater: true, fogEnabled: true });
 
   const steps: Record<string, StepReadback> = {};
-  for (const name of ['placeInWater', 'climbOutEast', 'mineIce', 'pickFlower', 'chopBirch', 'craftTable'] as const) {
+  for (const name of WATER_TO_TABLE_STEPS) {
     steps[name] = await stepInPage(page, name);
     expectStep[name](steps[name]!, terrain);
   }
@@ -397,7 +383,7 @@ test('第七切片全流程：新建世界出生在平原的草方块上，走�
 
   const changed = changedCells(terrain, step);
   const cells = Object.values(changed).map(({ cell }) => cell);
-  const before = await observeSeventh(page, cells);
+  const before = await observe(page, cells);
   expect(Object.fromEntries(Object.keys(changed).map((name, i) => [name, before.blocks[i]]))).toEqual(
     Object.fromEntries(Object.entries(changed).map(([name, { block }]) => [name, block])),
   );
@@ -407,7 +393,7 @@ test('第七切片全流程：新建世界出生在平原的草方块上，走�
   const [originalId] = await entryIds(page);
   await enterId(page, originalId!);
   await expect(pauseMenu(page)).toBeVisible();
-  expect(await observeSeventh(page, cells)).toEqual(before);
+  expect(await observe(page, cells)).toEqual(before);
 
   // 导出再导入：副本进入后与原世界相同
   await saveAndExit(page);
@@ -423,6 +409,6 @@ test('第七切片全流程：新建世界出生在平原的草方块上，走�
   await expect(entries(page)).toHaveCount(2);
   const [copyId] = (await entryIds(page)).filter((id) => id !== originalId);
   await enterId(page, copyId!);
-  expect(await observeSeventh(page, cells)).toEqual(before);
+  expect(await observe(page, cells)).toEqual(before);
   expect(errors).toEqual([]);
 });

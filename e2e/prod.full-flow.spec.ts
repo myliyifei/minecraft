@@ -15,7 +15,7 @@ import { gunzipChunk } from '../src/storage/chunk-codec';
 import { decodeWorldBlob, encodeWorldFile, type WorldFile } from '../src/storage/world-file';
 import { STRINGS } from '../src/ui/strings';
 import { worldFileOf } from '../tests/helpers/world-file';
-import { changedCells, checkSeventhSliceTerrain, expectStep, SEVENTH_SLICE_ARGS, seventhSliceSteps } from './seventh-slice';
+import { changedCells, checkSeventhSliceTerrain, expectStep, SEVENTH_SLICE_ARGS, seventhSliceSteps, WATER_TO_TABLE_STEPS } from './seventh-slice';
 import { createWorld, pressEscape, waitForWorld, waitForWorldList } from './world-list';
 
 /*
@@ -362,7 +362,7 @@ function seventhSlicePlayed() {
   expect({ ...core.player.position }).toEqual(terrain.spawn);
   const steps = seventhSliceSteps(core, SEVENTH_SLICE_ARGS);
   expectStep.swimToPondCenter(steps.swimToPondCenter(), terrain);
-  for (const name of ['placeInWater', 'climbOutEast', 'mineIce', 'pickFlower', 'chopBirch', 'craftTable'] as const) {
+  for (const name of WATER_TO_TABLE_STEPS) {
     expectStep[name](steps[name](), terrain);
   }
   const step = expectStep.buildStep(steps.buildStep());

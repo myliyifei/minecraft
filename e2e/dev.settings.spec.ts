@@ -1,6 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
+import { BlockType } from '../src/core/block';
 import { DEFAULT_SEED, TICK_RATE } from '../src/core/constants';
+import { PLAYER_WIDTH } from '../src/core/player';
 import { DEFAULT_KEY_BINDINGS, keyLabel } from '../src/input/keybindings';
+import { SETTINGS_KEY } from '../src/settings';
 import { STRINGS } from '../src/ui/strings';
 import { createWorld, ignorePause, pressEscape, resumeGame, waitForWorld, waitForWorldList } from './world-list';
 
@@ -198,4 +201,103 @@ test('暂停菜单里打开设置，视距 8 → 4：已加载区块数当场下
 
   await ignorePause(page);
   await expect.poll(() => loadedChunks(page), { timeout: 20_000 }).toBeGreaterThanOrEqual(full);
+});
+
+/** 设置界面上的自动跳跃开关（#78）。 */
+function autoJumpToggle(page: Page) {
+  return settingsScreen(page).getByLabel(STRINGS.autoJump);
+}
+
+/** localStorage 里那条设置 JSON 的自动跳跃一项，没有设置时 undefined。 */
+function storedAutoJump(page: Page): Promise<unknown> {
+  return page.evaluate((key) => {
+    const text = localStorage.getItem(key);
+    return text === null ? undefined : (JSON.parse(text) as { autoJump?: unknown }).autoJump;
+  }, SETTINGS_KEY);
+}
+
+/**
+ * 在玩家正前方（−Z）搭一条 3 格宽的平路，路上前方第三格起垒一格高、八格长的台阶，按住 W 推进 30 tick，返回起点、终点
+ * 与台阶的位置。约 10 tick 走到台阶跟前，开着自动跳跃时约第 19 tick 落在台阶上，第 30 tick 还在台阶中段，没走出这段路。
+ * 整段在一次同步的 evaluate 里，游戏循环插不进来；世界处于暂停，只有这里推进 tick。不依赖出生点附近的地形：脚下一层
+ * 换成石头，脚底往上四格清空，台阶上方因此站得下。
+ */
+function walkIntoStep(page: Page) {
+  return page.evaluate(
+    ({ stone, air }) => {
+      const core = window.__VOXEL__!.core;
+      core.turn(-core.player.yaw, -core.player.pitch);
+      const start = core.player.position;
+      const bx = Math.floor(start.x);
+      const bz = Math.floor(start.z);
+      const feet = Math.floor(start.y);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = 1; dz >= -10; dz--) {
+          core.setBlock(bx + dx, feet - 1, bz + dz, stone);
+          for (let dy = 0; dy <= 3; dy++) core.setBlock(bx + dx, feet + dy, bz + dz, air);
+        }
+        for (let dz = -3; dz >= -10; dz--) core.setBlock(bx + dx, feet, bz + dz, stone);
+      }
+      core.setMoveIntent({ forward: true, back: false, left: false, right: false, jump: false });
+      for (let i = 0; i < 30; i++) core.tick();
+      core.setMoveIntent({ forward: false, back: false, left: false, right: false, jump: false });
+      // 台阶靠玩家那一面在 z = bz − 2
+      return { start, end: core.player.position, feet, stepFace: bz - 2 };
+    },
+    { stone: BlockType.Stone, air: BlockType.Air },
+  );
+}
+
+test('自动跳跃默认开：设置里与三个画面开关并列、勾着；进世界后朝一格高的台阶走能上去（#78）', async ({ page }) => {
+  await openSettingsFromList(page);
+  await expect(autoJumpToggle(page)).toBeChecked();
+  // 与三个画面开关同样是一行开关，排在它们后面
+  const toggles = settingsScreen(page).locator('.settings__row--toggle input[type="checkbox"]');
+  await expect(toggles).toHaveCount(4);
+  expect(await toggles.evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).name))).toEqual([
+    'smoothLighting',
+    'flicker',
+    'particles',
+    'autoJump',
+  ]);
+  await settingsScreen(page).getByRole('button', { name: STRINGS.done }).click();
+
+  await createWorld(page, { seed: String(DEFAULT_SEED) });
+  expect(await page.evaluate(() => window.__VOXEL__!.core.autoJump)).toBe(true);
+  const walk = await walkIntoStep(page);
+  expect(walk.end.y).toBe(walk.feet + 1);
+  expect(walk.end.z).toBeLessThan(walk.stepFace - 1);
+});
+
+test('设置里关掉自动跳跃：当场写进 localStorage，重新打开页面仍是关；进世界后朝台阶走被挡住（#78）', async ({ page }) => {
+  await openSettingsFromList(page);
+  await autoJumpToggle(page).uncheck();
+  expect(await storedAutoJump(page)).toBe(false);
+  await settingsScreen(page).getByRole('button', { name: STRINGS.done }).click();
+
+  await page.reload();
+  await waitForWorldList(page);
+  await openSettingsFromList(page);
+  await expect(autoJumpToggle(page)).not.toBeChecked();
+  await settingsScreen(page).getByRole('button', { name: STRINGS.done }).click();
+
+  await createWorld(page, { seed: String(DEFAULT_SEED) });
+  expect(await page.evaluate(() => window.__VOXEL__!.core.autoJump)).toBe(false);
+  const walk = await walkIntoStep(page);
+  expect(walk.end.y).toBe(walk.feet);
+  expect(walk.end.z).toBeCloseTo(walk.stepFace + PLAYER_WIDTH / 2, 6);
+});
+
+test('暂停菜单里打开设置切换自动跳跃：核心的开关当场跟着变（#78）', async ({ page }) => {
+  await createWorld(page, { seed: String(DEFAULT_SEED) });
+  const core = () => page.evaluate(() => window.__VOXEL__!.core.autoJump);
+  expect(await core()).toBe(true);
+  await page.locator('#pause-menu').getByRole('button', { name: STRINGS.settings }).click();
+  await expect(settingsScreen(page)).toBeVisible();
+
+  await autoJumpToggle(page).uncheck();
+  expect(await core()).toBe(false);
+  await autoJumpToggle(page).check();
+  expect(await core()).toBe(true);
+  expect(await storedAutoJump(page)).toBe(true);
 });

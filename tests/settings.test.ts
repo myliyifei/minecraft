@@ -27,8 +27,8 @@ function memoryStorage(initial?: string): SettingsStorage & { writes: number; te
 
 /** 设置里除键位之外的几项，读成普通对象好比较。 */
 function valuesOf(settings: Settings) {
-  const { viewRadius, sensitivity, smoothLighting, flicker, particles } = settings;
-  return { viewRadius, sensitivity, smoothLighting, flicker, particles };
+  const { viewRadius, sensitivity, smoothLighting, flicker, particles, autoJump } = settings;
+  return { viewRadius, sensitivity, smoothLighting, flicker, particles, autoJump };
 }
 
 describe('缺省值', () => {
@@ -107,6 +107,7 @@ describe('读写往返', () => {
       smoothLighting: false,
       flicker: false,
       particles: false,
+      autoJump: true,
     });
     expect(reopened.keys.codeOf('jump')).toBe('KeyJ');
   });
@@ -152,5 +153,62 @@ describe('改动的通知', () => {
     off();
     settings.set({ viewRadius: 7 });
     expect(calls).toBe(2);
+  });
+});
+
+describe('自动跳跃（#78）', () => {
+  it('默认开：localStorage 里没有设置时读出 true', () => {
+    expect(DEFAULT_SETTINGS.autoJump).toBe(true);
+    expect(new Settings(memoryStorage()).autoJump).toBe(true);
+  });
+
+  it('存着的 JSON 缺这一项：取默认开，别的项照读', () => {
+    const settings = new Settings(memoryStorage(JSON.stringify({ viewRadius: 6, flicker: false })));
+    expect(settings.autoJump).toBe(true);
+    expect(settings.viewRadius).toBe(6);
+    expect(settings.flicker).toBe(false);
+  });
+
+  it('存的是 false：读出 false', () => {
+    expect(new Settings(memoryStorage(JSON.stringify({ autoJump: false }))).autoJump).toBe(false);
+  });
+
+  it('值不是布尔（字符串、数、null、对象）：取默认开，别的项照读', () => {
+    for (const autoJump of ['false', 0, 1, null, {}, []]) {
+      const settings = new Settings(memoryStorage(JSON.stringify({ autoJump, sensitivity: 150 })));
+      expect(settings.autoJump).toBe(true);
+      expect(settings.sensitivity).toBe(150);
+    }
+  });
+
+  it('改动即写：关掉时写一次 localStorage；用同一份再打开仍是关，再打开改回开也一样', () => {
+    const storage = memoryStorage();
+    const settings = new Settings(storage);
+    settings.set({ autoJump: false });
+    expect(settings.autoJump).toBe(false);
+    expect(storage.writes).toBe(1);
+    expect(JSON.parse(storage.text()!)).toMatchObject({ autoJump: false });
+
+    const reopened = new Settings(storage);
+    expect(reopened.autoJump).toBe(false);
+    reopened.set({ autoJump: true });
+    expect(new Settings(storage).autoJump).toBe(true);
+  });
+
+  it('改成非布尔时拒绝，什么都不写', () => {
+    const storage = memoryStorage();
+    const settings = new Settings(storage);
+    expect(() => settings.set({ autoJump: 'no' as unknown as boolean })).toThrow(RangeError);
+    expect(storage.writes).toBe(0);
+    expect(settings.autoJump).toBe(true);
+  });
+
+  it('改自动跳跃也通知订阅者：接线层据此调核心的开关', () => {
+    const settings = new Settings(memoryStorage());
+    const seen: boolean[] = [];
+    settings.subscribe(() => seen.push(settings.autoJump));
+    settings.set({ autoJump: false });
+    settings.set({ autoJump: true });
+    expect(seen).toEqual([false, true]);
   });
 });

@@ -3,6 +3,7 @@ import type { Chunk } from './chunk';
 import { CHUNK_SIZE, SEA_LEVEL } from './constants';
 import { Biome } from './biome';
 import { hashCoords } from './noise';
+import type { ColumnCoord } from './terrain';
 
 /**
  * 某一列的地表高度（Surface Height）。
@@ -13,8 +14,8 @@ import { hashCoords } from './noise';
 export type SurfaceHeightAt = (x: number, z: number) => number;
 
 /**
- * 放树要的三样输入：世界种子（决定哪里长树、树长多高）、任意一列的群系（大海里不长树），
- * 与任意一列的地表高度（决定树根落在哪）。
+ * 放树要的四样输入：世界种子（决定哪里长树、树长多高）、任意一列的群系（大海里不长树）、
+ * 任意一列的地表高度（决定树根落在哪），与出生列（它周围不长树）。
  *
  * 地表高度当参数传进来而不是直接调地形模块：树的规则与地形算法因此互不依赖，
  * 换了地形算法照样复用，两个模块之间也不必绕一个循环 import。成员名与地形对象
@@ -24,6 +25,8 @@ export interface TreePlacement {
   readonly seed: number;
   readonly biomeAt: (x: number, z: number) => Biome;
   readonly surfaceHeightAt: SurfaceHeightAt;
+  /** 出生列（见 CONTEXT.md「出生点」），树根不落在它周围 `OAK_SPAWN_CLEARANCE` 格内。 */
+  readonly spawnColumn: ColumnCoord;
 }
 
 /** 一棵橡树。位置与形状全由种子决定，所以这几个数就足以描述它。 */
@@ -76,10 +79,10 @@ export const OAK_CANOPY_RADIUS = 2;
 export const OAK_MIN_SPACING = 2 * OAK_CANOPY_RADIUS + 1;
 
 /**
- * 出生点周围不长树的半径（方块，切比雪夫距离）。指的是树根：树冠还会再伸出
+ * 出生列周围不长树的半径（方块，切比雪夫距离）。指的是树根：树冠还会再伸出
  * OAK_CANOPY_RADIUS 格。
  *
- * 出生点在世界原点那一列（`GameCore.spawnPoint`）。树叶是实心的：树冠盖到出生点，玩家
+ * 出生点在出生列上（`TreePlacement.spawnColumn`、`GameCore.spawnPoint`）。树叶是实心的：树冠盖到出生点，玩家
  * 一进世界就卡在树叶里；盖到旁边几格，他刚迈步就撞上。所以给出生点留一小片空地，按
  * 「随便朝哪个方向走一秒都还撞不到东西」定大小——一秒 4.3 格，加半个碰撞箱是 4.6 格，
  * 所以树冠不能进 |5| 格，树根因此不能进 |7| 格。
@@ -148,20 +151,22 @@ function cellOf(worldCoord: number): number {
 /**
  * 某个树格里的落点：树干那一列，与树干高度。这一格不长树则 undefined。
  *
- * 只问种子，不问地表高度——判断两棵树挨得开不开只看水平距离，而地表高度是这里最贵的
- * 一次计算（要求那一列四角格点的三维密度），邻格检查不该承担这个开销。
+ * 只问种子与出生列，不问地表高度——判断两棵树挨得开不开只看水平距离，而地表高度是这里最贵的
+ * 一次计算（要求那一列四角格点的三维密度），邻格检查不该承担这个开销。落点在出生列周围的也是 undefined，
+ * 所以它也不挤掉邻格的树。
  */
 function oakSiteInCell(
-  seed: number,
+  placement: TreePlacement,
   cellX: number,
   cellZ: number,
 ): Omit<OakTree, 'rootY'> | undefined {
-  const roll = hashCoords(seed ^ OAK_TREE_SALT, cellX, cellZ);
+  const roll = hashCoords(placement.seed ^ OAK_TREE_SALT, cellX, cellZ);
   if (((roll >>> PRESENCE_SHIFT) & ROLL_MASK) >= OAK_TREE_CHANCE) return undefined;
 
   const x = cellX * OAK_CELL_SIZE + ((roll >>> SLOT_X_SHIFT) & OAK_CELL_MASK);
   const z = cellZ * OAK_CELL_SIZE + ((roll >>> SLOT_Z_SHIFT) & OAK_CELL_MASK);
-  if (Math.max(Math.abs(x), Math.abs(z)) <= OAK_SPAWN_CLEARANCE) return undefined;
+  const spawn = placement.spawnColumn;
+  if (Math.max(Math.abs(x - spawn.x), Math.abs(z - spawn.z)) <= OAK_SPAWN_CLEARANCE) return undefined;
 
   return {
     x,
@@ -176,11 +181,11 @@ function oakTreeInCell(
   cellX: number,
   cellZ: number,
 ): OakTree | undefined {
-  const site = oakSiteInCell(placement.seed, cellX, cellZ);
+  const site = oakSiteInCell(placement, cellX, cellZ);
   if (!site) return undefined;
 
   for (const [dx, dz] of EARLIER_CELLS) {
-    const earlier = oakSiteInCell(placement.seed, cellX + dx, cellZ + dz);
+    const earlier = oakSiteInCell(placement, cellX + dx, cellZ + dz);
     if (!earlier) continue;
     const distance = Math.max(Math.abs(earlier.x - site.x), Math.abs(earlier.z - site.z));
     if (distance < OAK_MIN_SPACING) return undefined;

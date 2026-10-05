@@ -35,7 +35,7 @@ export interface ColumnCoord {
  *
  * 核心、Worker 与测试都只经这个对象使用地形，换地形算法不必改调用方。成员都是不依赖 `this` 的
  * 函数属性：可以单独取出来传，也可以展开成新对象再换掉生成器（浏览器把生成器换成 Worker 那一侧的区块来源）。
- * 地形对象本身就是一份 `TreePlacement`（种子、群系与地表高度），放树时直接传它。
+ * 地形对象本身就是一份 `TreePlacement`（种子、群系、地表高度与出生列），放树时直接传它。
  */
 export interface Terrain {
   readonly seed: number;

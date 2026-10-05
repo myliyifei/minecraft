@@ -279,7 +279,7 @@ describe('僵尸在 32 格内朝玩家直线走', () => {
       if (zombie.position.z > 2 && zombie.position.z < 5 && Math.abs(zombie.position.x - (11 + ZOMBIE_WIDTH / 2)) < 1e-9) slid = true;
     });
     expect(highest).toBe(FLAT_STAND_Y);
-    // 场景搭对了：贴着墙的东面滑过，最后绕过墙的尽头走到玩家脚下
+    // 前提成立：贴着墙的东面滑过，最后绕过墙的尽头走到玩家脚下
     expect(slid).toBe(true);
     expect(horizontalDistance(zombies.all()[0]!)).toBeLessThan(1e-9);
   });

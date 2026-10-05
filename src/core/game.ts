@@ -546,7 +546,7 @@ export class GameCore implements BlockEdit, BlockStateView {
    */
   respawn(): void {
     if (!this.healthState.dead || deletesWorldOnDeath(this.worldDifficulty)) return;
-    // 出生列所在区块改过又卸载了，要先放回世界：出生点按改过之后的方块算。没改过又还没送到的，
+    // 出生列所在区块改过又卸载了，要先放回世界：出生点按改过之后的方块算。没改过又还没传来的，
     // 出生点就是进入世界时那一个（`spawnPoint`），玩家在那里等区块送到（ADR-0013）。
     this.world.loadChunk(this.spawnChunk.cx, this.spawnChunk.cz);
     this.playerState.respawnAt(this.spawnPoint);

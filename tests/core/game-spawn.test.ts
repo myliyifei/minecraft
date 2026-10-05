@@ -100,7 +100,7 @@ describe('原点是大海：重生回到出生列上的同一点', () => {
   /** 走到那里要几 tick：多走几格，越过区块边界。 */
   const FAR_TICKS = Math.ceil((FAR_CHUNKS * CHUNK_SIZE + 4) / WALK_STEP);
 
-  /** 出生列所在区块只在 spawnReady 为真时给得出来，其余照常（模拟浏览器里 Worker 还没送到）。 */
+  /** 出生列所在区块只在 spawnReady 为真时给得出来，其余照常（模拟浏览器里 Worker 还没传来）。 */
   function coreWithGatedSpawnChunk(): { game: GameCore; setSpawnReady(ready: boolean): void } {
     let spawnReady = true;
     const game = new GameCore({
@@ -125,7 +125,7 @@ describe('原点是大海：重生回到出生列上的同一点', () => {
     expect(game.spawnPoint).toEqual(OCEAN_SPAWN_POINT);
   });
 
-  it('走远让出生列所在区块卸载、它没改过也还没送到：重生在首次出生点，等区块送到后站在地面上', () => {
+  it('走远让出生列所在区块卸载、它没改过也还没传来：重生在首次出生点，等区块传来后站在地面上', () => {
     const { game, setSpawnReady } = coreWithGatedSpawnChunk();
     expect(game.player.position).toEqual(OCEAN_SPAWN_POINT);
     walkEast(game, FAR_TICKS);
@@ -173,7 +173,7 @@ describe('原点是大海：读档不重算首次出生点', () => {
     expect(snapshot.firstSpawn).toEqual(OCEAN_SPAWN_POINT);
     const far = { ...snapshot, player: { ...snapshot.player, position: FAR } };
 
-    // 出生列所在区块一直给不出来（模拟浏览器里 Worker 还没送到）：读档时若按「未加载即空气」重算，出生点会落到虚空里
+    // 出生列所在区块一直给不出来（模拟浏览器里 Worker 还没传来）：读档时若按「未加载即空气」重算，出生点会落到虚空里
     let spawnReady = false;
     const game = new GameCore({
       viewRadius: 1,

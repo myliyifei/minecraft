@@ -20,14 +20,14 @@ import {
  * 木板组配方与配方书（#85）。
  *
  * 只经配方表的匹配（`matchRecipe` 用默认配方表）与背包界面（`InventoryScreen`）观察：配方格子里「一组物品」
- * 怎么表示是实现的事，这里只看摆什么出什么、配方书亮不亮、点了填进去什么。
+ * 怎么表示是实现的事，这里只看放入什么出什么、配方书亮不亮、点了填进去什么。
  */
 
 const TWO_BY_TWO: GridSize = { width: 2, height: 2 };
 const THREE_BY_THREE: GridSize = { width: 3, height: 3 };
 const S = ItemType.Stick;
 
-/** 一块网格按行摆满：`rows` 里每格是物品或空着。 */
+/** 一块网格按行填满：`rows` 里每格是物品或空着。 */
 function laid(size: GridSize, rows: ReadonlyArray<ReadonlyArray<ItemType | undefined>>): GridContents {
   const contents = Array<ItemType | undefined>(size.width * size.height).fill(undefined);
   rows.forEach((row, r) => row.forEach((item, c) => (contents[r * size.width + c] = item)));
@@ -46,7 +46,7 @@ function one(item: ItemType): ItemStack {
 const [O, B, P] = ALL_PLANKS as [ItemType, ItemType, ItemType];
 
 describe('三种原木各自合成自己的 4 块木板', () => {
-  it.each(named(ALL_SPECIES))('%s原木摆在 2x2 的任意一格都出 4 块自己那种木板', (_name, species) => {
+  it.each(named(ALL_SPECIES))('%s原木放在 2x2 的任意一格都出 4 块自己那种木板', (_name, species) => {
     expectDefined(species);
     for (let index = 0; index < 4; index++) {
       const contents = Array<ItemType | undefined>(4).fill(undefined);
@@ -55,20 +55,20 @@ describe('三种原木各自合成自己的 4 块木板', () => {
     }
   });
 
-  it.each(named(NEW_SPECIES))('%s原木摆在 3x3 正中也出 4 块自己那种木板', (_name, species) => {
+  it.each(named(NEW_SPECIES))('%s原木放在 3x3 正中也出 4 块自己那种木板', (_name, species) => {
     expectDefined(species);
     expect(matchRecipe(laid(THREE_BY_THREE, [[], [undefined, species.logItem]]), THREE_BY_THREE)).toEqual(
       stack(species.planksItem, 4),
     );
   });
 
-  it('两种原木摆在一起什么都不出：原木不是一组，无序配方的材料要正好一个', () => {
+  it('两种原木放在一起什么都不出：原木不是一组，无序配方的材料要正好一个', () => {
     expectAllDefined();
     expect(matchRecipe(laid(TWO_BY_TWO, [[BIRCH.logItem, SPRUCE.logItem]]), TWO_BY_TWO)).toBeUndefined();
     expect(matchRecipe(laid(TWO_BY_TWO, [[OAK.logItem, BIRCH.logItem]]), TWO_BY_TWO)).toBeUndefined();
   });
 
-  it('四块原木摆成方形不出工作台：木板组只有木板', () => {
+  it('四块原木排成方形不出工作台：木板组只有木板', () => {
     expectAllDefined();
     for (const species of ALL_SPECIES) {
       const log = species.logItem;
@@ -78,19 +78,19 @@ describe('三种原木各自合成自己的 4 块木板', () => {
 });
 
 describe('工作台用木板组', () => {
-  it.each(named(ALL_SPECIES))('4 块%s木板摆满 2x2 出 1 个工作台', (_name, species) => {
+  it.each(named(ALL_SPECIES))('4 块%s木板填满 2x2 出 1 个工作台', (_name, species) => {
     expectDefined(species);
     const p = species.planksItem;
     expect(matchRecipe(laid(TWO_BY_TWO, [[p, p], [p, p]]), TWO_BY_TWO)).toEqual(one(ItemType.CraftingTable));
   });
 
-  it('三种木板混用摆满 2x2 出 1 个工作台', () => {
+  it('三种木板混用填满 2x2 出 1 个工作台', () => {
     expectAllDefined();
     expect(matchRecipe(laid(TWO_BY_TWO, [[O, B], [P, O]]), TWO_BY_TWO)).toEqual(one(ItemType.CraftingTable));
     expect(matchRecipe(laid(TWO_BY_TWO, [[P, P], [B, B]]), TWO_BY_TWO)).toEqual(one(ItemType.CraftingTable));
   });
 
-  it('混用的方形摆在 3x3 的右下角也出：图案摆在网格里任意位置都算', () => {
+  it('混用的方形放在 3x3 的右下角也出：图案放在网格里任意位置都算', () => {
     expectAllDefined();
     expect(
       matchRecipe(laid(THREE_BY_THREE, [[], [undefined, B, P], [undefined, O, B]]), THREE_BY_THREE),
@@ -102,7 +102,7 @@ describe('工作台用木板组', () => {
     expect(matchRecipe(laid(TWO_BY_TWO, [[O, B], [P, undefined]]), TWO_BY_TWO)).toBeUndefined();
   });
 
-  it('木板组的格子里摆了别的东西不出：三块木板加一块泥土', () => {
+  it('木板组的格子里放了别的东西不出：三块木板加一块泥土', () => {
     expectAllDefined();
     expect(matchRecipe(laid(TWO_BY_TWO, [[B, P], [O, ItemType.Dirt]]), TWO_BY_TWO)).toBeUndefined();
   });
@@ -186,7 +186,7 @@ describe('四种木制工具用木板组', () => {
     ).toBeUndefined();
   });
 
-  it('柄仍必须是木棍：把木棍换成白桦木板摆镐的图案，什么都不出', () => {
+  it('柄仍必须是木棍：把木棍换成白桦木板排成镐的图案，什么都不出', () => {
     expectAllDefined();
     expect(matchRecipe(laid(THREE_BY_THREE, [[O, O, O], [undefined, B], [undefined, B]]), THREE_BY_THREE)).toBeUndefined();
   });

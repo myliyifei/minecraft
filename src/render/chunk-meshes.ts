@@ -18,7 +18,7 @@ interface ChunkEntry extends ChunkCoord {
 }
 
 /**
- * 场景里的区块网格（#83）：每个区块两份几何，不透明部分与半透明部分（水与冰），分别建、拆、释放，
+ * 场景里的区块网格（#83）：每个区块两份几何，不透明部分与半透明部分（水与冰），分别建立、移除、释放，
  * 调试读回（顶点数、贴图格）两部分合计。渲染器（`WorldRenderer`）把区块网格进出场景的事都交给它；
  * 它只依赖 three，不依赖 WebGL，所以能在 Node 里测。
  *
@@ -46,7 +46,7 @@ export class ChunkMeshes {
     });
   }
 
-  /** 拆掉这个区块的网格：两份几何都从场景移除并释放。没建过时什么都不做。 */
+  /** 移除这个区块的网格：两份几何都从场景移除并释放。没建过时什么都不做。 */
   drop(cx: number, cz: number): void {
     for (const mesh of this.partsOf(cx, cz)) {
       this.parent.remove(mesh);
@@ -97,7 +97,7 @@ export class ChunkMeshes {
     return [entry.opaque, entry.translucent].filter((mesh): mesh is THREE.Mesh => mesh !== undefined);
   }
 
-  /** 一部分几何放进场景，摆到区块的位置上。一个面都没有时不建对象。 */
+  /** 一部分几何放进场景，放到区块的位置上。一个面都没有时不建对象。 */
   private place(cx: number, cz: number, data: MeshData, material: THREE.Material): THREE.Mesh | undefined {
     if (data.indices.length === 0) return undefined;
     const mesh = new THREE.Mesh(toGeometry(data), material);

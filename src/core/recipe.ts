@@ -17,7 +17,7 @@ export type GridContents = ReadonlyArray<ItemType | undefined>;
 
 /**
  * 一组物品（见 CONTEXT.md 的「配方」，#85）：配方里的一格写它时，组里任意一种都匹配，同一个配方里的
- * 几格可以各摆组里不同的一种。目前只有木板组（`PLANKS`）。
+ * 几格可以各放入组里不同的一种。目前只有木板组（`PLANKS`）。
  *
  * 写成带 `kind` 的对象而不是物品数组：配方格里的单个物品是编号，组是对象，两者可按类型区分，
  * `ingredientMatches` 按 `typeof` 分派。
@@ -39,7 +39,7 @@ export const PLANKS: ItemGroup = Object.freeze({
 /** 配方里的一格要什么：一种物品，或一组物品里的任意一种。 */
 export type Ingredient = ItemType | ItemGroup;
 
-/** 这一格摆的物品满足这份材料要求吗：单个物品要正好是它，一组物品要是组里的一种。 */
+/** 这一格放入的物品满足这份材料要求吗：单个物品要正好是它，一组物品要是组里的一种。 */
 export function ingredientMatches(ingredient: Ingredient, item: ItemType): boolean {
   return typeof ingredient === 'number' ? ingredient === item : ingredient.items.includes(item);
 }
@@ -52,7 +52,7 @@ export function ingredientMatches(ingredient: Ingredient, item: ItemType): boole
  */
 export type Pattern = ReadonlyArray<ReadonlyArray<Ingredient | undefined>>;
 
-/** 网格裁到非空格的最小包围矩形之后的样子：几行，每行几格，格里是摆的物品或空着。 */
+/** 网格裁到非空格的最小包围矩形之后的样子：几行，每行几格，格里是放入的物品或空着。 */
 type Placed = ReadonlyArray<ReadonlyArray<ItemType | undefined>>;
 
 /** 有序配方：材料要按图案摆。图案可以摆在网格里任意位置，允许镜像的还可以左右翻过来。 */
@@ -271,7 +271,7 @@ export function recipesFor(size: GridSize, recipes: ReadonlyArray<Recipe> = RECI
 
 /**
  * 一条配方要哪些材料、各几份。有序配方数图案里的非空格，无序配方数材料表。一组物品按组计数，
- * 不拆成组里的每一种：工作台要的是「木板组 4 份」，不是橡木、白桦、云杉各几块。
+ * 不展开成组里的每一种：工作台要的是「木板组 4 份」，不是橡木、白桦、云杉各几块。
  *
  * 配方书判「材料够不够」看的就是这张表（`hasIngredients`）。
  */
@@ -315,7 +315,7 @@ function groupLast(ingredient: Ingredient): number {
 /**
  * 配方书自动填入材料时网格各格要什么材料：图案靠左上角对齐、不镜像；无序配方的材料从左上角
  * 起按行排开。每格是一种物品或一组物品，数量都是 1——每格只填 1 个；一组物品的格子填组里哪一种
- * 由取料的那一方决定（`InventoryScreen.clickRecipe`）。调用方要先用 `recipeFits` 确认摆得进去。
+ * 由取料的那一方决定（`InventoryScreen.clickRecipe`）。调用方要先用 `recipeFits` 确认放得进去。
  */
 export function layoutRecipe(recipe: Recipe, size: GridSize): ReadonlyArray<Ingredient | undefined> {
   const contents = Array<Ingredient | undefined>(size.width * size.height).fill(undefined);
@@ -374,8 +374,8 @@ function matches(recipe: Recipe, cropped: Placed): boolean {
 }
 
 /**
- * 摆的图案与配方图案行列数相同、逐格一致：图案空着的格必须空着，有材料的格摆的物品要满足那份材料
- * （`ingredientMatches`）。木板组的几格因此各摆哪种木板都行。
+ * 放入的图案与配方图案行列数相同、逐格一致：图案空着的格必须空着，有材料的格放入的物品要满足那份材料
+ * （`ingredientMatches`）。木板组的几格因此各放入哪种木板都行。
  */
 function samePattern(pattern: Pattern, placed: Placed): boolean {
   if (pattern.length !== placed.length || patternWidth(pattern) !== patternWidth(placed)) return false;
@@ -394,7 +394,7 @@ function mirror(placed: Placed): Placed {
 }
 
 /**
- * 摆的物品与所需材料能一一配上吗：份数相等，且每份材料都分到一件满足它的物品。
+ * 放入的物品与所需材料能一一配上吗：份数相等，且每份材料都分到一件满足它的物品。
  *
  * 材料里有一组物品时不能再「两边排序逐个比」，改成逐份材料回溯找一件还没分出去的物品。
  * 无序配方最多 9 份材料，回溯的开销可以忽略。

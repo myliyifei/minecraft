@@ -9,7 +9,7 @@ import { buildChunkMesh, type ChunkMeshData, type MeshView } from '../../src/ren
 import { FLAT_GROUND_Y } from '../helpers/flat-terrain';
 
 /**
- * #83：每个区块的网格分成不透明与半透明两份几何，分别建、拆、释放；判断空网格与调试读回（顶点数、贴图格）都覆盖两部分。
+ * #83：每个区块的网格分成不透明与半透明两份几何，分别建立、移除、释放；判断空网格与调试读回（顶点数、贴图格）都覆盖两部分。
  * 渲染器本身要 WebGL 上下文，Node 里建不出来；区块网格进出场景的那一段在 `ChunkMeshes` 里，渲染器委托给它。
  */
 
@@ -54,7 +54,7 @@ function watchDisposal(meshes: readonly THREE.Mesh[]): () => boolean[] {
 }
 
 describe('区块网格进出场景：两份几何（#83）', () => {
-  it('有石头也有水的区块：场景里一份用不透明材质、一份用半透明材质，都摆在区块的位置上', () => {
+  it('有石头也有水的区块：场景里一份用不透明材质、一份用半透明材质，都放在区块的位置上', () => {
     const { scene, meshes } = setup();
     meshes.set(2, -3, meshWith([[8, Y, 8, BlockType.Stone], [3, Y, 3, BlockType.Water]], 2, -3));
     const placed = sceneMeshes(scene);
@@ -139,7 +139,7 @@ describe('区块网格进出场景：两份几何（#83）', () => {
     expect(meshes.tiles(0, 0)).toEqual([TILE.stone]);
   });
 
-  it('拆掉一个区块不碰别的区块', () => {
+  it('移除一个区块的网格不影响别的区块', () => {
     const { scene, meshes } = setup();
     meshes.set(0, 0, meshWith([[3, Y, 3, BlockType.Water]]));
     meshes.set(1, 0, meshWith([[3, Y, 3, BlockType.Water]], 1, 0));
@@ -149,7 +149,7 @@ describe('区块网格进出场景：两份几何（#83）', () => {
     expect(meshes.vertexCount(1, 0)).toBe(7 * 4);
   });
 
-  it('拆掉没建过的区块什么都不做', () => {
+  it('移除没建过的区块的网格什么都不做', () => {
     const { scene, meshes } = setup();
     expect(() => meshes.drop(9, 9)).not.toThrow();
     expect(sceneMeshes(scene)).toEqual([]);

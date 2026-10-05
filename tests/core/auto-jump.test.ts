@@ -10,7 +10,7 @@ import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTerrain } from '../helpers/flat-terrai
  * `autoJump` 传入（省略时开），之后由 `setAutoJump` 改，`autoJump` 读当前值，与视距（`viewRadius`、`setViewRadius`）
  * 同一种写法（ADR-0020 补记）。
  *
- * 全部在平地上用 `setBlock` 摆台阶、墙与水，从核心的公共接口驱动：`turn`、`setMoveIntent`、`tick`，只读玩家的位置。
+ * 全部在平地上用 `setBlock` 放台阶、墙与水，从核心的公共接口驱动：`turn`、`setMoveIntent`、`tick`，只读玩家的位置。
  * 玩家出生在原点那一格中心（0.5, G + 1, 0.5），朝 −Z。
  */
 
@@ -117,7 +117,7 @@ describe('自动跳跃：开着时朝一格高的台阶走（#78）', () => {
 describe('自动跳跃：不该跳的时候不跳（#78）', () => {
   it('台阶上方只有一格空间（台阶顶面往上第二格是石头）：站不下碰撞箱，不跳，贴着台阶停下', () => {
     const game = core();
-    // 场景搭对了：开关开着，不跳是因为规则，不是因为没开
+    // 前提成立：开关开着，不跳是因为规则，不是因为没开
     expect(game.autoJump).toBe(true);
     stepAhead(game, 1);
     // 台阶顶面上方第二格封顶：台阶上只剩 G + 2 那一格高的空间，1.8 格高的碰撞箱站不下。玩家头顶不封，原地起跳本来跳得起来。
@@ -129,7 +129,7 @@ describe('自动跳跃：不该跳的时候不跳（#78）', () => {
 
   it('两格高的墙：不跳，贴着墙停下', () => {
     const game = core();
-    // 场景搭对了：开关开着，不跳是因为规则，不是因为没开
+    // 前提成立：开关开着，不跳是因为规则，不是因为没开
     expect(game.autoJump).toBe(true);
     stepAhead(game, 2);
     const ys = heights(game, FORWARD, WALK_TICKS);
@@ -167,7 +167,7 @@ describe('自动跳跃：不该跳的时候不跳（#78）', () => {
     // 击退的水平速度只能经快照放进去：朝 −Z（台阶那一侧）0.4 格/tick，与挨一下打时的大小相同，不带上抛
     const snapshot = blocked.snapshot();
     const game = core({ restore: { ...snapshot, player: { ...snapshot.player, knockback: { x: 0, z: -0.4 } } } });
-    // 场景搭对了：开关开着，还在地上贴着台阶
+    // 前提成立：开关开着，还在地上贴着台阶
     expect(game.autoJump).toBe(true);
     expect(game.player.onGround).toBe(true);
     const ys = heights(game, IDLE_INTENT, 20);
@@ -177,7 +177,7 @@ describe('自动跳跃：不该跳的时候不跳（#78）', () => {
 
   it('不在地面上：脚下悬空、前方是一格高的石头，被它挡住时不起跳，一路落到竖井底', () => {
     const game = core();
-    // 场景搭对了：开关开着，不跳是因为规则，不是因为没开
+    // 前提成立：开关开着，不跳是因为规则，不是因为没开
     expect(game.autoJump).toBe(true);
     // 玩家脚下那一列往下挖三格，井底的顶面在 G − 2；正前方 z = −1 那一格、与脚底同高处放一块石头，上方空着。
     // 第一 tick 竖直还没动（速度为 0），水平就被这块石头挡住：它只有一格高、上方站得下，只是玩家不在地面上。
@@ -191,14 +191,14 @@ describe('自动跳跃：不该跳的时候不跳（#78）', () => {
   });
   it('斜着走、沿 +X 一侧两格高的墙滑过墙的尽头：不跳', () => {
     const game = core();
-    // 场景搭对了：开关开着，不跳是因为规则，不是因为没开
+    // 前提成立：开关开着，不跳是因为规则，不是因为没开
     expect(game.autoJump).toBe(true);
     // 墙在 x = 1、z ∈ [−2, 0]、两格高。前进加右移：X 一直被墙挡住、沿墙往 −Z 滑，滑过 z = −2 那一端之后 X 不再被挡。
     // 滑过尽头那一 tick，按 Z 走之前的碰撞箱 X 被挡，Z 走完之后碰撞箱已越过墙的尽头，抬高 1 格不被挡；只看后者的实现在这里误跳一次。
     fill(game, [1, 1], [G + 1, G + 2], [-2, 0], BlockType.Stone);
     const ys = heights(game, { ...FORWARD, right: true }, WALK_TICKS);
     expect(Math.max(...ys)).toBe(FLAT_STAND_Y);
-    // 场景搭对了：确实滑过了墙的尽头，并且绕到了墙的 +X 一侧
+    // 前提成立：确实滑过了墙的尽头，并且绕到了墙的 +X 一侧
     expect(game.player.position.z).toBeLessThan(-2 - PLAYER_WIDTH / 2);
     expect(game.player.position.x).toBeGreaterThan(1);
   });
@@ -207,13 +207,13 @@ describe('自动跳跃：不该跳的时候不跳（#78）', () => {
 describe('自动跳跃：在水里不触发（#78）', () => {
   it('站在铺在草方块上的一层水里、不按跳朝一格高的台阶走：在水里，不跳，贴着台阶停下', () => {
     const game = core();
-    // 场景搭对了：开关开着，不跳是因为规则，不是因为没开
+    // 前提成立：开关开着，不跳是因为规则，不是因为没开
     expect(game.autoJump).toBe(true);
     stepAhead(game, 1);
     // 玩家所在那一片、台阶前面，G + 1 那一层铺成水：脚底在水里，碰撞箱与水格重叠
     fill(game, [-4, 4], [G + 1, G + 1], [0, 4], BlockType.Water);
     game.tick();
-    // 场景搭对了：玩家在水里
+    // 前提成立：玩家在水里
     expect(game.player.inWater).toBe(true);
     const ys = heights(game, FORWARD, WALK_TICKS);
     expect(Math.max(...ys)).toBeLessThanOrEqual(FLAT_STAND_Y);
@@ -238,12 +238,12 @@ describe('自动跳跃：在水里不触发（#78）', () => {
         player: { ...snapshot.player, position: { x: 0.5, y: above, z: 0.5 }, velocityY: -1.41, fallHighest: above },
       },
     });
-    // 场景搭对了：开关开着，这一 tick 开始时不在水里
+    // 前提成立：开关开着，这一 tick 开始时不在水里
     expect(game.autoJump).toBe(true);
     expect(game.player.inWater).toBe(false);
     // 落水那一 tick 按着前进：竖直这一步踩到池底，水平被岸挡住
     heights(game, FORWARD, 1);
-    // 场景搭对了：踩在池底、在水里、贴着岸
+    // 前提成立：踩在池底、在水里、贴着岸
     expect(game.player.position.y).toBe(F);
     expect(game.player.onGround).toBe(true);
     expect(game.player.inWater).toBe(true);

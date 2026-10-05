@@ -331,7 +331,7 @@ describe('邻区块要不要重建与网格的剔除是同一个判定（#83）'
     expect(keysOf(world.takeStaleChunks().blocks)).toEqual(['0,0', '-1,0']);
   });
 
-  /** 隔壁那一列摆的方块：每一档挡不挡隔壁的表现各出一种。火把从不让别的方块少画面，隔壁放它看不出差别，不放。 */
+  /** 隔壁那一列放的方块：每一档挡不挡隔壁的表现各出一种。火把从不让别的方块少画面，隔壁放它看不出差别，不放。 */
   const NEIGHBORS: readonly BlockType[] = [
     BlockType.Air,
     BlockType.Stone,

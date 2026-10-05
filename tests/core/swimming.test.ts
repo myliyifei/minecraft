@@ -24,7 +24,7 @@ import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTerrain, flatTestWorld } from '../help
  * 水中移动（#77）：玩家碰撞箱与水格重叠时算「在水里」，水平变慢、下沉变慢，按住跳上浮，水平被挡时按住跳能爬上岸，
  * 落进水里不受摔落伤害；眼睛那一格是水时算「眼睛在水下」。僵尸、掉落物在水里照旧。
  *
- * 全部在平地上用 `setBlock` 摆水池与岸（水不流动，摆在空中也停在原处），从核心的公共接口驱动：`turn`、`setMoveIntent`、
+ * 全部在平地上用 `setBlock` 放出水池与岸（水不流动，放在空中也停在原处），从核心的公共接口驱动：`turn`、`setMoveIntent`、
  * `tick`，读玩家的位置、上一 tick 的位置与生命值。速度只读位移，不读内部的速度分量；数值写在 src/core/player.ts 的常量里
  * 由实现按原版观感定，这里只断言相对关系（比陆上慢、比空气里慢、不超过上限、上浮为正）。
  */
@@ -115,7 +115,7 @@ describe('在水里的水平移动（#77）', () => {
     expect(inWater).toBeLessThan(onLand);
     // 仍然走得动，不是被挡住了
     expect(inWater).toBeGreaterThan(0);
-    // 场景搭对了：玩家确实在水池里，没有站在地面上
+    // 前提成立：玩家确实在水池里，没有站在地面上
     expect(pool.player.position.y).toBeLessThan(FLAT_STAND_Y);
   });
 });
@@ -145,12 +145,12 @@ describe('在水里的下沉与上浮（#77）', () => {
       previous = y;
     }
     expect(Math.max(...drops)).toBeLessThanOrEqual(WATER_MAX_SINK_SPEED + 1e-9);
-    // 场景搭对了：60 tick 之后还悬在水中，没有落到箱底
+    // 前提成立：60 tick 之后还悬在水中，没有落到箱底
     expect(game.player.position.y).toBeGreaterThan(G - 14);
   });
 
   it('从高处落进深水：入水之后每 tick 的下降都不超过水里的下落速度上限，不按空气里的速度一直冲下去', () => {
-    // 出生在 30 格高的石柱顶上；水箱替换掉石柱的下段，再拆掉水面以上的那段，玩家从水面上方 27 格落进水箱
+    // 出生在 30 格高的石柱顶上；水箱替换掉石柱的下段，再移除水面以上的那段，玩家从水面上方 27 格落进水箱
     const game = core(pillarTerrain(30));
     tank(game);
     fill(game, [0, 0], [TANK_SURFACE, G + 30], [0, 0], BlockType.Air);
@@ -163,7 +163,7 @@ describe('在水里的下沉与上浮（#77）', () => {
       const drop = game.player.previousPosition.y - game.player.position.y;
       expect(drop, `第 ${i + 1} tick`).toBeLessThanOrEqual(WATER_MAX_SINK_SPEED + 1e-9);
     }
-    // 场景搭对了：真的落进了水箱，在水里待了一阵，还没沉到箱底
+    // 前提成立：真的落进了水箱，在水里待了一阵，还没沉到箱底
     expect(wetTicks).toBeGreaterThan(20);
     expect(game.player.position.y).toBeGreaterThan(G - 14);
   });
@@ -246,7 +246,7 @@ describe('从水里爬上岸（#77）', () => {
       expect(y - previous, `第 ${i + 2} tick`).toBeLessThanOrEqual(0.1 + 1e-9);
       previous = y;
     }
-    // 场景搭对了：一直贴着墙（被挡在 z = −1 那一格里），而且 40 tick 之后还在水面以下很深的地方
+    // 前提成立：一直贴着墙（被挡在 z = −1 那一格里），而且 40 tick 之后还在水面以下很深的地方
     expect(Math.floor(game.player.position.z)).toBe(-1);
     expect(game.player.position.y).toBeLessThan(G);
   });
@@ -282,7 +282,7 @@ describe('从水里爬上岸（#77）', () => {
       expect(y - previous, `第 ${i + 1} tick`).toBeLessThanOrEqual(0.1 + 1e-9);
       previous = y;
     }
-    // 场景搭对了：已经越过了台阶，离水面还远
+    // 前提成立：已经越过了台阶，离水面还远
     expect(game.player.position.y).toBeGreaterThan(G - 13);
     expect(game.player.position.y).toBeLessThan(G);
   });
@@ -319,7 +319,7 @@ describe('从水里爬上岸（#77）', () => {
     // 头顶贴着冰的底面：脚底至多到 G − 碰撞箱高度
     expect(highestFeet).toBeLessThanOrEqual(G - PLAYER_HEIGHT + 1e-9);
     expect(game.player.inWater).toBe(true);
-    // 场景搭对了：游到了岸边、被岸挡住，而不是还没游过去
+    // 前提成立：游到了岸边、被岸挡住，而不是还没游过去
     expect(game.player.position.z).toBeCloseTo(-6 + PLAYER_WIDTH / 2, 9);
   });
 });
@@ -328,7 +328,7 @@ describe('落进水里不受摔落伤害（#77）', () => {
   /** 出生列上立着的石柱高度：玩家出生在柱顶，脚底离地面 PILLAR 格。 */
   const PILLAR = 20;
 
-  /** 站在柱顶上，按 withPool 在柱脚挖一个 3 格深的水池，再拆掉石柱，推进到落定为止。 */
+  /** 站在柱顶上，按 withPool 在柱脚挖一个 3 格深的水池，再移除石柱，推进到落定为止。 */
   function fallFromPillar(withPool: boolean): GameCore {
     const game = core(pillarTerrain(PILLAR));
     expect(game.player.position.y).toBe(FLAT_STAND_Y + PILLAR);
@@ -341,7 +341,7 @@ describe('落进水里不受摔落伤害（#77）', () => {
   it('从 20 格高处落进 3 格深的水里，生命值不变', () => {
     const game = fallFromPillar(true);
     expect(game.health.points).toBe(MAX_HEALTH);
-    // 场景搭对了：玩家确实落进了水池，在地面以下
+    // 前提成立：玩家确实落进了水池，在地面以下
     expect(game.player.position.y).toBeLessThan(FLAT_STAND_Y);
   });
 
@@ -357,7 +357,7 @@ describe('落进水里不受摔落伤害（#77）', () => {
       game.tick();
       if (game.player.onGround && !wasInWater && game.player.inWater) landedFromAir = true;
     }
-    // 场景搭对了：入水与落到草方块上是同一 tick，这一 tick 开始时还在空中
+    // 前提成立：入水与落到草方块上是同一 tick，这一 tick 开始时还在空中
     expect(landedFromAir).toBe(true);
     expect(game.player.position.y).toBe(FLAT_STAND_Y);
     expect(game.health.points).toBe(MAX_HEALTH);
@@ -375,7 +375,7 @@ describe('落进水里不受摔落伤害（#77）', () => {
       game.tick();
       if (game.player.inWater) wetTicks++;
     }
-    // 场景搭对了：只有一个 tick 结束时在水里，最后落在草方块上
+    // 前提成立：只有一个 tick 结束时在水里，最后落在草方块上
     expect(wetTicks).toBe(1);
     expect(game.player.position.y).toBe(FLAT_STAND_Y);
     expect(game.health.points).toBe(MAX_HEALTH);
@@ -429,7 +429,7 @@ describe('在水里与眼睛在水下的判定（#77）', () => {
     expect(game.player.eyeInWater).toBe(false);
   });
 
-  it('拆掉水之后两者都回到假', () => {
+  it('移除水之后两者都回到假', () => {
     const game = core();
     game.setBlock(0, EYE_Y, 0, BlockType.Water);
     game.setBlock(0, FEET_Y, 0, BlockType.Water);
@@ -443,7 +443,7 @@ describe('在水里与眼睛在水下的判定（#77）', () => {
 
 describe('只改玩家：僵尸与掉落物在水里照旧（#77 回归检查）', () => {
   /*
-   * 同一个场景摆两份：原点周围 5×5、3 格深的坑，一份灌水、一份留空，从坑上方放下同一只僵尸或同一个掉落物，逐 tick 比位置。
+   * 同一个场景做两份：原点周围 5×5、3 格深的坑，一份灌水、一份留空，从坑上方放下同一只僵尸或同一个掉落物，逐 tick 比位置。
    * 两份完全一样，才说明水只改了玩家。经验球不受重力、不与方块碰撞（src/core/xp-orb.ts），构造时连世界都没有，不必比。
    */
   function pit(world: World, fillWith: BlockType): void {

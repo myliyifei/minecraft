@@ -6,7 +6,7 @@ import { installPixelProbe } from './canvas';
 import { enterDefaultWorld } from './world-list';
 
 /**
- * #77 水下雾：眼睛所在那一格是水时 `sky` 读回报告在水下，雾开启、背景色换成雾色；拆掉水后回到原样。
+ * #77 水下雾：眼睛所在那一格是水时 `sky` 读回报告在水下，雾开启、背景色换成雾色；移除水后回到原样。
  * 画面上远处全是雾色。
  *
  * 场景都用调试句柄自己搭，不依赖出生点附近的地形（第七切片的地形还在变）。每条用例整段在一次同步的 evaluate 里执行，
@@ -34,7 +34,7 @@ function colorDistance(a: Rgb, b: Rgb): number {
   return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
 }
 
-/** sRGB 十六进制拆成三个 0–255 的通道。 */
+/** sRGB 十六进制分解成三个 0–255 的通道。 */
 function hexRgb(hex: number): Rgb {
   return [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff];
 }
@@ -44,8 +44,8 @@ function rgbHex([r, g, b]: Rgb): number {
   return (Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255);
 }
 
-test('在眼睛那一格与周围放水，sky 读回报告在水下、雾开启、背景换成雾色；拆掉水后报告不在（#77）', async ({ page }) => {
-  // 眼睛那一格周围 3×3×3 全放成水，画一帧读 `sky`；再全拆成空气，画一帧再读。中午：背景色在不在水下时就是白天的天空色。
+test('在眼睛那一格与周围放水，sky 读回报告在水下、雾开启、背景换成雾色；移除水后报告不在（#77）', async ({ page }) => {
+  // 眼睛那一格周围 3×3×3 全放成水，画一帧读 `sky`；再全部换成空气，画一帧再读。中午：背景色在不在水下时就是白天的天空色。
   const seen = await page.evaluate(
     ({ water, air, eyeHeight }) => {
       const { core, renderer } = window.__VOXEL__!;
@@ -72,7 +72,7 @@ test('在眼睛那一格与周围放水，sky 读回报告在水下、雾开启�
     { water: BlockType.Water, air: BlockType.Air, eyeHeight: PLAYER_EYE_HEIGHT },
   );
 
-  // 场景搭对了：眼睛那一格先是水、后是空气
+  // 前提成立：眼睛那一格先是水、后是空气
   expect(seen.wet.eyeBlock).toBe(BlockType.Water);
   expect(seen.dry.eyeBlock).toBe(BlockType.Air);
 
@@ -108,7 +108,7 @@ const FOGGED_TOLERANCE = 30;
 /** 没有水时同一处与雾色之差的下限：看到的是石墙本色，与蓝色的雾差得远。证明上一条不是巧合（石墙本来就是雾色）。 */
 const CLEAR_DIFFERENCE = 60;
 
-test('像素探针：眼睛在水下时，正前方远于雾的 far 处的石墙画成雾色；拆掉水后看到的是石墙本色（#77）', async ({ page }) => {
+test('像素探针：眼睛在水下时，正前方远于雾的 far 处的石墙画成雾色；移除水后看到的是石墙本色（#77）', async ({ page }) => {
   // 中午、平视 −Z。眼睛那一格周围 3×3×3 放水；正前方清出一条 3×3 的空气通道，通道尽头在 ceil(far) + 4 格处砌一面 13×11 的石墙，
   // 画面正中那条视线穿过水与通道落在墙上。从水里看出去，水贴着空气的侧面是背面、不画（ADR-0016 补记），所以视线上只有墙。
   // far 取 `sky` 读回里水下那一帧的值；读不到时（雾还没实现）直接返回，由下面的断言报出来。
@@ -179,7 +179,7 @@ test('像素探针：眼睛在水下时，正前方远于雾的 far 处的石墙
   expect(typeof seen.fogFar).toBe('number');
   expect(typeof seen.fogColor).toBe('number');
   if (!('wet' in seen) || seen.fogColor === null) return;
-  // 场景搭对了：墙在 far 之外，水下那一帧雾开着，拆水之后关了
+  // 前提成立：墙在 far 之外，水下那一帧雾开着，移除水之后关了
   expect(seen.wallBlock).toBe(BlockType.Stone);
   expect(seen.wallDistance).toBeGreaterThan(seen.fogFar as number);
   expect(seen.wet.sky.underwater).toBe(true);

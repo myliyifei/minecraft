@@ -118,7 +118,7 @@ test('调试句柄在玩家前方放一片水：透过水面看得到水底，�
     },
   );
 
-  // 场景搭对了：池底是要看的方块，池子里是水或空气
+  // 前提成立：池底是要看的方块，池子里是水或空气
   expect(seen.dry.light.floor).toBe(BlockType.BirchPlanks);
   expect(seen.dry.dark.floor).toBe(BlockType.Bedrock);
   expect(seen.dry.light.fill).toBe(BlockType.Air);
@@ -141,7 +141,7 @@ test('调试句柄在玩家前方放一片水：透过水面看得到水底，�
   expect(errors).toEqual([]);
 });
 
-test('调试句柄在高空放一格水与一格冰：区块网格的顶点数多出水与冰各 7 个面，贴图格里有水与冰；拆掉后回到原来的顶点数（#83）', async ({
+test('调试句柄在高空放一格水与一格冰：区块网格的顶点数多出水与冰各 7 个面，贴图格里有水与冰；移除后回到原来的顶点数（#83）', async ({
   page,
 }) => {
   // 两格都悬在玩家所在区块的高空，四周全是空气：水与冰都是六个面加上顶面的背面。两格不相邻，互不剔除。

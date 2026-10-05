@@ -99,7 +99,7 @@ describe('配方表里的原木出木板', () => {
     expect(matchRecipe(grid(TWO_BY_TWO, [0, ItemType.Dirt]), TWO_BY_TWO)).toBeUndefined();
   });
 
-  it('三种木板、木棍、工作台与两条火把摆得进 2x2，工具那几条要 3x3（白桦与云杉木板见 #85）', () => {
+  it('三种木板、木棍、工作台与两条火把放得进 2x2，工具那几条要 3x3（白桦与云杉木板见 #85）', () => {
     const twoByTwo = RECIPES.filter((recipe) => recipeFits(recipe, TWO_BY_TWO)).map(
       (recipe) => recipe.result.item,
     );
@@ -602,7 +602,7 @@ describe('配方书列出哪些配方', () => {
     expect(recipesFor(THREE_BY_THREE, table)).toEqual(table);
   });
 
-  it('默认列的是配方表：3x3 列全表，2x2 列摆得进的那七条', () => {
+  it('默认列的是配方表：3x3 列全表，2x2 列放得进的那七条', () => {
     expect(recipesFor(THREE_BY_THREE)).toEqual(RECIPES);
     expect(recipesFor(TWO_BY_TWO).map((recipe) => recipe.result.item)).toEqual([
       ItemType.OakPlanks,

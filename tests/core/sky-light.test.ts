@@ -105,7 +105,7 @@ describe.each(BUILDS)('天光的形状（%s）', (_name, build) => {
   });
 
   it('水面下第 n 格的天光是 15 − n（#74）', () => {
-    // 25×25、6 格深的一池水，摆在平地之上；中央离边缘 12 格，从池边横着传进来的光比竖直穿过的暗
+    // 25×25、6 格深的一池水，放在平地之上；中央离边缘 12 格，从池边横着传进来的光比竖直穿过的暗
     const depth = 6;
     const world = build(box([-12, G + 1, -12], [12, G + depth, 12], BlockType.Water));
     expect(world.skyLightAt(0, G + depth + 1, 0), '水面之上').toBe(15);

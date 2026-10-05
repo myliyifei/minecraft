@@ -19,7 +19,7 @@ import {
 import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTerrain } from '../helpers/flat-terrain';
 
 /*
- * 水与冰的核心规则（#74）：视线穿过水、放置替换水、冰挖掉变水。全部在平地上用 `setBlock` 摆出来验收，
+ * 水与冰的核心规则（#74）：视线穿过水、放置替换水、冰挖掉变水。全部在平地上用 `setBlock` 放出来验收，
  * 不依赖新地形；不断言具体的方块编号。方块表那几列的字面值在 tests/core/block.test.ts，天光在
  * tests/core/sky-light.test.ts，生成僵尸在 tests/core/zombie-spawn.test.ts，存档在 tests/storage/。
  */

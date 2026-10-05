@@ -77,7 +77,7 @@ function worldWith(terrain: Terrain, coords: Iterable<ChunkCoord>): World {
   return world;
 }
 
-/** 「x,y,z」拆回三个数。 */
+/** 「x,y,z」解析回三个数。 */
 function parseCell(cell: string): [number, number, number] {
   return cell.split(',').map(Number) as [number, number, number];
 }

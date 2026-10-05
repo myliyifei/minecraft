@@ -108,20 +108,24 @@ export const OAK_SPAWN_CLEARANCE = 7;
 const OAK_TREE_SALT = 0x2f1a_9c37;
 
 /**
- * 一个树格的哈希切成四段互不重叠的位，各当一个独立的随机数用：格内落点 x、格内落点 z、
- * 树干高度、这一格有没有树。`hashCoords` 已经把输入的每一位搅到输出的所有位上，
- * 切位段比对同一格算四次哈希便宜。
+ * 一个树格的哈希切成五段互不重叠的位，各当一个独立的随机数用：格内落点 x、格内落点 z、
+ * 树干高度、这一格有没有树、长哪种树。`hashCoords` 已经把输入的每一位搅到输出的所有位上，
+ * 切位段比对同一格算五次哈希便宜。
  */
 const SLOT_X_SHIFT = 0;
 const SLOT_Z_SHIFT = 3;
 const TRUNK_SHIFT = 6;
 const PRESENCE_SHIFT = 14;
+const SPECIES_SHIFT = 22;
 
 /** 一段 8 位的随机数，取值 0–255。 */
 const ROLL_MASK = 0xff;
 
 /** 随机数小于这个数，这一格就长树。64/256 = 25%，一个区块 4 个树格，平均约一棵。 */
 const OAK_TREE_CHANCE = 64;
+
+/** 平原的树里，长树种那段随机数小于这个数的是白桦：77/256 ≈ 30%（CONTEXT.md「树」约三成）。 */
+const BIRCH_CHANCE = 77;
 
 /**
  * 树冠自下而上每一层的形状，`dy` 相对最上面那格原木。
@@ -140,6 +144,20 @@ const OAK_CANOPY_LAYERS: ReadonlyArray<{
   { dy: 0, radius: 1, corners: true },
   { dy: 1, radius: 1, corners: false },
 ];
+
+/** 一种树写进区块时用的原木、树叶与树冠形状。 */
+interface TreeForm {
+  readonly log: BlockType;
+  readonly leaves: BlockType;
+  readonly canopy: typeof OAK_CANOPY_LAYERS;
+}
+
+/** 白桦与橡树同形（CONTEXT.md「树」），只换原木与树叶。 */
+const TREE_FORMS: Readonly<Record<TreeSpecies, TreeForm>> = {
+  [TreeSpecies.Oak]: { log: BlockType.OakLog, leaves: BlockType.OakLeaves, canopy: OAK_CANOPY_LAYERS },
+  [TreeSpecies.Birch]: { log: BlockType.BirchLog, leaves: BlockType.BirchLeaves, canopy: OAK_CANOPY_LAYERS },
+  [TreeSpecies.Spruce]: { log: BlockType.SpruceLog, leaves: BlockType.SpruceLeaves, canopy: OAK_CANOPY_LAYERS },
+};
 
 /**
  * 判断「挨得够不够开」时要看的邻格。
@@ -174,7 +192,7 @@ function oakSiteInCell(
   placement: TreePlacement,
   cellX: number,
   cellZ: number,
-): Omit<Tree, 'rootY' | 'species'> | undefined {
+): (Omit<Tree, 'rootY' | 'species'> & { readonly roll: number }) | undefined {
   const roll = hashCoords(placement.seed ^ OAK_TREE_SALT, cellX, cellZ);
   if (((roll >>> PRESENCE_SHIFT) & ROLL_MASK) >= OAK_TREE_CHANCE) return undefined;
 
@@ -186,6 +204,7 @@ function oakSiteInCell(
   return {
     x,
     z,
+    roll,
     trunkHeight: OAK_TRUNK_MIN + (((roll >>> TRUNK_SHIFT) & ROLL_MASK) % OAK_TRUNK_SPAN),
   };
 }
@@ -210,13 +229,16 @@ function treeInCell(
   }
 
   // 大海里不长树（父 spec #72）：岸边的大海列叠上起伏会露出海面，单看地表高度挡不住。群系查询比地表高度便宜，先问它。
-  if (placement.biomeAt(site.x, site.z) === Biome.Ocean) return undefined;
+  const biome = placement.biomeAt(site.x, site.z);
+  if (biome === Biome.Ocean) return undefined;
   // 地表不高于海平面的列不长：低于海平面的上面是水，正好在海平面的是水边那一圈。
   const surface = placement.surfaceHeightAt(site.x, site.z);
   if (surface <= SEA_LEVEL) return undefined;
   // 只长在草方块与雪草方块上（#76）：沙滩是沙子，陡坡与石头岸是石头，这些列都不长。
   if (!TREE_GROUND.has(placement.surfaceBlockAt(site.x, site.z))) return undefined;
-  return { ...site, rootY: surface + 1, species: TreeSpecies.Oak };
+  const birch = biome === Biome.Plains && ((site.roll >>> SPECIES_SHIFT) & ROLL_MASK) < BIRCH_CHANCE;
+  const { x, z, trunkHeight } = site;
+  return { x, z, rootY: surface + 1, trunkHeight, species: birch ? TreeSpecies.Birch : TreeSpecies.Oak };
 }
 
 /** 这棵树的树冠有没有伸进以 (originX, originZ) 为角的那个区块。 */
@@ -271,14 +293,15 @@ export function plantTrees(placement: TreePlacement, chunk: Chunk): void {
 export function plantTree(chunk: Chunk, tree: Tree): void {
   const lx = tree.x - chunk.cx * CHUNK_SIZE;
   const lz = tree.z - chunk.cz * CHUNK_SIZE;
-  plantCanopy(chunk, tree, lx, lz);
-  chunk.fillColumn(lx, lz, tree.rootY, trunkTopY(tree), BlockType.OakLog);
+  const form = TREE_FORMS[tree.species];
+  plantCanopy(chunk, tree, form, lx, lz);
+  chunk.fillColumn(lx, lz, tree.rootY, trunkTopY(tree), form.log);
 }
 
 /** 把树冠写进区块，(lx, lz) 是树干在这个区块里的局部坐标。 */
-function plantCanopy(chunk: Chunk, tree: Tree, lx: number, lz: number): void {
+function plantCanopy(chunk: Chunk, tree: Tree, form: TreeForm, lx: number, lz: number): void {
   const top = trunkTopY(tree);
-  for (const { dy, radius, corners } of OAK_CANOPY_LAYERS) {
+  for (const { dy, radius, corners } of form.canopy) {
     const y = top + dy;
     for (let dz = -radius; dz <= radius; dz++) {
       for (let dx = -radius; dx <= radius; dx++) {
@@ -286,7 +309,7 @@ function plantCanopy(chunk: Chunk, tree: Tree, lx: number, lz: number): void {
         // 只往空气里长，不替换掉已经在那儿的方块。树冠底面只比自己那一列的地表高两格，三维密度
         // 地形（#75）的平原有起伏、山坡更陡，两格外的地面常常高过它，替换掉就是地上一个洞。
         if (chunk.get(lx + dx, y, lz + dz) !== BlockType.Air) continue;
-        chunk.set(lx + dx, y, lz + dz, BlockType.OakLeaves);
+        chunk.set(lx + dx, y, lz + dz, form.leaves);
       }
     }
   }

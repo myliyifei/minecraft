@@ -24,7 +24,8 @@ import { createWorld, pressEscape, waitForWorld, waitForWorldList } from './worl
  * 做好，编码成导出文件，经界面导入；要比对的状态一律经界面导出、在 Node 里解码。界面上的操作都点真实的按钮。
  *
  * 第七切片的全流程（#82）同样做法：游水塘、往水里放方块、挖冰、挖花再种下、砍白桦合成工作台在 Node 里用 seventh-slice.ts 的
- * 步骤函数做（与 dev 那条同一组），自动跳跃上台阶用真实按键在生产构建里走。水下雾要读渲染器的 `sky`，生产构建读不到，只在 dev 里核对。
+ * 步骤函数做（与 dev 那条同一组），自动跳跃上台阶用真实按键在生产构建里走；另导入一个玩家被白桦树叶围住的世界，用真实鼠标
+ * 挖掉树叶，检验生产构建里真实输入改动的方块能写盘。水下雾要读渲染器的 `sky`，生产构建读不到，只在 dev 里核对。
  */
 
 /** 改跳跃键用的那颗键。 */
@@ -284,8 +285,72 @@ test('生产构建的全流程：设置改键位与视距并保留；新建世�
   expect(errors).toEqual([]);
 });
 
-/** 在生产构建里按住前进键的时长（毫秒）。无头 Chromium 锁着指针时 tick 跟不上实时，实测约走 3 格；台阶在 2 格外，上层铺了 8 格。 */
-const WALK_UP_MS = 1200;
+/**
+ * 朝台阶走时每一段按住前进键的时长（毫秒）。无头 Chromium 锁着指针时 tick 推进慢于实时，一段走多远不确定，
+ * 所以分段走：每段之后暂停、保存并退出、导出，读位置，直到站上台阶为止。一段至多走 1.7 格，台阶上层铺了 8 格，
+ * 站上台阶之后至多再多走一段，不会走过上层的尽头。
+ */
+const WALK_SEGMENT_MS = 400;
+/** 每段松开前进键之后、暂停之前留给落地的时长（毫秒）。是否站上台阶以导出的位置为准，不以这段时长为准。 */
+const LAND_MS = 300;
+/** 每一段按住左键的时长（毫秒）。空手挖白桦树叶要 6 tick，锁着指针时 tick 推进慢，留足余量。 */
+const MINE_SEGMENT_MS = 1500;
+/** 分段走台阶与按住左键挖树叶的总时长上限（毫秒）。 */
+const REAL_INPUT_TIMEOUT_MS = 60_000;
+
+/**
+ * 进入世界、回到游戏，做一段真实输入（act），暂停、保存并退出、导出，直到 done 对导出的文件成立；超过总时长报错。
+ * 生产构建读不到核心，世界的状态只能这样读。
+ */
+async function repeatUntil(
+  page: Page,
+  id: string,
+  act: () => Promise<void>,
+  done: (file: WorldFile) => boolean | Promise<boolean>,
+  describe: (file: WorldFile) => string,
+): Promise<WorldFile> {
+  const deadline = Date.now() + REAL_INPUT_TIMEOUT_MS;
+  for (;;) {
+    await enterId(page, id);
+    await resume(page);
+    await act();
+    await pressEscape(page);
+    await expect(pauseMenu(page)).toBeVisible();
+    await saveAndExit(page);
+    const file = await exportId(page, id);
+    if (await done(file)) return file;
+    if (Date.now() > deadline) throw new Error(`${REAL_INPUT_TIMEOUT_MS} 毫秒内没有达到预期：${describe(file)}`);
+  }
+}
+
+/** 一层树叶围住玩家的那些格：玩家所在那一列周围 3×3、从脚下一格到头顶上方一格，去掉玩家身体占的两格。 */
+function leafShell(feet: Vec3): Vec3[] {
+  const bx = Math.floor(feet.x);
+  const by = Math.floor(feet.y);
+  const bz = Math.floor(feet.z);
+  const cells: Vec3[] = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 2; dy++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        if (dx === 0 && dz === 0 && (dy === 0 || dy === 1)) continue;
+        cells.push({ x: bx + dx, y: by + dy, z: bz + dz });
+      }
+    }
+  }
+  return cells;
+}
+
+/**
+ * 玩家被一层白桦树叶围住的世界：从眼睛往任何方向，触及距离以内第一个碰到的都是一格树叶。指针锁定下 Playwright 的
+ * mouse.down 会连带投递一次大位移的 mousemove，视线朝哪不确定；这样不论朝哪，按住左键挖到的都是树叶。
+ */
+function leafShellSnapshot(): { snapshot: Snapshot; shell: Vec3[] } {
+  const core = newCore(Difficulty.Normal);
+  const shell = leafShell(core.player.position);
+  for (const { x, y, z } of shell) core.setBlock(x, y, z, BlockType.BirchLeaves);
+  core.tick();
+  return { snapshot: core.snapshot(), shell };
+}
 
 /**
  * 在 Node 里用同一份核心把第七切片全流程在世界里的各步做完（与 dev 全流程同一组步骤函数），每一步按同样的断言核对，
@@ -304,10 +369,10 @@ function seventhSlicePlayed() {
   return { terrain, step, snapshot: core.snapshot() };
 }
 
-test('生产构建的第七切片全流程：新建世界出生在平原的草方块上；导入在 Node 里游过水塘、往水里放圆石、挖冰、挖花再种下、砍白桦合成工作台的世界，回到游戏按住前进键自动跳上台阶；保存并退出再进入、导出再导入，改动都在原处（#82）', async ({
+test('生产构建的第七切片全流程：新建世界出生在平原的草方块上；导入在 Node 里游过水塘、往水里放圆石、挖冰、挖花再种下、砍白桦合成工作台的世界，回到游戏按住前进键自动跳上台阶；保存并退出再进入、导出再导入，改动都在原处；被白桦树叶围住时按住左键挖掉树叶，保存并退出再进入后仍是空气（#82）', async ({
   page,
 }, testInfo) => {
-  test.setTimeout(60_000);
+  test.setTimeout(180_000);
 
   // 新建世界、保存并退出、导出：玩家在 Node 里地形对象算出的出生点（平原、列顶草方块）
   const { terrain, step, snapshot } = seventhSlicePlayed();
@@ -320,20 +385,22 @@ test('生产构建的第七切片全流程：新建世界出生在平原的草�
 
   // 导入在 Node 里玩过的世界，回到游戏按住前进键朝台阶走：脚底高了一格、走过了台阶那一面
   const importedId = await importSnapshot(page, testInfo, snapshot, '第七切片');
-  await enterId(page, importedId);
-  await resume(page);
-  await page.keyboard.down(DEFAULT_KEY_BINDINGS.forward);
-  await page.waitForTimeout(WALK_UP_MS);
-  await page.keyboard.up(DEFAULT_KEY_BINDINGS.forward);
-  await pressEscape(page);
-  await expect(pauseMenu(page)).toBeVisible();
-  await saveAndExit(page);
-  const walked = await exportId(page, importedId);
+  // 走多远由帧率决定，只要求站到了台阶上：脚底正好高一格（在空中时脚底不会正好落在整数上），碰撞箱中心越过了台阶那一面
+  const onStep = ({ state: { player } }: WorldFile): boolean =>
+    player.position.y === step.feet + 1 && player.position.z < step.stepFace;
+  const walked = await repeatUntil(
+    page,
+    importedId,
+    async () => {
+      await page.keyboard.down(DEFAULT_KEY_BINDINGS.forward);
+      await page.waitForTimeout(WALK_SEGMENT_MS);
+      await page.keyboard.up(DEFAULT_KEY_BINDINGS.forward);
+      await page.waitForTimeout(LAND_MS);
+    },
+    onStep,
+    ({ state: { player } }) => `没有站上台阶，停在 ${JSON.stringify(player.position)}`,
+  );
   expect(walked.state.ticks).toBeGreaterThan(snapshot.ticks);
-  const { position } = walked.state.player;
-  // 走多远由帧率决定，只要求站到了台阶上：脚底高一格，碰撞箱中心越过了台阶那一面
-  expect(position.y).toBe(step.feet + 1);
-  expect(position.z).toBeLessThan(step.stepFace);
 
   // 改过的几格都在导出的文件里
   const changed = changedCells(terrain, step);
@@ -365,5 +432,34 @@ test('生产构建的第七切片全流程：新建世界出生在平原的草�
   const copy = await exportId(page, copyId);
   expect(await comparable(copy)).toEqual(await comparable(walked));
   expect(await blocksIn(copy)).toEqual(expected);
+
+  // 生产构建里用真实鼠标改一格方块：玩家被一层白桦树叶围住，按住左键挖，保存并退出后导出，有树叶变成了空气；
+  // 再进入、保存并退出再导出，挖掉的仍是空气
+  const { snapshot: shelled, shell } = leafShellSnapshot();
+  const shellId = await importSnapshot(page, testInfo, shelled, '树叶');
+  const minedIn = async (file: WorldFile): Promise<Vec3[]> => {
+    const blocks = await Promise.all(shell.map((cell) => blockIn(file, cell)));
+    return shell.filter((_, i) => blocks[i] === BlockType.Air);
+  };
+  const mined = await repeatUntil(
+    page,
+    shellId,
+    async () => {
+      await page.mouse.down();
+      await page.waitForTimeout(MINE_SEGMENT_MS);
+      await page.mouse.up();
+    },
+    async (file) => (await minedIn(file)).length > 0,
+    () => '没有一格树叶被挖掉',
+  );
+  const minedCells = await minedIn(mined);
+  // 其余的树叶都还在
+  const rest = shell.filter((cell) => !minedCells.includes(cell));
+  expect(await Promise.all(rest.map((cell) => blockIn(mined, cell)))).toEqual(rest.map(() => BlockType.BirchLeaves));
+  await enterId(page, shellId);
+  await saveAndExit(page);
+  const reenteredShell = await exportId(page, shellId);
+  expect(await minedIn(reenteredShell)).toEqual(minedCells);
+  expect(await comparable(reenteredShell)).toEqual(await comparable(mined));
   expect(errors).toEqual([]);
 });

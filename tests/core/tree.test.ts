@@ -22,6 +22,7 @@ import {
   World,
   type ChunkCoord,
 } from '../../src/core/world';
+import { isTerrainBlock } from '../helpers/terrain-survey';
 
 // 两个与 DEFAULT_SEED 无关的种子：树的性质不该只在默认种子下成立。
 const SEED = 314_159;
@@ -92,13 +93,18 @@ function leavesInLayer(world: World, tree: OakTree, y: number, radius: number): 
   return count;
 }
 
-/** 某一层里树叶的相对坐标，按 dx,dz 排好。 */
-function canopyLayer(world: World, tree: OakTree, y: number): string[] {
+/**
+ * 某一层里树冠格的相对坐标，按 dx,dz 排好：长出了树叶的格，加上 shape 里被地形方块占着的格。树叶只往空气里长，
+ * 三维密度地形（#75）的平原有起伏，两格外的地面可能高过树冠最下面那层，那一格被地面挡住不算缺。
+ */
+function canopyLayer(world: World, tree: OakTree, y: number, shape: readonly string[]): string[] {
   const cells: string[] = [];
   for (let dx = -OAK_CANOPY_RADIUS; dx <= OAK_CANOPY_RADIUS; dx++) {
     for (let dz = -OAK_CANOPY_RADIUS; dz <= OAK_CANOPY_RADIUS; dz++) {
-      if (world.getBlock(tree.x + dx, y, tree.z + dz) === BlockType.OakLeaves) {
-        cells.push(`${dx},${dz}`);
+      const block = world.getBlock(tree.x + dx, y, tree.z + dz);
+      const key = `${dx},${dz}`;
+      if (block === BlockType.OakLeaves || (isTerrainBlock(block) && shape.includes(key))) {
+        cells.push(key);
       }
     }
   }
@@ -125,10 +131,13 @@ function square(r: number, corners: boolean, ...without: string[]): string[] {
 function expectVanillaCanopy(world: World, tree: OakTree): void {
   const top = oakTrunkTopY(tree);
   const wide = OAK_CANOPY_RADIUS;
-  expect(canopyLayer(world, tree, top - 2)).toEqual(square(wide, false, '0,0'));
-  expect(canopyLayer(world, tree, top - 1)).toEqual(square(wide, false, '0,0'));
-  expect(canopyLayer(world, tree, top)).toEqual(square(1, true, '0,0'));
-  expect(canopyLayer(world, tree, top + 1)).toEqual(square(1, false));
+  const layers: Array<[y: number, shape: string[]]> = [
+    [top - 2, square(wide, false, '0,0')],
+    [top - 1, square(wide, false, '0,0')],
+    [top, square(1, true, '0,0')],
+    [top + 1, square(1, false)],
+  ];
+  for (const [y, shape] of layers) expect(canopyLayer(world, tree, y, shape)).toEqual(shape);
   // 树冠到此为止，再往上是空气
   expect(leavesInLayer(world, tree, top + 2, wide)).toBe(0);
 }

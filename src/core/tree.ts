@@ -1,6 +1,6 @@
 import { BlockType } from './block';
 import type { Chunk } from './chunk';
-import { CHUNK_SIZE } from './constants';
+import { CHUNK_SIZE, SEA_LEVEL } from './constants';
 import { hashCoords } from './noise';
 
 /**
@@ -168,7 +168,7 @@ function oakSiteInCell(
   };
 }
 
-/** 某个树格里的树，这一格不长树、或者树给邻格让了位则 undefined。 */
+/** 某个树格里的树，这一格不长树、树给邻格让了位、或者落点的地表不高于海平面则 undefined。 */
 function oakTreeInCell(
   placement: TreePlacement,
   cellX: number,
@@ -184,7 +184,10 @@ function oakTreeInCell(
     if (distance < OAK_MIN_SPACING) return undefined;
   }
 
-  return { ...site, rootY: placement.surfaceHeightAt(site.x, site.z) + 1 };
+  const surface = placement.surfaceHeightAt(site.x, site.z);
+  // 海底、洼地湖底不长树：地表不高于海平面的列上面是水（#76 起改看列顶地表方块）。
+  if (surface <= SEA_LEVEL) return undefined;
+  return { ...site, rootY: surface + 1 };
 }
 
 /** 这棵树的树冠有没有伸进以 (originX, originZ) 为角的那个区块。 */

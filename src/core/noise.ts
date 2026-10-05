@@ -117,3 +117,97 @@ export function fbm2(seed: number, x: number, z: number, octaves = 4): number {
   if (totalAmplitude === 0) return 0;
   return clampUnit(sum / totalAmplitude);
 }
+
+/** 三维格点哈希用的竖直种子偏移量：先把 x、z 搅在一起，再把结果当种子与 y 搅一次。 */
+const CELL_Y_SALT = 0x632b_e5ab;
+
+/**
+ * 12 个三维梯度方向：立方体 12 条棱的中点方向（Perlin 2002 的「改进噪声」）。
+ * 不归一化：每个分量是 0 或 ±1，点积只是两项相加，省掉乘法。
+ */
+const GRADIENTS_3D: ReadonlyArray<readonly [number, number, number]> = [
+  [1, 1, 0],
+  [-1, 1, 0],
+  [1, -1, 0],
+  [-1, -1, 0],
+  [1, 0, 1],
+  [-1, 0, 1],
+  [1, 0, -1],
+  [-1, 0, -1],
+  [0, 1, 1],
+  [0, -1, 1],
+  [0, 1, -1],
+  [0, -1, -1],
+];
+
+/** 三维格点梯度与该格点指向采样点的向量的点积。 */
+function gradientDot3(
+  seed: number,
+  ix: number,
+  iy: number,
+  iz: number,
+  dx: number,
+  dy: number,
+  dz: number,
+): number {
+  const h = hashCoords(hashCoords(seed, ix, iz), iy, CELL_Y_SALT);
+  const [gx, gy, gz] = GRADIENTS_3D[h % GRADIENTS_3D.length]!;
+  return gx * dx + gy * dy + gz * dz;
+}
+
+/**
+ * 3D 梯度噪声（Perlin），值域夹到 [−1, 1]，在整数格点上恒为 0。
+ *
+ * 地形的三维密度用它叠起伏：只在稀疏格点上取（见 `terrain-density.ts`），一个区块几百次，
+ * 每次 8 个格点、16 次哈希。棱方向梯度的理论极值约为 1，不另乘归一化系数。
+ */
+export function perlin3(seed: number, x: number, y: number, z: number): number {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const z0 = Math.floor(z);
+  const fx = x - x0;
+  const fy = y - y0;
+  const fz = z - z0;
+  const u = fade(fx);
+  const v = fade(fy);
+  const w = fade(fz);
+
+  const n000 = gradientDot3(seed, x0, y0, z0, fx, fy, fz);
+  const n100 = gradientDot3(seed, x0 + 1, y0, z0, fx - 1, fy, fz);
+  const n010 = gradientDot3(seed, x0, y0 + 1, z0, fx, fy - 1, fz);
+  const n110 = gradientDot3(seed, x0 + 1, y0 + 1, z0, fx - 1, fy - 1, fz);
+  const n001 = gradientDot3(seed, x0, y0, z0 + 1, fx, fy, fz - 1);
+  const n101 = gradientDot3(seed, x0 + 1, y0, z0 + 1, fx - 1, fy, fz - 1);
+  const n011 = gradientDot3(seed, x0, y0 + 1, z0 + 1, fx, fy - 1, fz - 1);
+  const n111 = gradientDot3(seed, x0 + 1, y0 + 1, z0 + 1, fx - 1, fy - 1, fz - 1);
+
+  const x00 = n000 + u * (n100 - n000);
+  const x10 = n010 + u * (n110 - n010);
+  const x01 = n001 + u * (n101 - n001);
+  const x11 = n011 + u * (n111 - n011);
+  const y0v = x00 + v * (x10 - x00);
+  const y1v = x01 + v * (x11 - x01);
+  return clampUnit(y0v + w * (y1v - y0v));
+}
+
+/**
+ * 三维分形叠加噪声：与 `fbm2` 同样的叠法（频率每层乘 2、振幅每层乘 0.5），值域 [−1, 1]。
+ * octaves ≤ 0 时结果是 0。
+ */
+export function fbm3(seed: number, x: number, y: number, z: number, octaves = 2): number {
+  let sum = 0;
+  let amplitude = 1;
+  let totalAmplitude = 0;
+  let frequency = 1;
+
+  for (let octave = 0; octave < octaves; octave++) {
+    const octaveSeed = (seed + Math.imul(octave, OCTAVE_SEED_STRIDE)) | 0;
+    sum += amplitude * perlin3(octaveSeed, x * frequency, y * frequency, z * frequency);
+    totalAmplitude += amplitude;
+    amplitude *= GAIN;
+    frequency *= LACUNARITY;
+  }
+
+  if (totalAmplitude === 0) return 0;
+  return clampUnit(sum / totalAmplitude);
+}

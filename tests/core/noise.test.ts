@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fbm2, hashCoords, perlin2 } from '../../src/core/noise';
+import { fbm2, fbm3, hashCoords, perlin2, perlin3 } from '../../src/core/noise';
 
 /** 一批含负数、跨区块、大坐标的采样点，用来代替真随机采样（测试必须确定性）。 */
 const POINTS: Array<[number, number]> = [
@@ -142,5 +142,71 @@ describe('fbm2', () => {
       }
     }
     expect(differing).toBeGreaterThan(90);
+  });
+});
+
+describe('perlin3', () => {
+  it('确定性：同样的种子与坐标给出同样的值', () => {
+    expect(perlin3(5, 1.3, -2.7, 0.4)).toBe(perlin3(5, 1.3, -2.7, 0.4));
+  });
+
+  it('值域落在 [−1, 1]，且确实有起伏', () => {
+    let spread = 0;
+    for (let i = 0; i < 40; i++) {
+      for (let j = 0; j < 40; j++) {
+        for (let k = 0; k < 10; k++) {
+          const v = perlin3(8, i * 0.37 - 7, k * 0.53 - 2, j * 0.29 + 3);
+          expect(v).toBeGreaterThanOrEqual(-1);
+          expect(v).toBeLessThanOrEqual(1);
+          spread = Math.max(spread, Math.abs(v));
+        }
+      }
+    }
+    expect(spread).toBeGreaterThan(0.4);
+  });
+
+  it('整数格点上为 0', () => {
+    for (const [x, z] of POINTS) {
+      expect(Math.abs(perlin3(8, x, z - x, z))).toBeLessThan(1e-12);
+    }
+  });
+
+  it('连续：坐标走一小步，值也只变一小点', () => {
+    const step = 0.01;
+    for (let i = 0; i < 500; i++) {
+      const x = i * 0.031 - 8;
+      const y = i * 0.023 - 1;
+      const z = i * 0.017 + 3;
+      expect(Math.abs(perlin3(2, x, y + step, z) - perlin3(2, x, y, z))).toBeLessThan(0.1);
+    }
+  });
+
+  it('换种子、换竖直坐标都得到不同的值', () => {
+    let bySeed = 0;
+    let byY = 0;
+    for (let i = 0; i < 100; i++) {
+      const x = i * 0.41;
+      const z = i * 0.23;
+      if (Math.abs(perlin3(1, x, 0.5, z) - perlin3(2, x, 0.5, z)) > 1e-6) bySeed++;
+      if (Math.abs(perlin3(1, x, 0.5, z) - perlin3(1, x, 3.5, z)) > 1e-6) byY++;
+    }
+    expect(bySeed).toBeGreaterThan(90);
+    expect(byY).toBeGreaterThan(90);
+  });
+});
+
+describe('fbm3', () => {
+  it('单个八度就等于 perlin3 本身，一层都不叠时是 0', () => {
+    expect(fbm3(9, 0.3, 1.1, 0.7, 1)).toBeCloseTo(perlin3(9, 0.3, 1.1, 0.7), 12);
+    expect(fbm3(9, 0.3, 1.1, 0.7, 0)).toBe(0);
+  });
+
+  it('值域落在 [−1, 1]，叠加更多八度会加进细节', () => {
+    for (let i = 0; i < 300; i++) {
+      const v = fbm3(6, i * 0.11 - 16, i * 0.07, i * 0.29 - 4, 3);
+      expect(v).toBeGreaterThanOrEqual(-1);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+    expect(fbm3(9, 0.3, 1.1, 0.7, 3)).not.toBeCloseTo(fbm3(9, 0.3, 1.1, 0.7, 1), 6);
   });
 });

@@ -701,7 +701,8 @@ export class GameCore implements BlockEdit, BlockStateView {
    *
    * 注意它不是「地表高度」：地表高度是地形生成给出的地面，不随挖掘与放置变化，
    * 由地形对象的 `surfaceHeightAt` 回答。这里问的是那一列现在实际堆到了多高，
-   * 出生点与僵尸的生成要的是这个。
+   * 出生点与僵尸的生成要的是这个。水、火把与地表植物也是非空气方块：长着植物的列报的是植物那一格，
+   * 要找脚下的地面得往下跳过不实心的方块（出生点见 `spawnColumnTop`，僵尸只跳过植物，见 `Zombies.spawnNaturally`）。
    */
   highestBlockY(x: number, z: number): number {
     return this.world.highestBlockY(x, z);
@@ -762,7 +763,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   /**
    * 出生点：出生列（地形对象的 `spawnColumn`）最高实心方块的顶面，落在方块中心。重生也回到这里。
    *
-   * 从最高的非空气方块（`highestBlockY`）往下跳过不实心的火把（#56）：玩家穿得过火把，站在它顶上
+   * 从最高的非空气方块（`highestBlockY`）往下跳过不实心的方块：火把（#56）、地表植物（#80）。玩家穿得过它们，站在火把顶上
    * 就会掉下去，插在高处墙上的一支足以让重生摔死。树冠是实心的，会把出生点抬到树冠的高度，所以
    * 出生点那一带干脆不长树，见 `TREE_SPAWN_CLEARANCE`。
    *

@@ -15,8 +15,8 @@ export type SurfaceHeightAt = (x: number, z: number) => number;
  * 放树要的两样输入：世界种子（决定哪里长树、树长多高），与任意一列的地表高度
  * （决定树根落在哪）。
  *
- * 地表高度当参数传进来而不是直接调地形模块：树的规则与群系的高度场因此互不依赖，
- * 换个群系换个高度场就能复用，两个模块之间也不必绕一个循环 import。成员名与地形对象
+ * 地表高度当参数传进来而不是直接调地形模块：树的规则与地形算法因此互不依赖，
+ * 换了地形算法照样复用，两个模块之间也不必绕一个循环 import。成员名与地形对象
  * （`Terrain`）的同名成员一致，地形对象因此可以直接当它传。
  */
 export interface TreePlacement {
@@ -84,7 +84,7 @@ export const OAK_MIN_SPACING = 2 * OAK_CANOPY_RADIUS + 1;
  */
 export const OAK_SPAWN_CLEARANCE = 7;
 
-/** 橡树分布用的种子偏移量。派生出一条与高度场、泥土层数都无关的哈希流。 */
+/** 橡树分布用的种子偏移量。派生出一条与地形密度、泥土层数都无关的哈希流。 */
 const OAK_TREE_SALT = 0x2f1a_9c37;
 
 /**
@@ -147,7 +147,7 @@ function cellOf(worldCoord: number): number {
  * 某个树格里的落点：树干那一列，与树干高度。这一格不长树则 undefined。
  *
  * 只问种子，不问地表高度——判断两棵树挨得开不开只看水平距离，而地表高度是这里最贵的
- * 一次计算（一次分形噪声），邻格检查不该承担这个开销。
+ * 一次计算（要求那一列四角格点的三维密度），邻格检查不该承担这个开销。
  */
 function oakSiteInCell(
   seed: number,
@@ -251,9 +251,8 @@ function plantCanopy(chunk: Chunk, tree: OakTree, lx: number, lz: number): void 
     for (let dz = -radius; dz <= radius; dz++) {
       for (let dx = -radius; dx <= radius; dx++) {
         if (!corners && Math.abs(dx) === radius && Math.abs(dz) === radius) continue;
-        // 只往空气里长，不顶掉已经在那儿的方块。平原上这一条其实一次也没触发过：树冠
-        // 底面只比自己那一列的地表高两格，而两格外的地面最多也就高两格——两者相等时
-        // 那一格就是邻居的草方块，顶掉它就是地上一个洞。地形一变陡这点余量就没了。
+        // 只往空气里长，不顶掉已经在那儿的方块。树冠底面只比自己那一列的地表高两格，三维密度
+        // 地形（#75）的平原有起伏、山坡更陡，两格外的地面常常高过它，顶掉就是地上一个洞。
         if (chunk.get(lx + dx, y, lz + dz) !== BlockType.Air) continue;
         chunk.set(lx + dx, y, lz + dz, BlockType.OakLeaves);
       }

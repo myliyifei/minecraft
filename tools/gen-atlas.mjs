@@ -15,7 +15,7 @@ import { deflateSync } from 'node:zlib';
 
 const TILE_PX = 16;
 const COLS = 8;
-const ROWS = 8;
+const ROWS = 16;
 const WIDTH = COLS * TILE_PX;
 const HEIGHT = ROWS * TILE_PX;
 

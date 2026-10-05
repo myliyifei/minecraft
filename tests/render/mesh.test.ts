@@ -364,7 +364,9 @@ describe('火把的细杆几何（#57）', () => {
     const mesh = meshOf(sparse([[x, y, z, BlockType.Torch]]));
     expect([...meshTiles(mesh.uvs)]).toEqual([TILE.torch]);
     const rect = tileUvRect(TILE.torch);
-    const px = (rect.u1 - rect.u0) / 16;
+    // 一个像素在 u、v 上各占多少：图集 8 列 16 行（#73），一格在 u 与 v 上的跨度不同
+    const pxU = (rect.u1 - rect.u0) / 16;
+    const pxV = (rect.v1 - rect.v0) / 16;
     const normals = faceNormals(mesh);
     for (let f = 0; f < normals.length; f++) {
       const us: number[] = [];
@@ -374,12 +376,12 @@ describe('火把的细杆几何（#57）', () => {
         vs.push(mesh.uvs[f * 8 + v * 2 + 1]!);
       }
       // 第 7、8 两列像素
-      expect(Math.min(...us)).toBeCloseTo(rect.u0 + 7 * px);
-      expect(Math.max(...us)).toBeCloseTo(rect.u0 + 9 * px);
+      expect(Math.min(...us)).toBeCloseTo(rect.u0 + 7 * pxU);
+      expect(Math.max(...us)).toBeCloseTo(rect.u0 + 9 * pxU);
       // 侧面从格底（第 15 行）到第 6 行，顶面是第 6、7 两行
       const top = normals[f]![1] === 1;
-      expect(Math.min(...vs)).toBeCloseTo(rect.v0 + (top ? 8 : 0) * px);
-      expect(Math.max(...vs)).toBeCloseTo(rect.v0 + 10 * px);
+      expect(Math.min(...vs)).toBeCloseTo(rect.v0 + (top ? 8 : 0) * pxV);
+      expect(Math.max(...vs)).toBeCloseTo(rect.v0 + 10 * pxV);
     }
   });
 });

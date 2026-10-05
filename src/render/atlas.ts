@@ -10,7 +10,7 @@ import { ItemType } from '../core/item';
  * 第三切片（#30）从 4 列扩到 8 列：矿石、材料、铁制工具还要十来格，4x8 的 32 格装不下。
  */
 export const ATLAS_COLS = 8;
-export const ATLAS_ROWS = 8;
+export const ATLAS_ROWS = 16;
 export const TILE_PX = 16;
 export const ATLAS_PATH = 'textures/atlas.png';
 

@@ -87,7 +87,7 @@ export const STRINGS = {
   difficulty: '难度',
   createWorld: '创建',
   cancel: '取消',
-  // 设置界面（ADR-0020）：从世界列表与暂停菜单进的是同一个。上半是键位，下半是视距、灵敏度与三个画面开关。
+  // 设置界面（ADR-0020）：从世界列表与暂停菜单进的是同一个。上半是键位，下半是视距、灵敏度、三个画面开关与自动跳跃开关。
   keyBindings: '键位',
   // 点了一项键位、等着按下一个键时那颗按钮上的字。按 Esc 取消。
   pressAKey: '按下一个键',
@@ -100,6 +100,7 @@ export const STRINGS = {
   smoothLighting: '平滑光照',
   flicker: '闪烁',
   particles: '粒子',
+  autoJump: '自动跳跃',
   done: '完成',
   // 按键与鼠标按钮的显示名里要用到的字。字母、数字、标点的显示名就是那个字符，在 src/input/keybindings.ts 里按规则取。
   keySpace: '空格',

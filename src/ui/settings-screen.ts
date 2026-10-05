@@ -10,7 +10,7 @@ import { bindableCode, SENSITIVITY_RANGE, VIEW_RADIUS_RANGE, type DisplayToggle,
 import { FIXED_ACTION_NAMES, keyActionName, sensitivityValue, STRINGS, viewRadiusValue } from './strings';
 
 /**
- * 设置界面（见 CONTEXT.md「设置」、ADR-0020）：铺满画面的一层，上半是键位，下半是视距、灵敏度与三个画面开关。
+ * 设置界面（见 CONTEXT.md「设置」、ADR-0020）：铺满画面的一层，上半是键位，下半是视距、灵敏度、三个画面开关与自动跳跃开关。
  * 世界列表与暂停菜单打开的是同一个。它叠在打开它的那一层之上，那一层一直留着，关掉就回到那里。改动当场写进设置，
  * 设置再写 localStorage。页面打开时装一个，之后一直在。
  *
@@ -67,11 +67,15 @@ function toggleRow(name: string): { row: HTMLLabelElement; input: HTMLInputEleme
   return { row, input };
 }
 
-/** 三个画面开关在设置里的名字与界面上的文字。 */
-const TOGGLES: ReadonlyArray<readonly [DisplayToggle, string]> = [
+/**
+ * 一行一个复选框的那几项在设置里的名字与界面上的文字：三个画面开关，之后是自动跳跃。自动跳跃不是画面开关
+ * （它是核心的属性，ADR-0020），只是界面上与它们并列。
+ */
+const TOGGLES: ReadonlyArray<readonly [DisplayToggle | 'autoJump', string]> = [
   ['smoothLighting', STRINGS.smoothLighting],
   ['flicker', STRINGS.flicker],
   ['particles', STRINGS.particles],
+  ['autoJump', STRINGS.autoJump],
 ];
 
 /** 把设置界面挂到页面上，开局藏着。 */

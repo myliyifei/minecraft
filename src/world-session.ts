@@ -26,7 +26,7 @@ export interface WorldSessionOptions {
   /** 世界的名称。元数据每次写盘整体重写，名称由这里给。 */
   readonly name: string;
   readonly start: WorldStart;
-  /** 设置（ADR-0020）：视距、灵敏度、键位与三个画面开关。改动当场生效。 */
+  /** 设置（ADR-0020）：视距、灵敏度、键位、三个画面开关与自动跳跃。改动当场生效。 */
   readonly settings: Settings;
   /** 设置界面。暂停菜单上的「设置」打开它，关掉回到暂停菜单。 */
   readonly settingsScreen: SettingsScreen;
@@ -86,14 +86,16 @@ export async function startWorldSession({
     // 种子只有一个出处：Worker 与地形对象的查询都由上面那一个 `seed` 造出，两边不可能不一致。核心传来的
     // 种子因此不用；只把地形对象的生成器换成 Worker 那一侧的区块来源。
     const terrain = () => ({ ...mainTerrain, generateChunk: chunks.source });
-    const { viewRadius } = settings;
+    const { viewRadius, autoJump } = settings;
     const core =
       'restore' in start
-        ? new GameCore({ restore: start.restore, terrain, viewRadius })
-        : new GameCore({ seed: chunks.seed, difficulty: start.difficulty, terrain, viewRadius });
+        ? new GameCore({ restore: start.restore, terrain, viewRadius, autoJump })
+        : new GameCore({ seed: chunks.seed, difficulty: start.difficulty, terrain, viewRadius, autoJump });
     // 设置界面上拖视距滑条：改小时超出范围的区块当场卸载，改大时缺的从下一 tick 起按平时的节奏加载。
+    // 自动跳跃同样是核心的属性（ADR-0020），在设置界面上切换时当场改核心，下一 tick 起按新值判断。
     unsubscribe = settings.subscribe(() => {
       if (core.viewRadius !== settings.viewRadius) core.setViewRadius(settings.viewRadius);
+      if (core.autoJump !== settings.autoJump) core.setAutoJump(settings.autoJump);
     });
 
     const [texture, crackTexture] = await Promise.all([loadPixelTexture(ATLAS_PATH), loadPixelTexture(CRACK_PATH)]);

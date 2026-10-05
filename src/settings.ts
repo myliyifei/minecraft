@@ -31,6 +31,11 @@ export interface SettingValues extends Readonly<Record<DisplayToggle, boolean>> 
   readonly flicker: boolean;
   /** 粒子：关掉时不再生成新粒子，已有的照常消失。 */
   readonly particles: boolean;
+  /**
+   * 自动跳跃（见 CONTEXT.md）。不是画面开关（不在 `DisplayToggle` 里）：它是核心的属性，接线层构造核心时传入、
+   * 改动时经订阅调 `GameCore.setAutoJump`（ADR-0020）。设置界面上与三个画面开关并列。
+   */
+  readonly autoJump: boolean;
 }
 
 export const DEFAULT_SETTINGS: SettingValues = {
@@ -39,6 +44,7 @@ export const DEFAULT_SETTINGS: SettingValues = {
   smoothLighting: true,
   flicker: true,
   particles: true,
+  autoJump: true,
 };
 
 /** 设置在 localStorage 里的键：一条 JSON（ADR-0020）。 */
@@ -59,6 +65,7 @@ const VALID: { readonly [K in keyof SettingValues]: (value: unknown) => boolean 
   smoothLighting: (value) => typeof value === 'boolean',
   flicker: (value) => typeof value === 'boolean',
   particles: (value) => typeof value === 'boolean',
+  autoJump: (value) => typeof value === 'boolean',
 };
 
 function integerIn(value: unknown, { min, max }: { readonly min: number; readonly max: number }): boolean {
@@ -146,6 +153,10 @@ export class Settings implements SettingValues {
 
   get particles(): boolean {
     return this.values.particles;
+  }
+
+  get autoJump(): boolean {
+    return this.values.autoJump;
   }
 
   /** 改几项。有一项不合法就整个拒绝、什么都不改（`RangeError`）：取值范围由设置界面的控件保证。 */

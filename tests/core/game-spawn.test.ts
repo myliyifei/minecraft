@@ -14,7 +14,7 @@ import { OCEAN_ORIGIN_SPAWN, oceanOriginChunk, oceanOriginTerrain } from '../hel
  * 首次出生点按那一列「最高的实心方块之上」站上去；重生回到同一点，出生列所在区块卸载之后也一样。
  *
  * 真实地形的原点总是平原，出生列几乎总是原点，所以「出生列不在原点」用原点是大海的假地形测
- * （tests/helpers/ocean-origin-terrain.ts）：出生列写死在 (112, −48)，区块 (7, −3)，在视距 2 覆盖的范围之外。
+ * （tests/helpers/ocean-origin-terrain.ts）：出生列固定为 (112, −96)，区块 (7, −6)，在视距 2 覆盖的范围之外。
  */
 
 // 与 DEFAULT_SEED 无关的几个种子，加上默认种子
@@ -159,6 +159,42 @@ describe('原点是大海：重生回到出生列上的同一点', () => {
     expect(game.player.position).toEqual({ ...OCEAN_SPAWN_POINT, y: FLAT_STAND_Y + 2 });
     game.tick(20);
     expect(game.player.position.y).toBe(FLAT_STAND_Y + 2);
+    expect(game.player.onGround).toBe(true);
+  });
+});
+
+describe('原点是大海：读档不重算首次出生点', () => {
+  /** 读档时玩家所在的列：出生列以东 300 格的平地，出生列所在区块在视距之外。 */
+  const FAR = { x: OCEAN_ORIGIN_SPAWN.x + 300 + 0.5, y: FLAT_STAND_Y, z: OCEAN_ORIGIN_SPAWN.z + 0.5 };
+
+  it('读档时玩家在远处：首次出生点仍是快照里的值；在远处死亡，重生仍在出生列上', () => {
+    const snapshot = new GameCore({ viewRadius: 1, terrain: oceanOriginTerrain }).snapshot();
+    expect(snapshot.firstSpawn).toEqual(OCEAN_SPAWN_POINT);
+    const far = { ...snapshot, player: { ...snapshot.player, position: FAR } };
+
+    // 出生列所在区块一直给不出来（模拟浏览器里 Worker 还没送到）：读档时若按「未加载即空气」重算，出生点会落到虚空里
+    let spawnReady = false;
+    const game = new GameCore({
+      viewRadius: 1,
+      restore: far,
+      terrain: (seed: number) => ({
+        ...oceanOriginTerrain(seed),
+        generateChunk: (cx: number, cz: number): Chunk | undefined =>
+          cx === SPAWN_CHUNK.cx && cz === SPAWN_CHUNK.cz && !spawnReady ? undefined : oceanOriginChunk(cx, cz),
+      }),
+    });
+    expect(game.isChunkLoaded(SPAWN_CHUNK.cx, SPAWN_CHUNK.cz)).toBe(false);
+    expect(game.player.position).toEqual(FAR);
+    expect(game.spawnPoint).toEqual(OCEAN_SPAWN_POINT);
+    expect(game.snapshot().firstSpawn).toEqual(OCEAN_SPAWN_POINT);
+
+    fallToDeath(game);
+    game.respawn();
+    expect(game.player.position).toEqual(OCEAN_SPAWN_POINT);
+
+    spawnReady = true;
+    game.tick(20);
+    expect(game.player.position).toEqual(OCEAN_SPAWN_POINT);
     expect(game.player.onGround).toBe(true);
   });
 });

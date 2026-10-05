@@ -7,21 +7,22 @@ import { FLAT_GROUND_Y, flatTestTerrain } from './flat-terrain';
 /**
  * 原点是大海的假地形（#84）。
  *
- * 真实地形造不出这种种子：Perlin 噪声在整数格点为 0，三层群系参数在原点都取 0，任何种子下原点都是平原（#75 交接）。
- * 出生列离开原点的情形因此只能用假地形测：原点周围一片方形的大海，外面是与 `flatTerrain` 相同的平原平地。
+ * 真实地形造不出这种种子：Perlin 噪声在整数格点为 0，三层群系参数在原点都取 0，任何种子下原点都是平原（#75 的交接说明）。
+ * 出生列离开原点的情形因此只能用假地形测：原点周围一块方形的大海，外面是与 `flatTerrain` 相同的平原平地。
  */
 
-/** 与原点的切比雪夫距离小于它的列是大海。取得比视距 2 覆盖的范围（约 ±40 格）大得多，出生列所在区块一开始不会顺带加载。 */
+/** 与原点的切比雪夫距离小于它的列是大海。取得比视距 2 覆盖的范围（约 ±40 格）大得多，出生列所在区块一开始不会同时加载。 */
 export const OCEAN_HALF_WIDTH = 100;
 
 /** 大海海底那一格（石头）的 y，低于海平面；其上到海平面是水。 */
 export const OCEAN_FLOOR_Y = 45;
 
 /**
- * 这份假地形的出生列：螺旋搜索在第 7 圈（距离 112）上第一次碰到平原。写死而不是现算，核心的测试因此不依赖搜索的实现；
- * 搜索本身的断言在 tests/core/spawn-column.test.ts。x 正、z 负，坐标写反或符号写错都对不上。
+ * 这份假地形的出生列：螺旋搜索在第 7 圈（距离 112）上第一次碰到平原，是那一圈第一段（x = 112，z 从 −96 起）的
+ * 第一列，区块 (7, −6)。固定为这个值而不是每次重算，核心的测试因此不依赖搜索的实现；它与搜索结果一致由
+ * tests/core/spawn-column.test.ts 断言。x 正、z 负，坐标写反或符号写错都会不一致。
  */
-export const OCEAN_ORIGIN_SPAWN: ColumnCoord = Object.freeze({ x: 112, z: -48 });
+export const OCEAN_ORIGIN_SPAWN: ColumnCoord = Object.freeze({ x: 112, z: -96 });
 
 /** 那一列是不是大海。 */
 export function isOceanColumn(x: number, z: number): boolean {

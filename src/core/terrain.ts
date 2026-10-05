@@ -16,7 +16,10 @@ import {
 import { Biome } from './biome';
 import { plantOakTrees, type SurfaceHeightAt, type TreePlacement } from './tree';
 
+import type { ColumnCoord } from './world';
+
 export { Biome } from './biome';
+export type { ColumnCoord } from './world';
 
 /**
  * 地形生成是纯函数：区块坐标决定区块内容，不依赖相邻区块的加载顺序。
@@ -24,11 +27,6 @@ export { Biome } from './biome';
  */
 export type TerrainGenerator = (cx: number, cz: number) => Chunk;
 
-/** 一列的水平坐标。 */
-export interface ColumnCoord {
-  readonly x: number;
-  readonly z: number;
-}
 
 /**
  * 地形对象：由种子构造，含区块生成器、三个纯函数查询与出生列（ADR-0021）。
@@ -64,8 +62,8 @@ export type SpawnColumnQueries = Pick<Terrain, 'biomeAt' | 'surfaceHeightAt' | '
  * 出生列（CONTEXT.md「出生点」）：从原点那一列起，以 16 格为步长按螺旋顺序查，取第一列群系是平原、列顶地表方块是
  * 草方块的；1024 格以内找不到就取第一列列顶不是水、地表高于海平面的陆地，再找不到就是原点。
  *
- * 只调三个查询，不生成区块：生成器放树要避开出生列，得先有出生列才造得出生成器。陆地顺带在同一遍里记下第一列，
- * 与「先查完平原、再从头查陆地」结果相同。群系最便宜，先问；地表高度最贵，只在还没找到陆地时才问。
+ * 只调三个查询，不生成区块：生成器放树要避开出生列，得先有出生列才造得出生成器。陆地同时在同一遍里记下第一列，
+ * 与「先查完平原、再从头查陆地」结果相同。群系开销最小，先问；地表高度开销最大，只在还没找到陆地时才问。
  * 每次搜索都返回新对象，原点也不例外：从引用是否相同就看得出出生列是不是只搜了一次。
  */
 export function findSpawnColumn(queries: SpawnColumnQueries): ColumnCoord {
@@ -83,7 +81,7 @@ export function findSpawnColumn(queries: SpawnColumnQueries): ColumnCoord {
 
 /**
  * 出生列搜索查的列，按螺旋顺序：先原点，再由内向外一圈一圈走，第 k 圈是与原点切比雪夫距离 16k 的那 8k 列。
- * 每一圈从上一圈终点 (16(k−1), −16(k−1)) 往 +X 迈一步起，沿 +Z、−X、−Z、+X 四条边走一周，终点 (16k, −16k)。
+ * 每一圈从上一圈终点 (16(k−1), −16(k−1)) 往 +X 前进一格起，沿 +Z、−X、−Z、+X 四条边走一周，终点 (16k, −16k)。
  */
 function* spawnSearchOrder(): Generator<ColumnCoord> {
   yield searchColumn(0, 0);

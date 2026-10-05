@@ -398,7 +398,7 @@ test('调试句柄能读到核心的方块状态', async ({ page }) => {
 });
 
 test('新建世界后出生点站在出生列的草方块上，那一列的群系是平原', async ({ page }) => {
-  // 出生列与群系在 Node 这一侧用同一份地形对象算出（#84），再拿去核对页面里的世界
+  // 出生列与群系在 Node 这一侧用同一份地形对象算出（#84），再用于核对页面里的世界
   const column = DEFAULT_TERRAIN.spawnColumn;
   expect(DEFAULT_TERRAIN.biomeAt(column.x, column.z)).toBe(Biome.Plains);
   const state = await page.evaluate(() => {

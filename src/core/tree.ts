@@ -3,7 +3,7 @@ import type { Chunk } from './chunk';
 import { CHUNK_SIZE, SEA_LEVEL } from './constants';
 import { Biome } from './biome';
 import { hashCoords } from './noise';
-import type { ColumnCoord } from './terrain';
+import type { ColumnCoord } from './world';
 
 /**
  * 某一列的地表高度（Surface Height）。
@@ -153,7 +153,7 @@ function cellOf(worldCoord: number): number {
  *
  * 只问种子与出生列，不问地表高度——判断两棵树挨得开不开只看水平距离，而地表高度是这里最贵的
  * 一次计算（要求那一列四角格点的三维密度），邻格检查不该承担这个开销。落点在出生列周围的也是 undefined，
- * 所以它也不挤掉邻格的树。
+ * 所以它也不替换邻格的树。
  */
 function oakSiteInCell(
   placement: TreePlacement,

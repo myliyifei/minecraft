@@ -68,24 +68,24 @@ export async function startWorldSession({
   let unsubscribe = (): void => {};
 
   try {
-    // 地形对象的查询在主线程上算，只造一次：出生列构造时要搜一次（`findSpawnColumn`），加载画面与核心都读它。
+    // 主线程上的地形对象只造一次：构造时要搜一次出生列（`findSpawnColumn`），加载画面与核心都读它的查询与出生列。
     const seed = 'restore' in start ? start.restore.seed : start.seed;
-    const queries = createTerrain(seed);
+    const mainTerrain = createTerrain(seed);
     // 新建时出生点由出生列算出来，等出生列所在区块周围（核心构造时也以那个区块为中心先加载）；读档时出生点
     // 取快照里的，等玩家周围。存档里的已改区块核心直接复用，不向 Worker 要。
     const { center, ready } =
       'restore' in start
         ? { center: chunkAt(start.restore.player.position), ready: start.restore.editedChunks }
-        : { center: chunkAt(queries.spawnColumn), ready: [] };
+        : { center: chunkAt(mainTerrain.spawnColumn), ready: [] };
     const chunks = createChunkStream({ seed, port: worker });
     const edited = new Set(ready.map(({ cx, cz }) => chunkKey(cx, cz)));
     await chunks.awaitChunks(
       chunksAround(center, SPAWN_READY_RADIUS).filter(({ cx, cz }) => !edited.has(chunkKey(cx, cz))),
     );
 
-    // 种子只有一个出处：Worker 与地形对象的查询都由上面那一个 `seed` 造出，两边不可能对不上。核心传来的
+    // 种子只有一个出处：Worker 与地形对象的查询都由上面那一个 `seed` 造出，两边不可能不一致。核心传来的
     // 种子因此不用；只把地形对象的生成器换成 Worker 那一侧的区块来源。
-    const terrain = () => ({ ...queries, generateChunk: chunks.source });
+    const terrain = () => ({ ...mainTerrain, generateChunk: chunks.source });
     const { viewRadius } = settings;
     const core =
       'restore' in start

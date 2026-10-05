@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { SEA_LEVEL } from '../../src/core/constants';
 import { Biome, findSpawnColumn, type ColumnCoord, type Terrain } from '../../src/core/terrain';
-import { OCEAN_HALF_WIDTH, oceanOriginQueries } from '../helpers/ocean-origin-terrain';
+import { OCEAN_HALF_WIDTH, OCEAN_ORIGIN_SPAWN, oceanOriginQueries } from '../helpers/ocean-origin-terrain';
 
 /**
  * 出生列的搜索规则（#84，CONTEXT.md「出生点」）：从原点那一列起，以 16 格为步长按确定的螺旋顺序查，取第一列群系是平原、
@@ -82,7 +82,7 @@ describe('出生列首选平原的草方块', () => {
     expect(findSpawnColumn(queries)).toEqual({ x: -48, z: 32 });
   });
 
-  it('1024 格以内有平原的草方块时，更近的陆地也让给它', () => {
+  it('1024 格以内有平原的草方块时，更近的陆地也优先选它', () => {
     const queries = queriesFrom([
       [16, 16, MOUNTAIN_GRASS],
       [0, -32, PLAINS_STONE],
@@ -108,6 +108,8 @@ describe('出生列首选平原的草方块', () => {
     expect(Math.abs(column.z % 16)).toBe(0);
     expect(oceanOriginQueries.biomeAt(column.x, column.z)).toBe(Biome.Plains);
     expect(oceanOriginQueries.surfaceBlockAt(column.x, column.z)).toBe(BlockType.Grass);
+    // 假地形对象上固定的出生列就是搜索的结果：核心的测试按它断言，与搜索不一致就测错了列
+    expect(column).toEqual(OCEAN_ORIGIN_SPAWN);
   });
 });
 

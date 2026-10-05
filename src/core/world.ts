@@ -22,6 +22,15 @@ export interface ChunkCoord {
 }
 
 /**
+ * 一列的水平坐标。放在这里而不是 `terrain.ts`：放树（`tree.ts`）要用它，而 `terrain.ts` 引入了 `tree.ts`，
+ * 两边都从这里引入，不绕循环 import。`terrain.ts` 原样转出，调用方仍可从那里取。
+ */
+export interface ColumnCoord {
+  readonly x: number;
+  readonly z: number;
+}
+
+/**
  * 自上次取走以来网格过期了的区块，按原因分两组（见 `World.takeStaleChunks`）。
  *
  * 分开报是因为两者等得起的时间不同：方块变了的区块不当帧重建，放下的方块要晚几帧才出现，挖掉的方块那里会

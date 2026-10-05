@@ -248,7 +248,7 @@ describe('橡树避开出生列', () => {
     expect(seedsWithTreeAtOrigin.length).toBeGreaterThan(0);
   });
 
-  it('只空出出生列那一片：出生列在原点时原点附近没有树，别处的树与出生列在更远处时一样', () => {
+  it('只避开出生列周围：出生列在原点时原点附近没有树，别处的树与出生列在更远处时一样', () => {
     // 对照：出生列放在离两处都很远的地方，原点与 SPAWN 附近的树都不受它影响
     const ELSEWHERE = { x: -500, z: 500 };
     for (const seed of CLEARANCE_SEEDS) {

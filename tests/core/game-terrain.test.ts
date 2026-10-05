@@ -11,7 +11,7 @@ import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTerrain } from '../helpers/flat-terrai
  * 它的出生列（`spawnColumn`）上（#84）。平地那一份的出生列是原点；换掉出生列的用例保证「核心读的是出生列，不是原点」这一点不丢失。
  *
  * 种子取 555：真实地形在原点那一列的地表是 y = 67，与平地（y = 70）不同。核心若还按真实地形生成区块，
- * 出生点与列顶的断言都会对不上。
+ * 出生点与列顶的断言都会失败。
  */
 const SEED = 555;
 

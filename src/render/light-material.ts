@@ -217,7 +217,7 @@ function lightMaterial(
   if (source === 'particle') defines.PARTICLE = '';
   if (translucent) defines.TRANSLUCENT = '';
   const blended = translucent || source === 'particle';
-  // 半透明的变体不做透明裁剪：水与冰贴图的 alpha 都高于阈值，留着裁剪也丢不掉像素，但以后更淡的半透明贴图会全部被透明裁剪丢弃。
+  // 半透明的变体不做透明裁剪：水与冰贴图的 alpha 都高于阈值，保留裁剪也不会丢弃像素，但以后更淡的半透明贴图会全部被透明裁剪丢弃。
   const alphaTest = translucent ? 0 : ALPHA_TEST;
   return new THREE.ShaderMaterial({
     vertexShader: source === 'particle' ? PARTICLE_VERTEX_SHADER : VERTEX_SHADER,

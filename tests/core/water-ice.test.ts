@@ -212,7 +212,7 @@ describe('放置的落点是水（#74）', () => {
   const WATER_CELL: BlockCoord = [2, LAYER_Y, 0];
   const HIT: BlockHit = { x: TARGET[0], y: TARGET[1], z: TARGET[2], normal: { x: -1, y: 0, z: 0 }, distance: 1 };
 
-  /** 站在平地上的碰撞箱，离瞄准层好几格。 */
+  /** 站在平地上的碰撞箱，离瞄准的那一层几格远。 */
   const STANDING: Hitbox = hitboxAt({ x: 0.5, y: FLAT_STAND_Y, z: 0.5 }, PLAYER_WIDTH, PLAYER_HEIGHT);
 
   function placeInto(held: ItemStack, body: Hitbox) {

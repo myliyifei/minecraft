@@ -165,7 +165,7 @@ const OAK_CANOPY_LAYERS: readonly CanopyLayer[] = [
 /**
  * 云杉的尖塔形树冠，自下而上，共 7 层（ADR-0005 补记）。
  *
- * 最下面一层 7×7 去掉四角，往上半径 2、1、2、1 交替收窄，树干顶那一层是 3×3 去掉四角的十字，
+ * 最下面一层 7×7 去掉四角，往上半径按 2、1、2、1 交替，树干顶那一层是 3×3 去掉四角的十字，
  * 树干顶之上再放一格树叶。半径交替变化与原版云杉一致：从侧面看是分层的，不是平滑的锥面。
  */
 const SPRUCE_CANOPY_LAYERS: readonly CanopyLayer[] = [
@@ -347,7 +347,7 @@ export function plantTrees(placement: TreePlacement, chunk: Chunk): void {
 }
 
 /**
- * 把一棵树落在这个区块里的部分写进去。落在区块外的格子由 `Chunk` 自己丢掉，那部分由邻居区块写。
+ * 把一棵树落在这个区块里的部分写进去。落在区块外的格子由 `Chunk` 丢弃，那部分由邻居区块写。
  *
  * 先树冠后树干：两者在树干顶端那几格重叠，原木覆盖树叶。
  */

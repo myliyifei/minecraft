@@ -101,7 +101,7 @@ export function blockAt(page: Page, x: number, y: number, z: number): Promise<nu
   return page.evaluate(({ x, y, z }) => window.__VOXEL__!.core.getBlock(x, y, z), { x, y, z });
 }
 
-/** 从脚下最高的实心方块起挖空 24 格，推进到摔死。整段在一次同步的 evaluate 里，游戏循环插不进来。 */
+/** 从脚下最高的实心方块起挖空 24 格，推进到摔死。整段在一次同步的 evaluate 里，游戏循环不会在其间执行。 */
 export async function fallToDeath(page: Page): Promise<void> {
   const dead = await page.evaluate(
     ({ depth, air, nonSolid, minY }) => {

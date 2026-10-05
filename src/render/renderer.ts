@@ -252,7 +252,7 @@ export interface HeldItemRenderView {
 }
 
 /**
- * 场景里的天空现在是什么样：背景色、这一帧送进着色器的光照输入与雾（ADR-0016）、太阳与月亮画不画。
+ * 场景里的天空现在是什么样：背景色、这一帧传入着色器的光照输入与雾（ADR-0016）、太阳与月亮画不画。
  * 与 `SelectionView` 一样直接从场景对象上读，端到端测试验的是真摆进场景的东西。
  */
 export interface SkyView {
@@ -266,13 +266,13 @@ export interface SkyView {
   readonly heldLight: number;
   /** 上一帧画的时候眼睛在水下（`PlayerView.eyeInWater`）。在水下时背景色是雾色，太阳与月亮不画。 */
   readonly underwater: boolean;
-  /** 送进着色器的雾开没开（`FrameLighting.fogEnabled`）。 */
+  /** 传入着色器的雾开没开（`FrameLighting.fogEnabled`）。 */
   readonly fogEnabled: boolean;
-  /** 送进着色器的雾色（sRGB 十六进制）。 */
+  /** 传入着色器的雾色（sRGB 十六进制）。 */
   readonly fogColor: number;
-  /** 送进着色器的雾从多远（方块）开始混入。 */
+  /** 传入着色器的雾从多远（方块）开始混入。 */
   readonly fogNear: number;
-  /** 送进着色器的雾到多远（方块）全是雾色。 */
+  /** 传入着色器的雾到多远（方块）全是雾色。 */
   readonly fogFar: number;
   readonly sunVisible: boolean;
   readonly moonVisible: boolean;
@@ -299,7 +299,7 @@ export class WorldRenderer {
   private readonly camera: THREE.PerspectiveCamera;
   /** 方块图集。地形、掉落物、僵尸与手持物品的材质都贴它。 */
   private readonly texture: THREE.Texture;
-  /** 每帧送进所有光照材质的输入：天光减量、闪烁、手持光与雾（ADR-0016）。 */
+  /** 每帧传入所有光照材质的输入：天光减量、闪烁、手持光与雾（ADR-0016）。 */
   private readonly frame: FrameLighting = frameLighting();
   /** 上一帧画的时候眼睛在不在水下（`updateSky`）。 */
   private underwater = false;
@@ -749,7 +749,7 @@ export class WorldRenderer {
   }
 
   /**
-   * 按世界时刻与眼睛在不在水下更新天空：背景色、送进着色器的天光减量与雾、太阳与月亮的位置。
+   * 按世界时刻与眼睛在不在水下更新天空：背景色、传入着色器的天光减量与雾、太阳与月亮的位置。
    *
    * 时刻与相机位置一样在上一个 tick 与当前 tick 之间插值（ADR-0002），太阳因此平滑地走，
    * 黄昏也是连续变暗的——减量不取整，着色器拿到的是浮点值。算法都在 `daylight.ts` 与 `fog.ts` 里，这里只把结果

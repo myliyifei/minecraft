@@ -374,7 +374,7 @@ function matches(recipe: Recipe, cropped: Placed): boolean {
 }
 
 /**
- * 摆的图案与配方图案行列数相同、逐格对得上：图案空着的格必须空着，有材料的格摆的物品要满足那份材料
+ * 摆的图案与配方图案行列数相同、逐格一致：图案空着的格必须空着，有材料的格摆的物品要满足那份材料
  * （`ingredientMatches`）。木板组的几格因此各摆哪种木板都行。
  */
 function samePattern(pattern: Pattern, placed: Placed): boolean {

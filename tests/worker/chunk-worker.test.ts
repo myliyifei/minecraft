@@ -5,7 +5,7 @@ import { chunkOfColumn, gridColumns, isInterior, SURVEY_SEEDS } from '../helpers
 import type { ChunkCoord } from '../../src/core/world';
 
 /**
- * 区块 Worker 的消息协议：收到 `ChunkRequest`，回一条 `ChunkResponse`（ADR-0003：Worker 只是换了个地方跑同一个纯函数）。
+ * 区块 Worker 的消息协议：收到 `ChunkRequest`，回一条 `ChunkResponse`（ADR-0003：Worker 只是换了个地方执行同一个纯函数）。
  *
  * 在 Node 里直接加载 Worker 模块：它把 `onmessage` 设在全局作用域上、用全局的 `postMessage` 回复，测试替换
  * `postMessage` 收下回复，再按消息协议发请求。断言回复的方块与同步调用地形对象逐字节相同。

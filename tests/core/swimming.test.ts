@@ -347,7 +347,7 @@ describe('落进水里不受摔落伤害（#77）', () => {
 
   it('从 20 格高处落进铺在草方块上的一层水里，同一 tick 入水并落到水底，生命值也不变', () => {
     const game = core(pillarTerrain(PILLAR));
-    // 一层水铺在草方块上（G + 1），石柱那一格留给下面拆
+    // 一层水铺在草方块上（G + 1），石柱那一格留给后面的步骤移除
     fill(game, [-2, 2], [G + 1, G + 1], [-2, 2], BlockType.Water);
     fill(game, [0, 0], [G + 1, G + PILLAR], [0, 0], BlockType.Air);
     game.setBlock(0, G + 1, 0, BlockType.Water);
@@ -363,8 +363,8 @@ describe('落进水里不受摔落伤害（#77）', () => {
     expect(game.health.points).toBe(MAX_HEALTH);
   });
 
-  it('下落途中水平走进一层悬空的水、碰撞箱只伸进水格一点，下一 tick 就离开了水，落到地上也不扣血', () => {
-    // 石柱旁边 G + 4 那一层摆一片悬空的水；第 23 tick 起按 W，那一 tick 水平移动之后碰撞箱顶端伸进水格约 0.03 格，
+  it('下落途中水平走进一层悬空的水、碰撞箱只伸进水格一点，下一 tick 就离开了水，落地后生命值也不减少', () => {
+    // 石柱旁边 G + 4 那一层放一片悬空的水；第 23 tick 起按 W，那一 tick 水平移动之后碰撞箱顶端伸进水格约 0.03 格，
     // 下一 tick 下沉 0.1 格就离开了水。在水里的那一刻落差就该从那里重新算起（复现方法来自 #77 的审查）
     const game = core(pillarTerrain(PILLAR));
     fill(game, [-2, 2], [G + 4, G + 4], [-3, -1], BlockType.Water);
@@ -381,7 +381,7 @@ describe('落进水里不受摔落伤害（#77）', () => {
     expect(game.health.points).toBe(MAX_HEALTH);
   });
 
-  it('对照：同样高度落在草方块上扣血', () => {
+  it('对照：从同样高度落在草方块上，生命值减少', () => {
     const game = fallFromPillar(false);
     expect(game.player.position.y).toBe(FLAT_STAND_Y);
     expect(game.health.points).toBeLessThan(MAX_HEALTH);

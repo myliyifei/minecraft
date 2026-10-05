@@ -114,7 +114,7 @@ describe('网格分成不透明与半透明两部分（#83）', () => {
     expect(faceCount(mesh.opaque)).toBe(6);
   });
 
-  it('两部分各自的数组长度对得上：每面 4 个顶点、6 个下标', () => {
+  it('两部分各自的数组长度一致：每面 4 个顶点、6 个下标', () => {
     const mesh = sparseMesh([
       [8, Y, 8, BlockType.Water],
       [8, Y + 3, 8, BlockType.Stone],

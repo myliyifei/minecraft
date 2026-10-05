@@ -9,7 +9,7 @@ import { enterDefaultWorld } from './world-list';
  * #77 水下雾：眼睛所在那一格是水时 `sky` 读回报告在水下，雾开启、背景色换成雾色；拆掉水后回到原样。
  * 画面上远处全是雾色。
  *
- * 场景都用调试句柄自己搭，不依赖出生点附近的地形（第七切片的地形还在变）。每条用例整段跑在一次同步的 evaluate 里，
+ * 场景都用调试句柄自己搭，不依赖出生点附近的地形（第七切片的地形还在变）。每条用例整段在一次同步的 evaluate 里执行，
  * 这期间游戏循环不会执行，读到的就是刚画的那一帧；不推进 tick，玩家不会在水里下沉。不锁定指针，世界不理会暂停
  * （`enterDefaultWorld`）。Windows 浏览器实机截图（水下是蓝色的雾、远处看不清）不在这里，留给实机验收。
  */
@@ -88,7 +88,7 @@ test('在眼睛那一格与周围放水，sky 读回报告在水下、雾开启�
   const [r, g, b] = hexRgb(seen.wet.sky.fogColor);
   expect(b).toBeGreaterThan(r);
   expect(b).toBeGreaterThan(g);
-  // 送进着色器的就是 `fogAt` 给的 sRGB 雾色：按 sRGB 换成线性写进 uniform，读回时换回来是同一个颜色
+  // 传入着色器的就是 `fogAt` 给的 sRGB 雾色：按 sRGB 换成线性写进 uniform，读回时换回来是同一个颜色
   expect(seen.wet.sky.fogColor).toBe(rgbHex(fogAt(true).color));
   // 中午太阳在天上，水下不画，出水后又画
   expect(seen.before.sunVisible).toBe(true);

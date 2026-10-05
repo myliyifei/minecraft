@@ -42,7 +42,7 @@ function meshOf({ chunk, view }: MeshInput): MeshData {
   return buildChunkMesh(chunk, view).opaque;
 }
 
-/** 网格构建顺带输出的发光方块。 */
+/** 网格构建同时输出的发光方块。 */
 function glowingOf({ chunk, view }: MeshInput): ChunkMeshData['glowingBlocks'] {
   return buildChunkMesh(chunk, view).glowingBlocks;
 }

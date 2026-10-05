@@ -139,7 +139,7 @@ describe('植物那一格的网格：两片交叉面片，正反两面', () => {
       expect(Math.min(...ys)).toBeCloseTo(S);
       expect(Math.max(...ys)).toBeGreaterThan(S + 0.5);
       expect(Math.max(...ys)).toBeLessThanOrEqual(S + 1 + 1e-6);
-      // 一片面片在水平方向上铺开不止半格：不是缩在中间的一根细杆
+      // 一片面片在水平方向上的跨度超过半格：不是位于中间的一根细杆
       const xs = corners.map(([px]) => px);
       expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(0.5);
       expect(normal[1]).toBe(0);

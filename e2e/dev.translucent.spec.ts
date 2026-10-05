@@ -8,7 +8,7 @@ import { enterDefaultWorld } from './world-list';
 /**
  * #83 水与冰的半透明渲染：画面上透过水面看得到水底，调试读回的顶点数与贴图格覆盖网格的两部分。
  *
- * 场景都用调试句柄自己搭，不依赖出生点附近的地形（第七切片的地形还在变）。每条用例整段跑在一次同步的 evaluate 里，
+ * 场景都用调试句柄自己搭，不依赖出生点附近的地形（第七切片的地形还在变）。每条用例整段在一次同步的 evaluate 里执行，
  * 这期间游戏循环不会执行，读到的就是刚画的那一帧；不锁定指针，世界不理会暂停（`enterDefaultWorld`）。
  */
 
@@ -145,7 +145,7 @@ test('调试句柄在高空放一格水与一格冰：区块网格的顶点数�
   page,
 }) => {
   // 两格都悬在玩家所在区块的高空，四周全是空气：水与冰都是六个面加上顶面的背面。两格不相邻，互不剔除。
-  // 读的是送上显卡的网格（`chunkMeshVertexCount`、`chunkMeshTiles`），两部分都要算进去。
+  // 读的是上传到显卡的网格（`chunkMeshVertexCount`、`chunkMeshTiles`），两部分都要算进去。
   const seen = await page.evaluate(
     ({ water, ice, air, chunkSize, y }) => {
       const { core, renderer } = window.__VOXEL__!;

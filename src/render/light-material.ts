@@ -144,8 +144,11 @@ void main() {
   // 画面上的值，乘完再换回线性。不能用 2.2 次方近似成线性空间里的一个乘数：sRGB 在接近黑的那一段是线性的，
   // 近似会把暗处的贴图再压暗一截，0 级看不出轮廓。
   vec3 display = sRGBTransferOETF(vec4(texel.rgb, 1.0)).rgb * (selfLit ? selfLitShade : brightness(level) * vShade);
-#ifdef PARTICLE
+#if defined(PARTICLE)
   float alpha = vAlpha;
+#elif defined(TRANSLUCENT)
+  // 水与冰（#83）：贴图的 alpha 就是这一处的不透明度，混合时透出背后已画好的不透明部分。
+  float alpha = texel.a;
 #else
   float alpha = 1.0;
 #endif
@@ -160,11 +163,16 @@ const ALPHA_TEST = 0.5;
 /** 三种画法：地形（顶点带光照）、实体（光照是 uniform）、粒子（光照与样子都是实例属性）。 */
 type LightSource = 'vertex' | 'entity' | 'particle';
 
+/**
+ * `translucent` 为真的是半透明的变体（#83）：输出贴图的 alpha、不做透明裁剪、开启混合、不写深度。
+ * 粒子另有自己的混合规则（按每个粒子的不透明度），不走这个开关。
+ */
 function lightMaterial(
   texture: THREE.Texture,
   frame: FrameLighting,
   source: LightSource,
   side: THREE.Side,
+  translucent = false,
 ): THREE.ShaderMaterial {
   const defines: Record<string, string> = {
     LIGHT_LEVELS: String(MAX_LIGHT_LEVEL + 1),
@@ -177,6 +185,10 @@ function lightMaterial(
   };
   if (source === 'vertex') defines.VERTEX_LIGHT = '';
   if (source === 'particle') defines.PARTICLE = '';
+  if (translucent) defines.TRANSLUCENT = '';
+  const blended = translucent || source === 'particle';
+  // 半透明的变体不做透明裁剪：水与冰贴图的 alpha 都高于阈值，留着裁剪也丢不掉像素，但以后更淡的半透明贴图会被整片丢掉。
+  const alphaTest = translucent ? 0 : ALPHA_TEST;
   return new THREE.ShaderMaterial({
     vertexShader: source === 'particle' ? PARTICLE_VERTEX_SHADER : VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
@@ -184,7 +196,7 @@ function lightMaterial(
     uniforms: {
       map: { value: texture },
       // three 只按 `alphaTest` 属性加 USE_ALPHATEST 这个宏，ShaderMaterial 的值得自己放进 uniform。
-      alphaTest: { value: ALPHA_TEST },
+      alphaTest: { value: alphaTest },
       skyDarkening: frame.skyDarkening,
       flicker: frame.flicker,
       heldLight: frame.heldLight,
@@ -192,18 +204,30 @@ function lightMaterial(
       tint: { value: new THREE.Color(0xffffff) },
       entityLight: { value: new THREE.Vector2(MAX_LIGHT_LEVEL, 0) },
     },
-    alphaTest: ALPHA_TEST,
+    alphaTest,
     side,
-    // 粒子按不透明度混合（烟会变淡），排在不透明的东西之后画。不写深度：变淡的烟写了深度，之后画的
-    // 东西落在它后面的部分整片被挡掉；粒子之间的前后靠绘制顺序（`ParticlePool.sortBackToFront`）
-    transparent: source === 'particle',
-    depthWrite: source !== 'particle',
+    // 粒子按不透明度混合（烟会变淡），半透明的地形按贴图的 alpha 混合，都排在不透明的东西之后画。不写深度：
+    // 变淡的烟写了深度，之后画的东西落在它后面的部分整片被挡掉；粒子之间的前后靠绘制顺序
+    // （`ParticlePool.sortBackToFront`），半透明区块之间的前后靠 three 按到相机的远近排序。深度照样测：
+    // 被不透明方块挡住的部分不画。
+    transparent: blended,
+    depthWrite: !blended,
   });
 }
 
 /** 地形的材质：两个等级从顶点属性 `light` 来。所有区块共用一份。 */
 export function terrainMaterial(texture: THREE.Texture, frame: FrameLighting): THREE.ShaderMaterial {
   return lightMaterial(texture, frame, 'vertex', THREE.FrontSide);
+}
+
+/**
+ * 网格半透明部分（水与冰）的材质（#83，ADR-0016 补记）：与 `terrainMaterial` 同一套着色器的变体，输出贴图的 alpha、
+ * 不做透明裁剪、开启混合（`NormalBlending`）、不写深度。`transparent` 为真，three 因此把用它的网格放进透明列表，
+ * 在所有不透明的网格之后画，并按到相机的距离由远到近排序，区块之间的前后就是这样排的。单面：水顶面从下面看的那一面
+ * 由网格多出的一份反向的面画（`buildChunkMesh`），不靠双面材质，否则水的侧面也会从里面透出来。所有区块共用一份。
+ */
+export function translucentTerrainMaterial(texture: THREE.Texture, frame: FrameLighting): THREE.ShaderMaterial {
+  return lightMaterial(texture, frame, 'vertex', THREE.FrontSide, true);
 }
 
 /**

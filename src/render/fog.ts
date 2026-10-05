@@ -38,7 +38,7 @@ const UNDERWATER: Fog = Object.freeze({
   far: UNDERWATER_FOG_FAR,
 });
 
-/** 关闭时颜色与距离不参与计算，取水下那一份，免得切换时着色器拿到没意义的数。 */
+/** 关闭时颜色与距离不参与计算，取水下那一份，以免切换时着色器读到无意义的值。 */
 const CLEAR: Fog = Object.freeze({ ...UNDERWATER, enabled: false });
 
 /** 这一帧的雾：眼睛在水下时是水下雾，否则关闭。 */

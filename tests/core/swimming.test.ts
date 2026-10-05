@@ -287,10 +287,10 @@ describe('从水里爬上岸（#77）', () => {
     expect(game.player.position.y).toBeLessThan(G);
   });
 
-  it('岸比水面高两格：按住跳朝岸游，被挡住时不给爬岸的速度，只在水面上浮着，不会一次次被弹出水面', () => {
+  it('岸比水面高两格：按住跳朝岸游，被挡住时不给爬岸的速度，只在水面上浮着，不会一次次被抬出水面', () => {
     const { climbed, highestFeet } = swimToWall(2);
     expect(climbed).toBe(false);
-    // 浮在水面时脚底至多比水面高约 0.05 格；被弹出水面时会高出 1 格以上
+    // 浮在水面时脚底至多比水面高约 0.05 格；被抬出水面时会高出 1 格以上
     expect(highestFeet).toBeLessThan(G + 1 + 0.5);
   });
 

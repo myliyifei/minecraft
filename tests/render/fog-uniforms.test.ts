@@ -27,7 +27,7 @@ describe('雾的 uniform（#77）', () => {
     expect(frame.fogEnabled.value).toBeFalsy();
   });
 
-  it('地形的两部分、实体与粒子四种材质都直接引用每帧那一份雾的 uniform：改一处，四种材质同一帧都拿到新值', () => {
+  it('地形的两部分、实体与粒子四种材质都直接引用每帧那一份雾的 uniform：改一处，四种材质同一帧都读到新值', () => {
     const frame = frameLighting();
     const materials = {
       terrain: terrainMaterial(texture, frame),

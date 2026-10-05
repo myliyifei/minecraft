@@ -1,4 +1,14 @@
-import { canPlaceInto, isOpaque, isSolid, isWater, placedBlock, type BlockEdit } from './block';
+import {
+  BlockType,
+  canPlaceInto,
+  isOpaque,
+  isPlant,
+  isPlantSoil,
+  isSolid,
+  isWater,
+  placedBlock,
+  type BlockEdit,
+} from './block';
 import type { Hand } from './item';
 import type { MiningView } from './mining';
 import { blockHitbox, overlaps } from './physics';
@@ -16,12 +26,13 @@ export type TargetView = Pick<MiningView, 'target'>;
 export type BodyView = Pick<PlayerView, 'hitbox'>;
 
 /**
- * 放置（见 CONTEXT.md）：把手上那一堆方块物品的一个放到目标方块的相邻面上，返回放下了没有。
+ * 放置（见 CONTEXT.md）：把手上那一堆方块物品的一个放到落点上，返回放下了没有。
  *
- * 落点是命中面外侧那一格（`blockOutsideFace`），也就是玩家看着的那一面外侧。三道拦住它的
- * 规则：那一格必须是空气或水（`canPlaceInto`，是水时放下的方块替换那一格水，#74）、必须真的写进了世界
- * （世界高度之外与未加载的区块都写不进去）、实心方块不能与玩家的碰撞箱交叠出体积（贴着身体那一格放得下，
- * 套住身体就不行；站在水里时那一格水同样放不了实心方块）。
+ * 落点：目标方块是矮草或蕨（`canPlaceInto` 认得的、视线选得中的方块）时就是它那一格，放下的方块替换它（#80）；
+ * 否则是命中面外侧那一格（`blockOutsideFace`），也就是玩家看着的那一面外侧——视线从植物的命中盒旁边穿过、打在
+ * 下面那格顶面上时，落点也就是植物那一格。三道拦住它的规则：落点必须是空气、水、矮草或蕨（`canPlaceInto`，替换
+ * 原来那一格，#74）、必须真的写进了世界（世界高度之外与未加载的区块都写不进去）、实心方块不能与玩家的碰撞箱交叠出体积
+ * （贴着身体那一格放得下，套住身体就不行；站在水里或矮草里时那一格同样放不了实心方块）。
  *
  * **触及距离不在这里判**：射线本身只走到 `PLAYER_REACH`，拿得到目标就说明够得着，
  * 这条规则的唯一出处是投射线那一步（ADR-0006）。在这里再判一次就是一段永远不会成立的
@@ -31,7 +42,10 @@ export type BodyView = Pick<PlayerView, 'hitbox'>;
  *
  * 火把（#56）多三步：目标方块必须是不透明方块（冰不是，对着冰放没有反应）；放下去的编号按命中面选
  * （`torchOnFace`）——顶面是地面火把，侧面是贴在目标那一侧的墙上火把，底面没有反应；落点是水时不放（#74）。
+ * 对着矮草或蕨放火把时替换它、立在下面那格的顶面上，下面那格不是不透明方块时不放（#80）。
  * 火把不实心，不查与玩家碰撞箱的交叠：站在坑里对着脚下也放得下。
+ *
+ * 花（#80）的落点不能是水，下面那格必须是草方块、雪草方块或泥土（`isPlantSoil`）。
  *
  * 写成函数而不是类：它没有跨 tick 的状态，与 `raycastBlocks`、`streamChunks` 一样。
  * 等按住使用键要连发（原版约 4 次/秒）时才需要一个记着冷却的对象。
@@ -51,17 +65,26 @@ export function placeBlock(
   const hit = aim.target;
   if (!hit) return false;
 
+  // 视线选得中、又能被替换的只有矮草与蕨：对着它们放，落点就是它们那一格
+  const replacing = canPlaceInto(blocks.getBlock(hit.x, hit.y, hit.z));
+  const { x, y, z } = replacing ? hit : blockOutsideFace(hit);
+
   if (isTorch(block)) {
-    if (!isOpaque(blocks.getBlock(hit.x, hit.y, hit.z))) return false;
-    const facing = torchOnFace(hit.normal);
-    if (facing === undefined) return false;
-    block = facing;
+    if (replacing) {
+      if (!isOpaque(blocks.getBlock(x, y - 1, z))) return false;
+      block = BlockType.Torch;
+    } else {
+      if (!isOpaque(blocks.getBlock(hit.x, hit.y, hit.z))) return false;
+      const facing = torchOnFace(hit.normal);
+      if (facing === undefined) return false;
+      block = facing;
+    }
   }
 
-  const { x, y, z } = blockOutsideFace(hit);
   const landing = blocks.getBlock(x, y, z);
   if (!canPlaceInto(landing)) return false;
-  if (isTorch(block) && isWater(landing)) return false;
+  if ((isTorch(block) || isPlant(block)) && isWater(landing)) return false;
+  if (isPlant(block) && !isPlantSoil(blocks.getBlock(x, y - 1, z))) return false;
   if (isSolid(block) && overlaps(body.hitbox, blockHitbox(x, y, z))) return false;
   // 只有真的写进了世界才扣数量：写不进去（世界顶面之外、区块没加载）时手上那一堆一个
   // 都不少，否则方块就凭空消失了。

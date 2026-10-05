@@ -3,6 +3,7 @@ import type { Chunk } from './chunk';
 import { CHUNK_SIZE, SEA_LEVEL } from './constants';
 import { Biome } from './biome';
 import { hashCoords } from './noise';
+import { SNOW_LINE_Y } from './surface';
 import type { ColumnCoord } from './world';
 
 /**
@@ -132,6 +133,13 @@ const TREE_CHANCE = 64;
 /** 平原的树里，树种那段随机数小于这个数的是白桦：77/256 ≈ 30%（CONTEXT.md「树」约三成）。 */
 const BIRCH_CHANCE = 77;
 
+/**
+ * 冰雪的落点里，树种那段随机数小于这个数的才长树：128/256 = 50%。冰雪零散长云杉（CONTEXT.md「树」）。
+ * 三个种子的大范围采样（按区块中心那一列的群系归类）：每个区块平均冰雪约 0.45 棵、平原约 0.9 棵、
+ * 高山雪线以下约 0.75 棵（陡坡露石头的列不长）。
+ */
+const SNOWY_TREE_CHANCE = 128;
+
 /** 树冠的一层：`dy` 相对最上面那格原木。 */
 interface CanopyLayer {
   readonly dy: number;
@@ -234,7 +242,8 @@ interface Site {
 }
 
 /**
- * 某个树格里的落点。这一格不长树、落点在出生列周围或者落点是大海，则 undefined，它也就不挤掉邻格的树。
+ * 某个树格里的落点。这一格不长树、落点在出生列周围、落点是大海，或者落点在冰雪里却没抽中，则 undefined，
+ * 它也就不挤掉邻格的树。
  *
  * 只问种子、出生列与群系，不问地表高度——判断两棵树是否相距足够只看水平距离与树冠半径，而地表高度是这里
  * 开销最大的一次计算（要求那一列四角格点的三维密度），邻格检查不该承担这个开销。群系查询便宜得多，树冠半径
@@ -252,6 +261,8 @@ function siteInCell(placement: TreePlacement, cellX: number, cellZ: number): Sit
   // 大海里不长树（父 spec #72）：岸边的大海列叠上起伏会露出海面，单看地表高度挡不住。
   const biome = placement.biomeAt(x, z);
   if (biome === Biome.Ocean) return undefined;
+  // 冰雪只留一部分落点。冰雪不长白桦，树种那段随机数在这里另作他用。
+  if (biome === Biome.Snowy && ((roll >>> SPECIES_SHIFT) & ROLL_MASK) >= SNOWY_TREE_CHANCE) return undefined;
   const canopyRadius = TREE_FORMS[biome === Biome.Plains ? TreeSpecies.Oak : TreeSpecies.Spruce].canopyRadius;
   return { x, z, biome, roll, canopyRadius };
 }
@@ -263,8 +274,8 @@ function speciesAt(site: Site): TreeSpecies {
 }
 
 /**
- * 某个树格里的树。这一格没有落点、树给邻格让了位、落点的地表不高于海平面，或者落点的列顶地表方块
- * 不是草方块与雪草方块，则 undefined。
+ * 某个树格里的树。这一格没有落点、树给邻格让了位、落点的地表不高于海平面、落点是高山雪线以上，或者落点的
+ * 列顶地表方块不是草方块与雪草方块，则 undefined。
  */
 function treeInCell(placement: TreePlacement, cellX: number, cellZ: number): Tree | undefined {
   const site = siteInCell(placement, cellX, cellZ);
@@ -282,6 +293,8 @@ function treeInCell(placement: TreePlacement, cellX: number, cellZ: number): Tre
   // 地表不高于海平面的列不长：低于海平面的上面是水，正好在海平面的是水边那一圈。
   const surface = placement.surfaceHeightAt(site.x, site.z);
   if (surface <= SEA_LEVEL) return undefined;
+  // 高山雪线以上不长（CONTEXT.md「雪线」）：那里的列顶是雪草方块，单看列顶地表方块挡不住。
+  if (site.biome === Biome.Mountains && surface >= SNOW_LINE_Y) return undefined;
   // 只长在草方块与雪草方块上（#76）：沙滩是沙子，陡坡与石头岸是石头，这些列都不长。
   if (!TREE_GROUND.has(placement.surfaceBlockAt(site.x, site.z))) return undefined;
 

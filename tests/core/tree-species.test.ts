@@ -4,11 +4,12 @@ import type { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, SEA_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { SNOW_LINE_Y } from '../../src/core/surface';
 import { Biome, createTerrain, type ColumnCoord, type Terrain } from '../../src/core/terrain';
-import { OAK_TRUNK_MAX, OAK_TRUNK_MIN } from '../../src/core/tree';
+import { OAK_TRUNK_MAX, OAK_TRUNK_MIN, TreeSpecies } from '../../src/core/tree';
 import type { ChunkCoord } from '../../src/core/world';
 import { chunkCache, columnIn, SURVEY_SEEDS } from '../helpers/terrain-survey';
 import {
   canopyRadiusOf,
+  chebyshev,
   chunksTouchedBy,
   crossesChunk,
   flatForest,
@@ -465,6 +466,35 @@ function vanillaOakShape(trunkHeight: number, log: BlockType, leaves: BlockType)
   return [...cells.values()].sort((a, b) => a.dy - b.dy || a.dz - b.dz || a.dx - b.dx);
 }
 
+/**
+ * ADR-0005 补记（#79）的云杉形状（相对树根），按 dy、dz、dx 排好：树干 trunkHeight 格原木；树冠自下而上 7 层，
+ * 树干顶之下 5 层到树干顶之上 1 层，半径依次 3、2、1、2、1、1、0；半径 3、2 的层与树干顶那层去掉四角，
+ * 其余保留四角；树干占着的格是原木。
+ */
+function adrSpruceShape(trunkHeight: number): TreeCell[] {
+  const top = trunkHeight - 1;
+  const layers: Array<[dy: number, radius: number, corners: boolean]> = [
+    [top - 5, 3, false],
+    [top - 4, 2, false],
+    [top - 3, 1, true],
+    [top - 2, 2, false],
+    [top - 1, 1, true],
+    [top, 1, false],
+    [top + 1, 0, true],
+  ];
+  const cells = new Map<string, TreeCell>();
+  for (const [dy, radius, corners] of layers) {
+    for (let dz = -radius; dz <= radius; dz++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (!corners && Math.abs(dx) === radius && Math.abs(dz) === radius) continue;
+        cells.set(`${dx},${dy},${dz}`, { dx, dy, dz, block: SPRUCE.leaves });
+      }
+    }
+  }
+  for (let dy = 0; dy <= top; dy++) cells.set(`0,${dy},0`, { dx: 0, dy, dz: 0, block: SPRUCE.log });
+  return [...cells.values()].sort((a, b) => a.dy - b.dy || a.dz - b.dz || a.dx - b.dx);
+}
+
 describe('树的形状', () => {
   /** 每个种子取一些这种树，三个种子合在一起。 */
   function sampleOf(species: string): Tree[] {
@@ -605,6 +635,62 @@ describe('树的形状', () => {
         if (upper >= lower) wrong.push(`${treeKey(tree)} 上半最大半径 ${upper}、下半 ${lower}`);
       }
       expect(wrong.slice(0, 20)).toEqual([]);
+    });
+
+    it('树冠各层相连：最下面一层到最上面一层之间每一层都有树叶', () => {
+      const wrong: string[] = [];
+      for (const tree of spruces()) {
+        const dys = leafLayers(footprint(tree)).map((layer) => layer.dy);
+        const lowest = Math.min(...dys);
+        const highest = Math.max(...dys);
+        for (let dy = lowest; dy <= highest; dy++) {
+          if (!dys.includes(dy)) wrong.push(`${treeKey(tree)} dy ${dy} 没有树叶`);
+        }
+      }
+      expect(wrong.slice(0, 20)).toEqual([]);
+    });
+
+    it('逐格是 ADR-0005 补记的形状：树干 7 到 9 格，树冠自下而上半径 3、2、1、2、1、1、0', () => {
+      const wrong: string[] = [];
+      for (const tree of spruces()) {
+        if (tree.trunkHeight < 7 || tree.trunkHeight > 9) wrong.push(`${treeKey(tree)} 树干 ${tree.trunkHeight} 格`);
+        // 按 JSON 比：半径 0 那层的循环从 -0 开始，深比较会把 -0 与 0 当成不同
+        if (JSON.stringify(footprint(tree)) !== JSON.stringify(adrSpruceShape(tree.trunkHeight))) {
+          wrong.push(`${treeKey(tree)} 形状不同`);
+        }
+      }
+      expect(wrong.slice(0, 20)).toEqual([]);
+    });
+
+    it('相邻的两棵树占的列互不相同，树冠在水平方向上也不重叠（平地，一半平原一半高山）', () => {
+      // 树干高度不同的两棵树，树冠各层不在同一高度，只比三维的格子查不出间距不够；
+      // 树间距按较大的树冠算（#79），所以按列比较
+      const half = (x: number): Biome => (x < 0 ? Biome.Plains : Biome.Mountains);
+      const overlaps: string[] = [];
+      const pairs = new Set<string>();
+      for (const seed of [1, 2, 3, 4]) {
+        const terrain = flatForest(seed, Biome.Mountains, {
+          biomeAt: (x) => half(x),
+          spawnColumn: { x: -10_000, z: -10_000 },
+        });
+        const coords: ChunkCoord[] = [];
+        for (let cx = -4; cx < 4; cx++) for (let cz = -4; cz < 4; cz++) coords.push({ cx, cz });
+        const owner = new Map<string, Tree>();
+        for (const tree of treesRootedIn(terrain, coords)) {
+          const columns = new Set(footprint(tree).map(({ dx, dz }) => `${tree.x + dx},${tree.z + dz}`));
+          for (const column of columns) {
+            const other = owner.get(column);
+            if (other) overlaps.push(`种子 ${seed}：${treeKey(other)} 与 ${treeKey(tree)} 都占列 ${column}`);
+            owner.set(column, tree);
+          }
+          for (const other of new Set(owner.values())) {
+            if (other !== tree && chebyshev(other, tree) <= 7) pairs.add([other.species, tree.species].sort().join('-'));
+          }
+        }
+      }
+      // 相距 7 格以内的树对里有云杉与云杉、云杉与橡树或白桦，这条测得到云杉的间距
+      expect([...pairs].filter((pair) => pair.includes(TreeSpecies.Spruce)).length, `相邻树对 ${[...pairs].join('、')}`).toBeGreaterThan(1);
+      expect(overlaps.slice(0, 20)).toEqual([]);
     });
   });
 });

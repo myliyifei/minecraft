@@ -31,6 +31,7 @@ import {
   type SkyEnds,
 } from './daylight';
 import { dropBob, dropSpin } from './drop-motion';
+import { fogAt } from './fog';
 import { heldSwingPhase, heldSwingPose } from './held-swing';
 import {
   entityMaterial,
@@ -251,7 +252,7 @@ export interface HeldItemRenderView {
 }
 
 /**
- * 场景里的天空现在是什么样：背景色、这一帧送进着色器的三个数（ADR-0016）、太阳与月亮画不画。
+ * 场景里的天空现在是什么样：背景色、这一帧送进着色器的光照输入与雾（ADR-0016）、太阳与月亮画不画。
  * 与 `SelectionView` 一样直接从场景对象上读，端到端测试验的是真摆进场景的东西。
  */
 export interface SkyView {
@@ -263,6 +264,16 @@ export interface SkyView {
   readonly flicker: number;
   /** 手持光等级（见 CONTEXT.md 的「手持光」）：选中格是火把时 14，否则 0。 */
   readonly heldLight: number;
+  /** 上一帧画的时候眼睛在水下（`PlayerView.eyeInWater`）。在水下时背景色是雾色，太阳与月亮不画。 */
+  readonly underwater: boolean;
+  /** 送进着色器的雾开没开（`FrameLighting.fogEnabled`）。 */
+  readonly fogEnabled: boolean;
+  /** 送进着色器的雾色（sRGB 十六进制）。 */
+  readonly fogColor: number;
+  /** 送进着色器的雾从多远（方块）开始混入。 */
+  readonly fogNear: number;
+  /** 送进着色器的雾到多远（方块）全是雾色。 */
+  readonly fogFar: number;
   readonly sunVisible: boolean;
   readonly moonVisible: boolean;
 }
@@ -288,8 +299,10 @@ export class WorldRenderer {
   private readonly camera: THREE.PerspectiveCamera;
   /** 方块图集。地形、掉落物、僵尸与手持物品的材质都贴它。 */
   private readonly texture: THREE.Texture;
-  /** 每帧送进所有光照材质的输入：天光减量、闪烁、手持光（ADR-0016）。 */
+  /** 每帧送进所有光照材质的输入：天光减量、闪烁、手持光与雾（ADR-0016）。 */
   private readonly frame: FrameLighting = frameLighting();
+  /** 上一帧画的时候眼睛在不在水下（`updateSky`）。 */
+  private underwater = false;
   private readonly core: GameCore;
   /** 场景里的区块网格，每个区块不透明与半透明两份几何（#83）。 */
   private readonly meshes: ChunkMeshes;
@@ -521,6 +534,11 @@ export class WorldRenderer {
       skyDarkening: this.frame.skyDarkening.value,
       flicker: this.frame.flicker.value,
       heldLight: this.frame.heldLight.value,
+      underwater: this.underwater,
+      fogEnabled: this.frame.fogEnabled.value,
+      fogColor: this.frame.fogColor.value.getHex(),
+      fogNear: this.frame.fogNear.value,
+      fogFar: this.frame.fogFar.value,
       sunVisible: this.sun.visible,
       moonVisible: this.moon.visible,
     };
@@ -724,22 +742,33 @@ export class WorldRenderer {
   }
 
   /**
-   * 按世界时刻更新天空：背景色、送进着色器的天光减量、太阳与月亮的位置。
+   * 按世界时刻与眼睛在不在水下更新天空：背景色、送进着色器的天光减量与雾、太阳与月亮的位置。
    *
    * 时刻与相机位置一样在上一个 tick 与当前 tick 之间插值（ADR-0002），太阳因此平滑地走，
-   * 黄昏也是连续变暗的——减量不取整，着色器拿到的是浮点值。算法都在 `daylight.ts` 里，这里只把结果
+   * 黄昏也是连续变暗的——减量不取整，着色器拿到的是浮点值。算法都在 `daylight.ts` 与 `fog.ts` 里，这里只把结果
    * 写进场景对象。太阳月亮那一层的位置取相机的位置，所以排在 `updateCamera` 之后。
+   *
+   * 眼睛在水下时（#77）背景色换成雾色、太阳与月亮不画：它们远在雾的 `far` 之外，又不走光照材质，不藏起来就会
+   * 透过雾露出来。眼睛在不在水下读核心按 tick 算的值，不按插值后的相机位置另算，出入水面时最多差一个 tick。
    */
   private updateSky(alpha: number): void {
     const time = frameTimeOfDay(this.core.timeOfDay, alpha);
     const { sky, skyDarkening } = daylightAt(time, this.skyEnds);
-    this.skyColor.setRGB(...sky);
     this.frame.skyDarkening.value = skyDarkening;
+
+    this.underwater = this.core.player.eyeInWater;
+    const fog = fogAt(this.underwater);
+    this.frame.fogEnabled.value = fog.enabled;
+    this.frame.fogColor.value.setRGB(...fog.color, THREE.SRGBColorSpace);
+    this.frame.fogNear.value = fog.near;
+    this.frame.fogFar.value = fog.far;
+    if (fog.enabled) this.skyColor.copy(this.frame.fogColor.value);
+    else this.skyColor.setRGB(...sky);
 
     this.celestialPivot.position.copy(this.camera.position);
     this.celestialPivot.rotation.z = celestialAngle(time);
-    this.sun.visible = celestialVisible(sunDirection(time));
-    this.moon.visible = celestialVisible(moonDirection(time));
+    this.sun.visible = !fog.enabled && celestialVisible(sunDirection(time));
+    this.moon.visible = !fog.enabled && celestialVisible(moonDirection(time));
   }
 
   /**

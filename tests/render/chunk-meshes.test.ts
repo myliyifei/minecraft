@@ -98,8 +98,8 @@ describe('区块网格进出场景：两份几何（#83）', () => {
   it('调试读回覆盖两部分：顶点数是两部分之和，贴图格是两部分的并集、升序', () => {
     const { meshes } = setup();
     meshes.set(0, 0, meshWith([[8, Y, 8, BlockType.Stone], [3, Y, 3, BlockType.Water], [12, Y, 12, BlockType.Ice]]));
-    // 石头 6 面、水 7 面、冰 6 面
-    expect(meshes.vertexCount(0, 0)).toBe((6 + 7 + 6) * 4);
+    // 石头 6 面，水与冰各 7 面（顶面正反两面）
+    expect(meshes.vertexCount(0, 0)).toBe((6 + 7 + 7) * 4);
     expect(meshes.tiles(0, 0)).toEqual([TILE.stone, TILE.water, TILE.ice].sort((a, b) => a - b));
   });
 

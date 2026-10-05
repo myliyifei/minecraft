@@ -129,7 +129,7 @@ describe('网格分成不透明与半透明两部分（#83）', () => {
   });
 });
 
-describe('水贴着空气的顶面正反两面都画（#83）', () => {
+describe('水与冰贴着空气的顶面正反两面都画（#83）', () => {
   it('悬空一格水：七个面，顶面那个平面上一正一反两个面，绕序与各自的法线同向', () => {
     const mesh = sparseMesh([[8, Y, 8, BlockType.Water]]);
     // 六个面加上顶面的背面
@@ -147,10 +147,30 @@ describe('水贴着空气的顶面正反两面都画（#83）', () => {
     }
   });
 
-  it('悬空一格冰：六个面，顶面不画背面', () => {
+  it('悬空一格冰：七个面，顶面也是一正一反，绕序与各自的法线同向', () => {
     const mesh = sparseMesh([[8, Y, 8, BlockType.Ice]]);
-    expect(faceCount(mesh.translucent)).toBe(6);
-    expect(facesOnPlane(mesh.translucent, 1, Y + 1)).toHaveLength(1);
+    // 六个面加上顶面的背面：冰盖在水上时，从水下抬头看到的就是这一面
+    expect(faceCount(mesh.translucent)).toBe(7);
+    const top = facesOnPlane(mesh.translucent, 1, Y + 1);
+    expect(top.map((face) => face.normal).sort()).toEqual([
+      [0, -1, 0],
+      [0, 1, 0],
+    ]);
+    for (const face of top) {
+      expect(Math.sign(face.winding[1]), `法线 ${face.normal}`).toBe(face.normal[1]);
+    }
+  });
+
+  it('冰盖在水上：从水下抬头，冰顶面的背面在，法线朝下、绕序朝下，冰与水之间的平面上没有面', () => {
+    const mesh = sparseMesh([
+      [8, Y, 8, BlockType.Water],
+      [8, Y + 1, 8, BlockType.Ice],
+    ]);
+    const iceTop = facesOnPlane(mesh.translucent, 1, Y + 2);
+    const underside = iceTop.filter((face) => face.normal[1] === -1);
+    expect(underside).toHaveLength(1);
+    expect(Math.sign(underside[0]!.winding[1])).toBe(-1);
+    expect(facesOnPlane(mesh.translucent, 1, Y + 1)).toEqual([]);
   });
 
   it('水的底面与侧面只有一个面', () => {
@@ -214,8 +234,8 @@ describe('水与冰的剔除看相邻两格的组合（#83）', () => {
       [9, Y, 8, BlockType.Ice],
     ]);
     expect(facesOnPlane(mesh.translucent, 0, 9)).toEqual([]);
-    // 水 7 − 1，冰 6 − 1
-    expect(faceCount(mesh.translucent)).toBe(11);
+    // 水 7 − 1，冰 7 − 1
+    expect(faceCount(mesh.translucent)).toBe(12);
   });
 
   it('冰盖在水上：冰的底面与水的顶面都不画', () => {
@@ -224,8 +244,8 @@ describe('水与冰的剔除看相邻两格的组合（#83）', () => {
       [8, Y + 1, 8, BlockType.Ice],
     ]);
     expect(facesOnPlane(mesh.translucent, 1, Y + 1)).toEqual([]);
-    // 水 5 个面（没有顶面），冰 5 个面（没有底面）
-    expect(faceCount(mesh.translucent)).toBe(10);
+    // 水 5 个面（没有顶面），冰 6 个面（没有底面，顶面正反两面）
+    expect(faceCount(mesh.translucent)).toBe(11);
   });
 
   it('两格相邻的冰之间没有面', () => {
@@ -234,7 +254,7 @@ describe('水与冰的剔除看相邻两格的组合（#83）', () => {
       [9, Y, 8, BlockType.Ice],
     ]);
     expect(facesOnPlane(mesh.translucent, 0, 9)).toEqual([]);
-    expect(faceCount(mesh.translucent)).toBe(10);
+    expect(faceCount(mesh.translucent)).toBe(12);
   });
 
   it('水贴着区块边，隔壁区块那一格也是水：边上那个平面没有面', () => {

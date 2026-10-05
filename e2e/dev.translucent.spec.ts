@@ -9,7 +9,7 @@ import { enterDefaultWorld } from './world-list';
  * #83 水与冰的半透明渲染：画面上透过水面看得到水底，调试读回的顶点数与贴图格覆盖网格的两部分。
  *
  * 场景都用调试句柄自己搭，不依赖出生点附近的地形（第七切片的地形还在变）。每条用例整段跑在一次同步的 evaluate 里，
- * 游戏循环插不进来，读到的就是刚画的那一帧；不锁定指针，世界不理会暂停（`enterDefaultWorld`）。
+ * 这期间游戏循环不会执行，读到的就是刚画的那一帧；不锁定指针，世界不理会暂停（`enterDefaultWorld`）。
  */
 
 const errors: string[] = [];
@@ -130,7 +130,7 @@ test('调试句柄在玩家前方放一片水：透过水面看得到水底，�
   // 没水时两种池底本来就分得开
   expect(luma(seen.dry.light.rgb)).toBeGreaterThan(luma(seen.dry.dark.rgb));
 
-  // 有水与没有水时不同：水面盖上了一层水的颜色，蓝色占比变高
+  // 有水与没有水时不同：画面叠上了水的颜色，蓝色占比变高
   expect(colorDistance(seen.wet.light.rgb, seen.dry.light.rgb)).toBeGreaterThan(VISIBLE_DIFFERENCE);
   expect(blueShare(seen.wet.light.rgb)).toBeGreaterThan(blueShare(seen.dry.light.rgb));
 
@@ -141,10 +141,10 @@ test('调试句柄在玩家前方放一片水：透过水面看得到水底，�
   expect(errors).toEqual([]);
 });
 
-test('调试句柄在高空放一格水与一格冰：区块网格的顶点数多出水的 7 个面与冰的 6 个面，贴图格里有水与冰；拆掉后回到原来的顶点数（#83）', async ({
+test('调试句柄在高空放一格水与一格冰：区块网格的顶点数多出水与冰各 7 个面，贴图格里有水与冰；拆掉后回到原来的顶点数（#83）', async ({
   page,
 }) => {
-  // 两格都悬在玩家所在区块的高空，四周全是空气：水六个面加上顶面的背面，冰六个面。两格不相邻，互不剔除。
+  // 两格都悬在玩家所在区块的高空，四周全是空气：水与冰都是六个面加上顶面的背面。两格不相邻，互不剔除。
   // 读的是送上显卡的网格（`chunkMeshVertexCount`、`chunkMeshTiles`），两部分都要算进去。
   const seen = await page.evaluate(
     ({ water, ice, air, chunkSize, y }) => {
@@ -178,7 +178,7 @@ test('调试句柄在高空放一格水与一格冰：区块网格的顶点数�
 
   expect(seen.placed.blocks).toEqual([BlockType.Water, BlockType.Ice]);
   expect(seen.before).toBeGreaterThan(0);
-  expect(seen.placed.vertices - seen.before).toBe((7 + 6) * 4);
+  expect(seen.placed.vertices - seen.before).toBe((7 + 7) * 4);
   expect(seen.placed.tiles).toContain(TILE.water);
   expect(seen.placed.tiles).toContain(TILE.ice);
   expect(seen.after).toBe(seen.before);

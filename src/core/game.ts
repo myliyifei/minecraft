@@ -52,7 +52,7 @@ export interface GameCoreOptions {
   /** 视距（区块数）：这个半径内的区块保持加载，见 CONTEXT.md 的「视距」。之后可以改，见 `setViewRadius`。 */
   readonly viewRadius?: number;
   /**
-   * 自动跳跃（见 CONTEXT.md）开着没有，省略时开（与设置的默认值一致）。之后可以改，见 `setAutoJump`。它是设置里的
+   * 自动跳跃（见 CONTEXT.md）是否开启，省略时开（与设置的默认值一致）。之后可以改，见 `setAutoJump`。它是设置里的
    * 一项，不进快照：从快照构造时同样按这里给的值（ADR-0020）。
    */
   readonly autoJump?: boolean;
@@ -740,7 +740,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.world.unloadOutside(this.playerChunk, radius + UNLOAD_MARGIN);
   }
 
-  /** 自动跳跃（见 CONTEXT.md）开着没有。 */
+  /** 自动跳跃（见 CONTEXT.md）是否开启。 */
   get autoJump(): boolean {
     return this.autoJumpEnabled;
   }

@@ -86,7 +86,7 @@ export const WATER_SWIM_UP_SPEED = 0.04;
  * 设速那一 tick 结束时仍在水里且仍被挡，下一 tick 速度再次被设成 0.4（只设一次约升 1.26 格），出水之后按空气里的重力减速，两次设速一共抬高约 1.6 格。原版是 0.3：原版的玩家
  * 能直接走上 0.6 格高的台阶（登高），身子抬到离岸顶不到 0.6 格时水平一走就上去了，所以只要抬高约 1 格。本项目没有
  * 这种登高，只能整个越过岸顶，0.3 从起伏的低处达不到岸顶。自动跳跃（#78）不改变这一点：在水里不触发，出水之后
- * 不在地面上也不触发，而且它只是按 `JUMP_VELOCITY` 起跳，不是登高。#78 复核过：自动跳跃开着时改成 0.3，爬上比水面高一格的岸的用例照样失败，所以仍取 0.4。
+ * 不在地面上也不触发，而且它只是按 `JUMP_VELOCITY` 起跳，不是登高。#78 复核过：自动跳跃开着时改成 0.3，爬上比水面高一格的岸的用例仍然失败，所以仍取 0.4。
  */
 export const WATER_CLIMB_SPEED = 0.4;
 
@@ -106,7 +106,7 @@ export const WATER_CLIMB_SURFACE = 0.6;
 
 /**
  * 自动跳跃认作台阶的高度（方块）：碰撞箱抬高这么多之后水平不再被挡，挡住的才是台阶。一格：起跳最高点 1.252 格，
- * 够得上一格，够不上两格。
+ * 最高点高于一格、低于两格。
  */
 const AUTO_JUMP_RISE = 1;
 
@@ -329,7 +329,7 @@ export class Player implements PlayerView {
    * 或者一直站在地上，返回 0。跳上台阶时落差只算高出台阶顶面的那一段。受不受伤、受几点由调用方
    * 按 `fallDamage` 算，玩家本身不持生命值。
    *
-   * autoJump 是自动跳跃（见 CONTEXT.md）开着没有，见 `stepsUp`。开关归核心管（`GameCore.autoJump`），每 tick 传进来；
+   * autoJump 是自动跳跃（见 CONTEXT.md）是否开启，见 `stepsUp`。开关由核心持有（`GameCore.autoJump`），每 tick 传进来；
    * 省略时关，直接构造玩家的测试因此与没有自动跳跃时相同。
    */
   step(intent: MoveIntent, autoJump = false): number {
@@ -378,23 +378,28 @@ export class Player implements PlayerView {
     this.x = this.movedAlong('x', move.x);
     const blockedZ = isBlockedAlong(this.blocks, this.hitbox, 'z', move.z);
     this.z = this.movedAlong('z', move.z);
-    // 被挡住的轴里有一个满足 rule 就算。斜着走进墙角时两个轴都被挡，哪个轴上挡住的东西够得上就算哪个。
+    // 被挡住的轴里有一个满足 rule 就算。斜着走进墙角时两个轴都被挡，任一被挡的轴满足条件即起跳。
     const blockedBy = (rule: (axis: 'x' | 'z', delta: number) => boolean): boolean =>
       (blockedX && rule('x', move.x)) || (blockedZ && rule('z', move.z));
     if (swimming) {
       // 爬岸：在水里按住跳、水平被岸挡住时给一个向上的速度，下一 tick 起往上走，出水之后靠它越过岸边。
       if (intent.jump && blockedBy((axis, delta) => this.canClimbOut(axis, delta))) this.velocityY = WATER_CLIMB_SPEED;
-    } else if (autoJump && this.stepsUp(walk, blockedBy)) {
+    } else if (autoJump && !this.inWater && this.stepsUp(walk, blockedBy)) {
       // 自动跳跃：竖直这一步这一 tick 已经走完，起跳速度下一 tick 生效，与按跳起跳是同一个速度。
+      // 这一 tick 开始时不在水里、走完之后在水里（从水面上方落进浅水、踩到池底）也不跳：移动按开始时的判断推进，
+      // 自动跳跃按走完之后的位置判断，否则落进一格深的水时会被一格高的岸挡住、自动起跳出水登岸。
       this.velocityY = JUMP_VELOCITY;
     }
     return fell;
   }
 
   /**
-   * 自动跳跃（见 CONTEXT.md）该不该起跳：水平走完之后在地面上、这一 tick 有移动输入（walk 不为零），被挡住的轴上
+   * 自动跳跃（见 CONTEXT.md）是否起跳：水平走完之后在地面上、这一 tick 有移动输入（walk 不为零），被挡住的轴上
    * 挡住玩家的只是一格高的台阶、上方站得下碰撞箱（`clearsAfterRising` 抬高 1 格，抬高后的整个碰撞箱一并检查，
-   * 台阶上方空间不够 1.8 格就不跳）。在水里不问它，走爬岸那条规则，两者不叠加。
+   * 台阶上方空间不够 1.8 格就不跳）。在水里不做这项判断，按爬岸规则处理，两者不叠加。
+   *
+   * 抬高之前先确认水平走完之后的碰撞箱沿该轴仍被挡：blockedX 按 Z 走之前的碰撞箱判断，斜着沿两格高的墙滑过墙的尽头时，
+   * Z 走完之后碰撞箱已越过墙的尽头，抬高 1 格当然不被挡，不先确认就会误跳一次。
    *
    * 要有移动输入：只被击退推着撞上台阶时不跳。判断写法与僵尸登台阶相同（`Zombie.canStepUp`）。
    */
@@ -404,8 +409,10 @@ export class Player implements PlayerView {
   ): boolean {
     if (walk.x === 0 && walk.z === 0) return false;
     if (!this.onGround) return false;
-    return blockedBy((axis, delta) =>
-      clearsAfterRising(this.blocks, this.position, PLAYER_WIDTH, PLAYER_HEIGHT, AUTO_JUMP_RISE, axis, delta),
+    return blockedBy(
+      (axis, delta) =>
+        isBlockedAlong(this.blocks, this.hitbox, axis, delta) &&
+        clearsAfterRising(this.blocks, this.position, PLAYER_WIDTH, PLAYER_HEIGHT, AUTO_JUMP_RISE, axis, delta),
     );
   }
 

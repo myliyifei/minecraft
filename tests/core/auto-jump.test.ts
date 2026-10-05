@@ -189,6 +189,19 @@ describe('自动跳跃：不该跳的时候不跳（#78）', () => {
     expect(game.player.position.y).toBe(G - 2);
     expect(game.player.position.z).toBeCloseTo(BLOCKED_Z, 10);
   });
+  it('斜着走、沿 +X 一侧两格高的墙滑过墙的尽头：不跳', () => {
+    const game = core();
+    // 场景搭对了：开关开着，不跳是因为规则，不是因为没开
+    expect(game.autoJump).toBe(true);
+    // 墙在 x = 1、z ∈ [−2, 0]、两格高。前进加右移：X 一直被墙挡住、沿墙往 −Z 滑，滑过 z = −2 那一端之后 X 不再被挡。
+    // 滑过尽头那一 tick，按 Z 走之前的碰撞箱 X 被挡，Z 走完之后碰撞箱已越过墙的尽头，抬高 1 格不被挡；只看后者的实现在这里误跳一次。
+    fill(game, [1, 1], [G + 1, G + 2], [-2, 0], BlockType.Stone);
+    const ys = heights(game, { ...FORWARD, right: true }, WALK_TICKS);
+    expect(Math.max(...ys)).toBe(FLAT_STAND_Y);
+    // 场景搭对了：确实滑过了墙的尽头，并且绕到了墙的 +X 一侧
+    expect(game.player.position.z).toBeLessThan(-2 - PLAYER_WIDTH / 2);
+    expect(game.player.position.x).toBeGreaterThan(1);
+  });
 });
 
 describe('自动跳跃：在水里不触发（#78）', () => {
@@ -207,6 +220,40 @@ describe('自动跳跃：在水里不触发（#78）', () => {
     expect(game.player.position.z).toBeCloseTo(BLOCKED_Z, 10);
     expect(game.player.inWater).toBe(true);
   });
+
+  it('tick 开始时在水面上方、这一 tick 落进一格深的水踩到池底，同时被一格高的岸挡住：不跳，留在水里', () => {
+    // 玩家所在那一片（x ∈ [−1, 1]、z ∈ [0, 1]）挖到 F，池底那一层是水：一格深的水，水面在 F + 1。
+    // 前方 z = −1 那一列是岸：顶面在 F + 1，比池底高一格，上方一直空到地面。
+    const F = G - 16;
+    const setup = core();
+    fill(setup, [-1, 1], [F, G], [-1, 1], BlockType.Air);
+    fill(setup, [-1, 1], [F, F], [0, 1], BlockType.Water);
+    fill(setup, [-1, 1], [F, F], [-1, -1], BlockType.Stone);
+    // 从快照放到水面上方 0.09 格、以 1.41 格/tick 下落：与从地面掉下 16 格时落进水里那一 tick 开始时相同
+    const above = F + 1.09;
+    const snapshot = setup.snapshot();
+    const game = core({
+      restore: {
+        ...snapshot,
+        player: { ...snapshot.player, position: { x: 0.5, y: above, z: 0.5 }, velocityY: -1.41, fallHighest: above },
+      },
+    });
+    // 场景搭对了：开关开着，这一 tick 开始时不在水里
+    expect(game.autoJump).toBe(true);
+    expect(game.player.inWater).toBe(false);
+    // 落水那一 tick 按着前进：竖直这一步踩到池底，水平被岸挡住
+    heights(game, FORWARD, 1);
+    // 场景搭对了：踩在池底、在水里、贴着岸
+    expect(game.player.position.y).toBe(F);
+    expect(game.player.onGround).toBe(true);
+    expect(game.player.inWater).toBe(true);
+    expect(game.player.position.z).toBeCloseTo(BLOCKED_Z, 10);
+    // 之后接着按前进、不按跳：在水里按爬岸规则，不按跳就不出水
+    const ys = heights(game, FORWARD, 20);
+    expect(Math.max(...ys)).toBe(F);
+    expect(game.player.position.z).toBeCloseTo(BLOCKED_Z, 10);
+    expect(game.player.inWater).toBe(true);
+  });
 });
 
 describe('自动跳跃的开关（#78）', () => {
@@ -219,7 +266,7 @@ describe('自动跳跃的开关（#78）', () => {
     expect(game.player.position.z).toBeCloseTo(BLOCKED_Z, 10);
   });
 
-  it('关掉之后自己按跳照样登得上一格台阶', () => {
+  it('关掉之后自己按跳仍能登上一格台阶', () => {
     const game = core({ autoJump: false });
     stepAhead(game, 1);
     heights(game, { ...FORWARD, jump: true }, WALK_TICKS);

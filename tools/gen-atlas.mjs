@@ -84,6 +84,14 @@ const FIRE_BRIGHT = [252, 208, 64];
 /** 火焰光点中心发白的那一小团。 */
 const FIRE_CORE = [255, 244, 190];
 /** 烟粒子：浅灰，边上一圈偏暗。 */
+// 水与冰（#74）：两格都带 alpha，留给 #83 的半透明部分用。alpha 都在 alphaTest 的 0.5 之上，#83 之前随不透明
+// 部分画时一个像素也不会被抠掉。
+const WATER = [52, 92, 196];
+const WATER_RIPPLE = [92, 132, 222];
+const WATER_ALPHA = 176;
+const ICE = [148, 186, 234];
+const ICE_STREAK = [214, 232, 252];
+const ICE_ALPHA = 200;
 const SMOKE = [196, 196, 198];
 const SMOKE_EDGE = [148, 148, 152];
 /** 矿点的颜色：煤近黑，铁是浅棕；物品图标上再各配一个亮面。 */
@@ -533,6 +541,18 @@ const TILES = {
     if (core < 2.5) return shade(FIRE_CORE, noise);
     if (core < 4) return shade(FIRE_BRIGHT, noise);
     return shade(FIRE, noise);
+  },
+  // water：蓝底，几道断续的浅色横向水纹，每隔一道错开半格，带 alpha
+  47: (x, y, rand) => {
+    const ripple = y % 4 === 1 && (x + (y % 8 === 1 ? 0 : 4)) % 8 < 5;
+    const [r, g, b] = shade(ripple ? WATER_RIPPLE : WATER, Math.floor(rand() * 16) - 8);
+    return [r, g, b, WATER_ALPHA];
+  },
+  // ice：浅蓝底，几道斜向的白色条纹，带 alpha，比水更不透明
+  48: (x, y, rand) => {
+    const streak = (x + y) % 7 === 0 || (x - y + 16) % 11 === 0;
+    const [r, g, b] = shade(streak ? ICE_STREAK : ICE, Math.floor(rand() * 12) - 6);
+    return [r, g, b, ICE_ALPHA];
   },
   // birch_log_top：浅黄白木的年轮，最外一圈是灰白树皮
   49: (x, y, rand) => {

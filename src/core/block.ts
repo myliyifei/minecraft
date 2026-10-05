@@ -52,6 +52,14 @@ export const BlockType = {
   SpruceLog: 22,
   SpruceLeaves: 23,
   SprucePlanks: 24,
+  /**
+   * 水（见 CONTEXT.md 的「流体」，#74）：不实心、不是不透明，视线穿过它，挖不到，没有物品。目前不流动。
+   */
+  Water: 25,
+  /**
+   * 冰（见 CONTEXT.md 的「冰面」，#74）：实心、不是不透明，挖掉什么都不掉，原处变成一格水（`blockAfterMining`）。
+   */
+  Ice: 26,
 } as const;
 
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
@@ -314,6 +322,46 @@ function planks(item: ItemType): BlockDef {
   };
 }
 
+/**
+ * 水（#74）：不实心、不是不透明，天光竖直穿过每格减 1，与树叶同一种透光方式。
+ *
+ * 水与空气一样不是挖掘目标：视线穿过它（`sightPassesThrough`），`isBreakable` 因此为假。硬度、合格工具的类别
+ * 与最低材质档只是占位，与空气同填。没有物品，什么都不掉，不给经验。
+ */
+const WATER: BlockDef = {
+  opaque: false,
+  solid: false,
+  hardness: 0,
+  qualifiedToolClass: ToolClass.None,
+  minimumMaterial: ToolMaterial.Wood,
+  requiresTool: false,
+  drop: null,
+  experience: 0,
+  use: BlockUse.None,
+  state: BlockStateKind.None,
+  lightEmission: 0,
+  lightPassage: LightPassage.Leaves,
+};
+
+/**
+ * 冰（#74）：实心、不是不透明（火把插不上），透光方式与树叶相同。硬度 0.5，合格工具是镐但不需要工具，
+ * 空手 15 tick、持木镐 8 tick。挖掉什么都不掉，经验照普通方块给；原处写水而不是空气（`blockAfterMining`）。
+ */
+const ICE: BlockDef = {
+  opaque: false,
+  solid: true,
+  hardness: 0.5,
+  qualifiedToolClass: ToolClass.Pickaxe,
+  minimumMaterial: ToolMaterial.Wood,
+  requiresTool: false,
+  drop: null,
+  experience: COMMON_EXPERIENCE,
+  use: BlockUse.None,
+  state: BlockStateKind.None,
+  lightEmission: 0,
+  lightPassage: LightPassage.Leaves,
+};
+
 /** 方块属性表——纯数据。加方块只加一行。 */
 export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
   // 空气不是挖掘目标，硬度、合格工具的类别与最低材质档只是占位。
@@ -445,6 +493,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
   [BlockType.SpruceLog]: log(ItemType.SpruceLog),
   [BlockType.SpruceLeaves]: LEAVES,
   [BlockType.SprucePlanks]: planks(ItemType.SprucePlanks),
+  [BlockType.Water]: WATER,
+  [BlockType.Ice]: ICE,
 };
 
 export function isAir(block: BlockType): boolean {
@@ -461,9 +511,37 @@ export function isSolid(block: BlockType): boolean {
   return BLOCKS[block].solid;
 }
 
-/** 挖得动的方块。空气不是挖掘目标，基岩挖不动。 */
+/** 挖得动的方块。视线穿过的方块（空气与水）不是挖掘目标，基岩挖不动。 */
 export function isBreakable(block: BlockType): boolean {
-  return block !== BlockType.Air && BLOCKS[block].hardness !== UNBREAKABLE;
+  return !sightPassesThrough(block) && BLOCKS[block].hardness !== UNBREAKABLE;
+}
+
+export function isWater(block: BlockType): boolean {
+  return block === BlockType.Water;
+}
+
+/**
+ * 选目标方块的视线穿不穿过这种方块（见 CONTEXT.md 的「目标方块」）：空气与水穿过，其余方块都能成为目标，
+ * 树叶与冰也算。火把那一格另按细杆的盒子求交（`raycastBlocks`），不走这一条。
+ */
+export function sightPassesThrough(block: BlockType): boolean {
+  return isAir(block) || isWater(block);
+}
+
+/**
+ * 放置的落点能不能是这一格（见 CONTEXT.md 的「放置」）：空气与水可以，放下的方块替换原来那一格。
+ * 火把不能放进水里，那一条在 `placeBlock`。
+ */
+export function canPlaceInto(block: BlockType): boolean {
+  return isAir(block) || isWater(block);
+}
+
+/**
+ * 挖掉这种方块之后原处是什么：冰变成一格水（见 CONTEXT.md 的「冰面」），其余方块变成空气。
+ * 单块挖掘与连锁挖掘都按它写，连锁挖掉一片冰每一格都变成水。
+ */
+export function blockAfterMining(block: BlockType): BlockType {
+  return block === BlockType.Ice ? BlockType.Water : BlockType.Air;
 }
 
 /**

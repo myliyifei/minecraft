@@ -3,7 +3,7 @@ import { isTorch } from '../core/torch';
 import { ItemType } from '../core/item';
 
 /**
- * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 16 行，目前用了 54 格：第 0 到 46 格（第 43 格不用）与第 49 到 56 格。
+ * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 16 行，目前用了 56 格：第 0 到 46 格（第 43 格不用）与第 47 到 56 格。
  *
  * 行列数都取 2 的幂：uv 是格号除以行列数，除以 8 在 float32 里是精确的，除以 5 就不是
  * ——顶点属性存的是 Float32Array，1/5 一进去就带上舍入误差，一个面的边缘会取到相邻那一格的像素。
@@ -73,6 +73,9 @@ export const TILE = {
   // 粒子（#59）：一缕烟与一个火焰光点，都是格中间一小团、四周透明。不属于任何方块或物品。
   smoke: 45,
   flame: 46,
+  // 水与冰（#74）：六面同一张。#83 之前随不透明部分画，外观不对。
+  water: 47,
+  ice: 48,
   // 白桦与云杉（#85）：每种树四格，原木顶面是年轮、侧面是树皮，树叶带镂空，木板四条横板。
   birchLogTop: 49,
   birchLogSide: 50,
@@ -181,6 +184,8 @@ export const BLOCK_TILES: Readonly<Record<BlockType, FaceTiles | null>> = {
   [BlockType.SpruceLog]: SPRUCE_LOG_TILES,
   [BlockType.SpruceLeaves]: flat(TILE.spruceLeaves),
   [BlockType.SprucePlanks]: flat(TILE.sprucePlanks),
+  [BlockType.Water]: flat(TILE.water),
+  [BlockType.Ice]: flat(TILE.ice),
 };
 
 /**

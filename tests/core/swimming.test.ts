@@ -251,6 +251,42 @@ describe('从水里爬上岸（#77）', () => {
     expect(game.player.position.y).toBeLessThan(G);
   });
 
+  it('岸在 −X 方向、比水面高一格：朝 −X 游过去同样爬得上去', () => {
+    const game = core();
+    // 把上面的水池转到 x 轴上：水在 x ∈ [−6, 1]，岸在 x ≤ −7
+    fill(game, [-6, 1], [G - 2, G], [-2, 2], BlockType.Water);
+    fill(game, [-9, -7], [G + 1, G + 1], [-2, 2], BlockType.Stone);
+    // 偏航 π/2：前方是 −X
+    game.turn(Math.PI / 2, 0);
+    game.setMoveIntent(SWIM_FORWARD);
+    let climbed = false;
+    for (let i = 0; i < 300 && !climbed; i++) {
+      game.tick();
+      climbed = game.player.onGround && game.player.position.y === G + 2;
+    }
+    expect(climbed).toBe(true);
+    expect(Math.floor(game.player.position.x)).toBeLessThanOrEqual(-7);
+  });
+
+  it('深水底部被一格高的台阶挡住：离水面还远时不给爬岸的速度，按住跳只按水里的上浮速度升起来', () => {
+    const game = core();
+    tank(game);
+    // 水箱底部朝 −Z 那一排垫一格石头，成为一级台阶；先沉到箱底
+    fill(game, [-1, 1], [G - 14, G - 14], [-1, -1], BlockType.Stone);
+    heights(game, IDLE_INTENT, 200);
+    // 落点与箱底之间只差碰撞扫掠容差以内的舍入误差
+    expect(game.player.position.y).toBeCloseTo(G - 14, 9);
+    let previous = game.player.position.y;
+    const ys = heights(game, SWIM_FORWARD, 30);
+    for (const [i, y] of ys.entries()) {
+      expect(y - previous, `第 ${i + 1} tick`).toBeLessThanOrEqual(0.1 + 1e-9);
+      previous = y;
+    }
+    // 场景搭对了：已经越过了台阶，离水面还远
+    expect(game.player.position.y).toBeGreaterThan(G - 13);
+    expect(game.player.position.y).toBeLessThan(G);
+  });
+
   it('岸比水面高两格：按住跳朝岸游，被挡住时不给爬岸的速度，只在水面上浮着，不会一次次被弹出水面', () => {
     const { climbed, highestFeet } = swimToWall(2);
     expect(climbed).toBe(false);

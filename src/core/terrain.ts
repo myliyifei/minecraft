@@ -24,7 +24,6 @@ export { Biome } from './biome';
  */
 export type TerrainGenerator = (cx: number, cz: number) => Chunk;
 
-
 /** 一列的水平坐标。 */
 export interface ColumnCoord {
   readonly x: number;

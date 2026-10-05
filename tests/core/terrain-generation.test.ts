@@ -52,7 +52,7 @@ const INLAND_WALK = 48;
 /** issue 给的地表高度上界。 */
 const MAX_SURFACE_Y = 210;
 
-/** 草方块之下的泥土层数（本 issue的铺法沿用平原的 3 到 4 层）。 */
+/** 草方块之下的泥土层数（本 issue 的铺法沿用平原的 3 到 4 层）。 */
 const DIRT_LAYERS_MIN = 3;
 const DIRT_LAYERS_MAX = 4;
 
@@ -227,7 +227,7 @@ describe('地表高度查询与生成结果一致', () => {
     expect(wrong).toEqual([]);
   });
 
-  it.each(SURVEY_SEEDS)('种子 %i：列顶地表方块查询等于地表高度那一格，本 issue仍总是草方块（#76 改）', (seed) => {
+  it.each(SURVEY_SEEDS)('种子 %i：列顶地表方块查询等于地表高度那一格，本 issue 仍总是草方块（#76 改）', (seed) => {
     expectAllBiomesFound(seed);
     const terrain = createTerrain(seed);
     const wrong: string[] = [];
@@ -447,7 +447,7 @@ describe('悬垂', () => {
   });
 });
 
-describe('地表铺法（本 issue最简单的一种，#76 改）', () => {
+describe('地表铺法（本 issue 最简单的一种，#76 改）', () => {
   it.each(SURVEY_SEEDS)('种子 %i：上方是空气、水或冰的地形方块都是草方块，其下 3 到 4 层泥土（那一段不够厚时到段底为止）', (seed) => {
     expectAllBiomesFound(seed);
     const exposedAbove: ReadonlySet<BlockType> = new Set([BlockType.Air, BlockType.Water, BlockType.Ice]);

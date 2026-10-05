@@ -14,8 +14,8 @@ import type { ColumnCoord } from './world';
 export type SurfaceHeightAt = (x: number, z: number) => number;
 
 /**
- * 放树要的四样输入：世界种子（决定哪里长树、树长多高）、任意一列的群系（大海里不长树）、
- * 任意一列的地表高度（决定树根落在哪），与出生列（它周围不长树）。
+ * 放树要的五样输入：世界种子（决定哪里长树、树长多高）、任意一列的群系（大海里不长树）、
+ * 任意一列的地表高度（决定树根落在哪）、任意一列的列顶地表方块（只长在草方块与雪草方块上），与出生列（它周围不长树）。
  *
  * 地表高度当参数传进来而不是直接调地形模块：树的规则与地形算法因此互不依赖，
  * 换了地形算法照样复用，两个模块之间也不必绕一个循环 import。成员名与地形对象
@@ -25,9 +25,13 @@ export interface TreePlacement {
   readonly seed: number;
   readonly biomeAt: (x: number, z: number) => Biome;
   readonly surfaceHeightAt: SurfaceHeightAt;
+  readonly surfaceBlockAt: (x: number, z: number) => BlockType;
   /** 出生列（见 CONTEXT.md「出生点」），树根不落在它周围 `OAK_SPAWN_CLEARANCE` 格内。 */
   readonly spawnColumn: ColumnCoord;
 }
+
+/** 树干能长在哪些列顶地表方块上（CONTEXT.md「树」）：沙滩、陡坡的石头、水底的沙子与沙砾都不长。 */
+const TREE_GROUND: ReadonlySet<BlockType> = new Set([BlockType.Grass, BlockType.SnowyGrass]);
 
 /** 一棵橡树。位置与形状全由种子决定，所以这几个数就足以描述它。 */
 export interface OakTree {
@@ -175,7 +179,10 @@ function oakSiteInCell(
   };
 }
 
-/** 某个树格里的树，这一格不长树、树给邻格让了位、落点是大海或者落点的地表不高于海平面则 undefined。 */
+/**
+ * 某个树格里的树。这一格不长树、树给邻格让了位、落点是大海、落点的地表不高于海平面，或者落点的列顶地表方块
+ * 不是草方块与雪草方块，则 undefined。
+ */
 function oakTreeInCell(
   placement: TreePlacement,
   cellX: number,
@@ -193,9 +200,11 @@ function oakTreeInCell(
 
   // 大海里不长树（父 spec #72）：岸边的大海列叠上起伏会露出海面，单看地表高度挡不住。群系查询比地表高度便宜，先问它。
   if (placement.biomeAt(site.x, site.z) === Biome.Ocean) return undefined;
+  // 地表不高于海平面的列不长：低于海平面的上面是水，正好在海平面的是水边那一圈。
   const surface = placement.surfaceHeightAt(site.x, site.z);
-  // 海底、洼地湖底不长树：地表不高于海平面的列上面是水（#76 起改看列顶地表方块）。
   if (surface <= SEA_LEVEL) return undefined;
+  // 只长在草方块与雪草方块上（#76）：沙滩是沙子，陡坡与石头岸是石头，这些列都不长。
+  if (!TREE_GROUND.has(placement.surfaceBlockAt(site.x, site.z))) return undefined;
   return { ...site, rootY: surface + 1 };
 }
 

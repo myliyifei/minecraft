@@ -4,16 +4,19 @@ import { CHUNK_SIZE, SEA_LEVEL, WORLD_MIN_Y } from './constants';
 import { hashCoords } from './noise';
 import { plantOreVeins } from './ore';
 import {
-  climateAt,
   COLD_TEMPERATURE,
+  continentalnessAt,
   densitySurfaceHeight,
   fillDensity,
+  HEIGHT_WINDOW,
   isColdAt,
   MOUNTAIN_RELIEF,
   OCEAN_CONTINENTALNESS,
-  type Climate,
+  reliefAt,
+  temperatureAt,
 } from './terrain-density';
 import { Biome } from './biome';
+import { BEACH_REACH, BEACH_SEAWARD_REACH, coverColumn, highestTopBlock, type SurfaceSamples } from './surface';
 import { plantOakTrees, type SurfaceHeightAt, type TreePlacement } from './tree';
 
 import type { ColumnCoord } from './world';
@@ -33,7 +36,7 @@ export type TerrainGenerator = (cx: number, cz: number) => Chunk;
  *
  * 核心、Worker 与测试都只经这个对象使用地形，换地形算法不必改调用方。成员都是不依赖 `this` 的
  * 函数属性：可以单独取出来传，也可以展开成新对象再换掉生成器（浏览器把生成器换成 Worker 那一侧的区块来源）。
- * 地形对象本身就是一份 `TreePlacement`（种子、群系、地表高度与出生列），放树时直接传它。
+ * 地形对象本身就是一份 `TreePlacement`（种子、群系、地表高度、列顶地表方块与出生列），放树时直接传它。
  */
 export interface Terrain {
   readonly seed: number;
@@ -43,7 +46,7 @@ export interface Terrain {
   readonly biomeAt: (x: number, z: number) => Biome;
   /** 那一列的地表高度（见 CONTEXT.md「地表高度」）。 */
   readonly surfaceHeightAt: SurfaceHeightAt;
-  /** 那一列地表高度那一格的方块（列顶地表方块）。 */
+  /** 那一列地表高度那一格的方块（列顶地表方块），按铺地表的规则（`surface.ts`）给出。 */
   readonly surfaceBlockAt: (x: number, z: number) => BlockType;
   /** 出生列（见 CONTEXT.md「出生点」）。 */
   readonly spawnColumn: ColumnCoord;
@@ -103,17 +106,22 @@ function searchColumn(i: number, j: number): ColumnCoord {
  * 由种子构造地形对象。
  *
  * 地形由三维密度决定（ADR-0021，密度场见 `terrain-density.ts`）：群系按大陆度、起伏、温度三层参数分，
- * 地表高度按那一列的密度求出。列顶地表方块这一版仍总是草方块（#76 按铺地表的规则给出）。
+ * 地表高度按那一列的密度求出，列顶地表方块按铺地表的规则（`surface.ts`）由地表高度、群系与大陆度给出。
  *
  * 出生列构造时按三个查询搜一次（`findSpawnColumn`），存在地形对象上，之后读的都是这一个结果：生成器放树
  * 要避开它，核心与加载画面也读它。
  */
 export function createTerrain(seed: number): Terrain {
-  const queries = {
+  const samples: SurfaceSamples = {
+    heightAt: (x, z) => densitySurfaceHeight(seed, x, z),
+    biomeAt: (x, z) => biomeAt(seed, x, z, continentalnessAt(seed, x, z)),
+    continentalnessAt: (x, z) => continentalnessAt(seed, x, z),
+  };
+  const queries: Omit<Terrain, 'generateChunk' | 'spawnColumn'> = {
     seed,
-    biomeAt: (x: number, z: number): Biome => biomeOf(climateAt(seed, x, z)),
-    surfaceHeightAt: (x: number, z: number) => densitySurfaceHeight(seed, x, z),
-    surfaceBlockAt: () => BlockType.Grass,
+    biomeAt: samples.biomeAt,
+    surfaceHeightAt: samples.heightAt,
+    surfaceBlockAt: (x, z) => highestTopBlock(samples, x, z),
   };
   const placement = { ...queries, spawnColumn: findSpawnColumn(queries) };
   return { ...placement, generateChunk: densityGenerator(placement) };
@@ -122,15 +130,17 @@ export function createTerrain(seed: number): Terrain {
 /**
  * 按群系参数分群系（CONTEXT.md「群系」）：先按大陆度分海与陆，海是大海；陆地上起伏大的是高山，
  * 寒冷处是冰雪，其余是平原。寒冷处的海仍是大海，海面结冰由生成步骤按同一个温度阈值做。
+ *
+ * 大陆度由调用方先求好（区块生成按列缓存它，铺地表找大海也只看它），起伏与温度判到哪一层才求哪一层。
  */
-function biomeOf({ continentalness, relief, temperature }: Climate): Biome {
+function biomeAt(seed: number, x: number, z: number, continentalness: number): Biome {
   if (continentalness < OCEAN_CONTINENTALNESS) return Biome.Ocean;
-  if (relief > MOUNTAIN_RELIEF) return Biome.Mountains;
-  if (temperature < COLD_TEMPERATURE) return Biome.Snowy;
+  if (reliefAt(seed, x, z) > MOUNTAIN_RELIEF) return Biome.Mountains;
+  if (temperatureAt(seed, x, z) < COLD_TEMPERATURE) return Biome.Snowy;
   return Biome.Plains;
 }
 
-/** 草方块之下的泥土层数：每一列在这个闭区间里由种子确定性地取一个。 */
+/** 草方块与雪草方块之下的泥土层数（沙子、沙砾之下同样层数）：每一列在这个闭区间里由种子确定性地取一个。 */
 const DIRT_DEPTH_MIN = 3;
 const DIRT_DEPTH_MAX = 4;
 
@@ -148,27 +158,84 @@ function dirtDepthAt(seed: number, x: number, z: number): number {
   return DIRT_DEPTH_MIN + (hashCoords(seed ^ DIRT_DEPTH_SALT, x, z) % DIRT_DEPTH_SPAN);
 }
 
+/** 区块生成时群系与大陆度缓存的范围：区块四周各 BEACH_REACH 列，铺地表找海岸只看到这么远。 */
+const CLIMATE_MARGIN = Math.max(BEACH_REACH, BEACH_SEAWARD_REACH);
+const CLIMATE_WINDOW = CHUNK_SIZE + 2 * CLIMATE_MARGIN;
+
 /**
- * 三维密度地形的区块生成器。放树按传入的地表高度查询，与地形对象的查询是同一个函数，
- * 查询值与生成结果因此一致。
+ * 区块生成用的样本：区块连同四周一圈的地表高度来自 `fillDensity` 已求出的数，区块连同四周 CLIMATE_MARGIN 列的
+ * 群系与大陆度按列算一次存下；更远的列落回地形对象的查询。每个数都与查询逐列相同，所以生成时铺地表与
+ * 列顶地表方块查询得到同一个结果，只是不重复计算。
+ */
+function chunkSamples(
+  seed: number,
+  originX: number,
+  originZ: number,
+  heights: Int16Array,
+  queries: Omit<Terrain, 'generateChunk'>,
+): SurfaceSamples {
+  const continentalness = new Float64Array(CLIMATE_WINDOW * CLIMATE_WINDOW).fill(Number.NaN);
+  const biomes: Array<Biome | undefined> = new Array<Biome | undefined>(CLIMATE_WINDOW * CLIMATE_WINDOW);
+  const climateIndex = (x: number, z: number): number => {
+    const wx = x - originX + CLIMATE_MARGIN;
+    const wz = z - originZ + CLIMATE_MARGIN;
+    return wx >= 0 && wx < CLIMATE_WINDOW && wz >= 0 && wz < CLIMATE_WINDOW ? wz * CLIMATE_WINDOW + wx : -1;
+  };
+  const continentalnessOf = (x: number, z: number): number => {
+    const i = climateIndex(x, z);
+    if (i < 0) return continentalnessAt(seed, x, z);
+    let c = continentalness[i]!;
+    if (Number.isNaN(c)) {
+      c = continentalnessAt(seed, x, z);
+      continentalness[i] = c;
+    }
+    return c;
+  };
+  return {
+    heightAt: (x, z) => {
+      const wx = x - originX + 1;
+      const wz = z - originZ + 1;
+      const inWindow = wx >= 0 && wx < HEIGHT_WINDOW && wz >= 0 && wz < HEIGHT_WINDOW;
+      // 窗口四个角上的列没有求，落回查询。
+      const corner = (wx === 0 || wx === HEIGHT_WINDOW - 1) && (wz === 0 || wz === HEIGHT_WINDOW - 1);
+      return inWindow && !corner ? heights[wz * HEIGHT_WINDOW + wx]! : queries.surfaceHeightAt(x, z);
+    },
+    biomeAt: (x, z) => {
+      const i = climateIndex(x, z);
+      if (i < 0) return queries.biomeAt(x, z);
+      let biome = biomes[i];
+      if (biome === undefined) {
+        biome = biomeAt(seed, x, z, continentalnessOf(x, z));
+        biomes[i] = biome;
+      }
+      return biome;
+    },
+    continentalnessAt: continentalnessOf,
+  };
+}
+
+/**
+ * 三维密度地形的区块生成器。铺地表与放树读的样本与地形对象的查询逐列相同，查询值因此与生成结果一致。
  *
  * 每一步只读本区块里已写下的方块与纯函数（ADR-0021），同一个种子与区块坐标永远得到同样的区块（ADR-0003）：
  * 1. 最底层基岩；密度为正的格写石头。
  * 2. 海平面那层及以下的空气灌水（内陆洼地因此成湖）。
  * 3. 寒冷处海平面那层的水换成冰（大海与洼地湖都是）。
- * 4. 铺地表：上方是空气或水的每一段石头，顶层换草方块、其下 3 到 4 层泥土（沙滩、雪线、陡坡露石在 #76）。
- * 5. 嵌矿脉，只替换石头。
- * 6. 种树，只长在地表高于海平面的列上。
+ * 4. 铺地表：上方是空气或水的每一段石头按 `surface.ts` 的规则铺顶层与其下几层。
+ * 5. 嵌矿脉，只替换石头；列顶是石头的那一格（陡坡、石头岸）不换，列顶地表方块才与查询一致。
+ * 6. 种树，只长在列顶地表方块是草方块或雪草方块的列上，出生列周围不长。
  */
-function densityGenerator(terrain: TreePlacement): TerrainGenerator {
-  const { seed } = terrain;
+function densityGenerator(queries: Omit<Terrain, 'generateChunk'>): TerrainGenerator {
+  const { seed } = queries;
   return (cx, cz) => {
     const chunk = new Chunk(cx, cz);
     chunk.fillLayer(WORLD_MIN_Y, BlockType.Bedrock);
-    const { tops, solidTops } = fillDensity(seed, chunk);
+    const { tops, solidTops, heights } = fillDensity(seed, chunk);
 
     const originX = cx * CHUNK_SIZE;
     const originZ = cz * CHUNK_SIZE;
+    const samples = chunkSamples(seed, originX, originZ, heights, queries);
+    const highest = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
     for (let lz = 0; lz < CHUNK_SIZE; lz++) {
       for (let lx = 0; lx < CHUNK_SIZE; lx++) {
         const x = originX + lx;
@@ -179,14 +246,41 @@ function densityGenerator(terrain: TreePlacement): TerrainGenerator {
         if (chunk.get(lx, SEA_LEVEL, lz) === BlockType.Water && isColdAt(seed, x, z)) {
           chunk.set(lx, SEA_LEVEL, lz, BlockType.Ice);
         }
-        coverSurface(chunk, lx, lz, tops[column]!, solidTop, dirtDepthAt(seed, x, z));
+        const top = highestTopBlock(samples, x, z);
+        highest[column] = top;
+        coverColumn(chunk, lx, lz, {
+          top: tops[column]!,
+          solidTop,
+          depth: dirtDepthAt(seed, x, z),
+          highest: top,
+          biome: samples.biomeAt(x, z),
+        });
       }
     }
 
     // 土石铺完再嵌矿脉：矿石只替换石头，得先有石头。
     plantOreVeins(seed, chunk);
-    // 再种树：树叶只往空气里长，得先有地面才知道哪里是空气。
-    plantOakTrees(terrain, chunk);
+    // 列顶是石头的那一格可能被矿脉换掉，写回石头：列顶地表方块查询不知道矿脉。
+    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        if (highest[lz * CHUNK_SIZE + lx] !== BlockType.Stone) continue;
+        chunk.set(lx, heights[(lz + 1) * HEIGHT_WINDOW + (lx + 1)]!, lz, BlockType.Stone);
+      }
+    }
+    // 再种树：树叶只往空气里长，得先有地面才知道哪里是空气。区块里的列直接读上面铺好的顶层。
+    const placement: TreePlacement = {
+      seed,
+      spawnColumn: queries.spawnColumn,
+      biomeAt: samples.biomeAt,
+      surfaceHeightAt: samples.heightAt,
+      surfaceBlockAt: (x, z) => {
+        const lx = x - originX;
+        const lz = z - originZ;
+        const inChunk = lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE;
+        return inChunk ? (highest[lz * CHUNK_SIZE + lx] as BlockType) : highestTopBlock(samples, x, z);
+      },
+    };
+    plantOakTrees(placement, chunk);
     return chunk;
   };
 }
@@ -195,34 +289,5 @@ function densityGenerator(terrain: TreePlacement): TerrainGenerator {
 function floodBelowSeaLevel(chunk: Chunk, lx: number, lz: number, solidTop: number): void {
   for (let y = solidTop + 1; y <= SEA_LEVEL; y++) {
     if (chunk.get(lx, y, lz) === BlockType.Air) chunk.set(lx, y, lz, BlockType.Water);
-  }
-}
-
-/**
- * 铺一列的地表：自上而下，上方不是石头（空气、水或冰）的每一段石头，顶层换草方块，其下 dirtDepth 层换泥土，
- * 那一段不够厚时到段底为止。top 之上没有石头；solidTop 及以下整段是石头，不会再有露天的顶面，泥土铺完就停。
- */
-function coverSurface(
-  chunk: Chunk,
-  lx: number,
-  lz: number,
-  top: number,
-  solidTop: number,
-  dirtDepth: number,
-): void {
-  let aboveSolid = false;
-  let dirtLeft = 0;
-  for (let y = top; y > solidTop || dirtLeft > 0; y--) {
-    const solid = chunk.get(lx, y, lz) === BlockType.Stone;
-    if (solid && !aboveSolid) {
-      chunk.set(lx, y, lz, BlockType.Grass);
-      dirtLeft = dirtDepth;
-    } else if (solid && dirtLeft > 0) {
-      chunk.set(lx, y, lz, BlockType.Dirt);
-      dirtLeft--;
-    } else if (!solid) {
-      dirtLeft = 0;
-    }
-    aboveSolid = solid;
   }
 }

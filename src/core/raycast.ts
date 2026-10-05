@@ -1,4 +1,4 @@
-import { isAir, type BlockType, type BlockView } from './block';
+import { sightPassesThrough, type BlockType, type BlockView } from './block';
 import type { Hitbox } from './physics';
 import { isTorch, torchHitbox } from './torch';
 import type { Axis, Vec3 } from './vec3';
@@ -35,7 +35,8 @@ export function blockOutsideFace(hit: BlockHit): Vec3 {
 }
 
 /**
- * 体素射线检测：从 `origin` 沿 `direction` 走最远 `maxDistance` 格，返回第一个非空气方块。
+ * 体素射线检测：从 `origin` 沿 `direction` 走最远 `maxDistance` 格，返回第一个视线不穿过的方块
+ * （`sightPassesThrough`：空气与水穿过，#74）。
  *
  * 走的是 Amanatides–Woo：只在三个轴的格边界上推进，逐格命中。按固定小步长采样的做法
  * 换不来这条保证——斜着看时它会从两个方块的公共角穿过去，准星明明压在方块上却挖不到。
@@ -47,8 +48,8 @@ export function blockOutsideFace(hit: BlockHit): Vec3 {
  * 命中面取盒子被碰到的那一面；碰不到就穿过这一格接着走。挖掘、使用、放置、攻击分派都走这一条。
  *
  * 起点那一格本身不是整格候选：眼睛埋在方块里时没有「进入面」可报，继续往前走又会命中墙后面
- * 的方块，所以直接判为没有目标。玩家进得去的非空气格只有火把（不实心）：眼睛在火把那一格里时
- * 照样与细杆求交，碰不到（含眼睛就在细杆里面）就接着往前走。
+ * 的方块，所以直接判为没有目标。玩家进得去的格子里视线照常往前走：起点是空气或水（眼睛在水里，#74）
+ * 时与别处一样；起点是火把那一格时照样与细杆求交，碰不到（含眼睛就在细杆里面）就接着往前走。
  */
 export function raycastBlocks(
   blocks: BlockView,
@@ -62,7 +63,7 @@ export function raycastBlocks(
     z: Math.floor(origin.z),
   };
   const start = blocks.getBlock(at.x, at.y, at.z);
-  if (!isAir(start) && !isTorch(start)) return undefined;
+  if (!sightPassesThrough(start) && !isTorch(start)) return undefined;
 
   /** 沿这个轴每次跨一格，坐标加多少。 */
   const step: Record<Axis, number> = { x: 0, y: 0, z: 0 };
@@ -96,7 +97,7 @@ export function raycastBlocks(
     at[axis] += step[axis];
     toBoundary[axis] += perBlock[axis];
     const block = blocks.getBlock(at.x, at.y, at.z);
-    if (isAir(block)) continue;
+    if (sightPassesThrough(block)) continue;
     if (isTorch(block)) {
       const hit = torchCellHit(block, at.x, at.y, at.z, origin, direction, maxDistance);
       if (hit) return hit;

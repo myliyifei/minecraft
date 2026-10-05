@@ -5,6 +5,7 @@ import { GameCore } from '../../src/core/game';
 import { IDLE_INTENT } from '../../src/core/player';
 import { chunkKey, chunksAround, type ChunkCoord } from '../../src/core/world';
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes } from '../../src/render/mesh-plan';
+import { flatTerrain } from '../helpers/flat-terrain';
 
 /** 已加载区块由一组 "cx,cz" 决定的世界。 */
 function worldWith(loaded: Iterable<ChunkCoord>) {
@@ -274,7 +275,8 @@ describe('放挖火把之后几帧内重建完', () => {
    * 每帧重建了几个区块，直到没有推迟的为止。
    */
   function placeAndBreak(x: number, z: number): { place: number[]; dig: number[] } {
-    const core = new GameCore();
+    // 默认视距那一圈用平地：真实地形铺 289 个区块太慢（#75），起伏与这条无关
+    const core = new GameCore({ terrain: flatTerrain });
     const meshed = new Map<number, ChunkCoord>();
     const request = { world: core, center: core.playerChunk, radius: core.viewRadius };
     const initial = planChunkMeshes({ ...request, meshed: [], budget: Infinity });
@@ -375,10 +377,11 @@ describe('每帧的预算追不追得上移动', () => {
    * 「记进已建集合」，因此不需要 three.js，也不受机器快慢影响。
    */
   function backlogWhileWalking(seconds: number): number[] {
-    const core = new GameCore();
+    // 默认视距那一圈用平地：真实地形铺 289 个区块太慢，走进海里或撞上山也会让积压测不准（#75）
+    const core = new GameCore({ terrain: flatTerrain });
     const meshed = new Map<number, ChunkCoord>();
     const backlog: number[] = [];
-    // 边走边跳：真实地形上相邻两列可能差一格，光走会被那一格挡住。
+    // 边走边跳：沿用改平地之前的走法。
     core.setMoveIntent({ ...IDLE_INTENT, forward: true, jump: true });
 
     for (let frame = 0; frame < seconds * 60; frame++) {

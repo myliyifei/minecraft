@@ -165,13 +165,17 @@ describe('地表高度与列顶地表方块的查询与生成结果一致', () =
   });
 });
 
-describe('本 issue 的平原实现（#75、#76、#84 改）', () => {
-  it('群系总是平原（#75 改为四种群系）', () => {
+describe('群系查询', () => {
+  it('只给出四种群系之一（四种都出现、各自的尺度与高度在 tests/core/terrain-biomes.test.ts）', () => {
+    const biomes = new Set<string>(Object.values(Biome));
     for (const seed of SEEDS) {
       const terrain = createTerrain(seed);
-      for (const [x, z] of sampleColumns()) expect(terrain.biomeAt(x, z)).toBe(Biome.Plains);
+      for (const [x, z] of sampleColumns()) expect(biomes.has(terrain.biomeAt(x, z))).toBe(true);
     }
   });
+});
+
+describe('列顶地表方块与出生列的平原实现（#76、#84 改）', () => {
 
   it('列顶地表方块总是草方块（#76 改为按铺地表的规则）', () => {
     for (const seed of SEEDS) {

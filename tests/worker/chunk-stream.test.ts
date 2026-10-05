@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { BlockType } from '../../src/core/block';
 import { CHUNK_BLOCK_COUNT } from '../../src/core/chunk';
 import { createTerrain } from '../../src/core/terrain';
 import { chunksAround, ORIGIN_CHUNK } from '../../src/core/world';
@@ -10,6 +9,7 @@ import {
   type ChunkStream,
 } from '../../src/worker/chunk-stream';
 import type { ChunkRequest, ChunkWorkerPort } from '../../src/worker/protocol';
+import { ABOVE_SURFACE } from '../helpers/above-surface';
 
 /**
  * 假的 Worker 端口：请求先存下来，由测试决定什么时候答、答哪一个。
@@ -86,9 +86,11 @@ describe('由 Worker 生成的区块来源', () => {
 
     const chunk = stream.source(1, 0)!;
     const x = 16;
-    const surface = createTerrain(SEED).surfaceHeightAt(x, 0);
-    expect(chunk.get(0, surface, 0)).toBe(BlockType.Grass);
-    expect(chunk.get(0, surface + 1, 0)).toBe(BlockType.Air);
+    const terrain = createTerrain(SEED);
+    const surface = terrain.surfaceHeightAt(x, 0);
+    expect(chunk.get(0, surface, 0)).toBe(terrain.surfaceBlockAt(x, 0));
+    // 地表之上不是地形方块：空气，低于海平面时是水或冰（#75）
+    expect(ABOVE_SURFACE.has(chunk.get(0, surface + 1, 0))).toBe(true);
   });
 
   it('区块只交出去一次：核心接管之后来源不再持有它', () => {

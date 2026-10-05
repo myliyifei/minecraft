@@ -188,7 +188,7 @@ describe('GameCore 在 Node 中的方块查询', () => {
     [31, -32],
   ];
 
-  it('地表以上只有空气与树，树冠之上什么都没有', () => {
+  it('地表以上只有空气、水、冰与树，树冠之上什么都没有', () => {
     const core = sampleCore();
     for (const [x, z] of columns) {
       const surface = surfaceAt(x, z);
@@ -247,12 +247,14 @@ describe('GameCore 在 Node 中的方块查询', () => {
 });
 
 describe('GameCore 的地形形态', () => {
-  it('已加载范围内每一列的地表都高于海平面（只对平原成立，#75 改）', () => {
+  it('已加载范围内每一列最高的方块不低于海平面、也不低于地表高度：低于海平面的地方灌了水', () => {
+    // highestBlockY 把水与冰算作非空气，所以海里与洼地湖里最高的是海平面那一格
     const core = sampleCore();
     const tooLow: string[] = [];
     for (let x = LOADED_MIN; x <= LOADED_MAX; x++) {
       for (let z = LOADED_MIN; z <= LOADED_MAX; z++) {
-        if (core.highestBlockY(x, z) <= SEA_LEVEL) tooLow.push(`(${x}, ${z})`);
+        const top = core.highestBlockY(x, z);
+        if (top < SEA_LEVEL || top < surfaceAt(x, z)) tooLow.push(`(${x}, ${z}) → ${top}`);
       }
     }
     expect(tooLow).toEqual([]);
@@ -2736,8 +2738,9 @@ describe('GameCore 的木石两档工具', () => {
 });
 
 describe('GameCore 的初始区块加载', () => {
+  // 默认视距要铺 289 个区块，用真实地形太慢（#75），断言的只是区块数，换平地
   it('构造后已加载区块数大于 0', () => {
-    expect(new GameCore().loadedChunkCount).toBeGreaterThan(0);
+    expect(new GameCore({ terrain: flatTerrain }).loadedChunkCount).toBeGreaterThan(0);
   });
 
   it('视距半径决定加载的区块数：半径 r 加载 (2r+1)² 个', () => {
@@ -2747,7 +2750,7 @@ describe('GameCore 的初始区块加载', () => {
   });
 
   it('不指定视距时用默认视距', () => {
-    const core = new GameCore();
+    const core = new GameCore({ terrain: flatTerrain });
     expect(core.viewRadius).toBe(DEFAULT_VIEW_RADIUS);
     expect(core.loadedChunkCount).toBe((2 * DEFAULT_VIEW_RADIUS + 1) ** 2);
   });

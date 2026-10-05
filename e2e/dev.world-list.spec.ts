@@ -273,12 +273,14 @@ test('版本不兼容的世界：列表标「版本不兼容」，进入禁用�
   const metas: WorldMeta[] = [
     base,
     { ...base, id: 'old-terrain', name: '旧地形', formatVersion: SNAPSHOT_FORMAT_VERSION, terrainVersion: TERRAIN_VERSION + 1, lastPlayedAt: 1 },
+    // 第六切片建的世界：地形版本写死为 1（#75 把地形版本改为 2）
+    { ...base, id: 'terrain-v1', name: '第六切片的世界', formatVersion: SNAPSHOT_FORMAT_VERSION, terrainVersion: 1, createdAt: 0, lastPlayedAt: 0 },
   ];
   await worldsTable(page, metas);
   await page.reload();
   await waitForWorldList(page);
 
-  await expect(entries(page)).toHaveCount(2);
+  await expect(entries(page)).toHaveCount(metas.length);
   for (const { name } of metas) {
     const entry = entryNamed(page, name);
     await expect(entry.locator('.world-list__incompatible')).toHaveText(STRINGS.incompatible);
@@ -290,7 +292,7 @@ test('版本不兼容的世界：列表标「版本不兼容」，进入禁用�
   await expect(page.locator('#game')).toHaveCount(0);
 
   await deleteNamed(page, '旧格式');
-  await expect(page.locator('.world-list__name')).toHaveText(['旧地形']);
+  await expect(page.locator('.world-list__name')).toHaveText(['旧地形', '第六切片的世界']);
   expect(errors).toEqual([]);
 });
 

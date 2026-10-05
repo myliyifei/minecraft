@@ -325,6 +325,24 @@ describe('版本不兼容', () => {
     expect(chunkReads()).toBe(0);
     expect((await newer.listWorlds()).map(({ compatible }) => compatible)).toEqual([false]);
   });
+
+  it('地形算法版本是 2（#75：三维密度地形）', () => {
+    expect(TERRAIN_VERSION).toBe(2);
+  });
+
+  it('地形版本写死为 1 的世界（第六切片建的）读档返回不兼容、不读区块，列表里标为不兼容', async () => {
+    const { open } = fixture();
+    await (await open({ versions: { format: SNAPSHOT_FORMAT_VERSION, terrain: 1 } })).saveWorld('a', '旧地形', editedGame().snapshot());
+
+    const current = await open();
+    const chunkReads = chunkStoreCalls('getAll');
+    const result = await current.loadWorld('a');
+    expect(result.status).toBe('incompatible');
+    expect(chunkReads()).toBe(0);
+    expect(await current.listWorlds()).toEqual([
+      { meta: expect.objectContaining({ id: 'a', terrainVersion: 1 }), compatible: false },
+    ]);
+  });
 });
 
 describe('删除世界', () => {

@@ -13,10 +13,13 @@ export type TerrainGenerator = (cx: number, cz: number) => Chunk;
 
 /**
  * 群系（见 CONTEXT.md「群系」）。值是字符串，不进存档：存档里只有方块，群系随时由种子与列坐标查得。
- * 现在只有平原，#75 补齐高山、冰雪、大海。
+ * 四种群系的名字已经定下，`biomeAt` 现在仍总是给出平原，#75 按群系参数给出另外三种。
  */
 export const Biome = {
   Plains: 'plains',
+  Mountains: 'mountains',
+  Snowy: 'snowy',
+  Ocean: 'ocean',
 } as const;
 export type Biome = (typeof Biome)[keyof typeof Biome];
 

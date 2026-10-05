@@ -4,7 +4,6 @@ import {
   CHUNK_SIZE,
   DEFAULT_SEED,
   DEFAULT_VIEW_RADIUS,
-  SEA_LEVEL,
   TICK_RATE,
 } from '../src/core/constants';
 import { CRAFTING_TABLE_GRID, INVENTORY_CRAFTING_GRID } from '../src/core/crafting-grid';
@@ -429,7 +428,7 @@ test('页面里长着由种子生成的橡树，树干与树冠都在', async ({
   ]);
 });
 
-test('页面打开后是由默认种子生成的起伏平原', async ({ page }) => {
+test('页面打开后是由默认种子生成的地形', async ({ page }) => {
   const seed = await page.evaluate(() => window.__VOXEL__!.core.seed);
   expect(seed).toBe(DEFAULT_SEED);
 
@@ -454,11 +453,8 @@ test('页面打开后是由默认种子生成的起伏平原', async ({ page }) 
   expect(mismatched).toEqual([]);
 
   const heights = columns.map(({ surface }) => surface);
-  // 出现多种高度才算「起伏」，而不是一片硬编码平地
+  // 出现多种高度才算「起伏」，而不是一片硬编码平地。高度范围与群系的断言在 tests/core/terrain-biomes.test.ts（#75）
   expect(new Set(heights).size).toBeGreaterThan(1);
-  // 下面两条只对平原成立：#75 换成三维密度与四种群系后，出生点一带可能有海、有山
-  expect(Math.min(...heights)).toBeGreaterThan(SEA_LEVEL);
-  expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(20);
 });
 
 test('同一种子每次进入地形相同', async ({ page }) => {
@@ -525,8 +521,6 @@ test('走远之后前方区块生成、身后区块与它的网格一起卸载',
 
   // 走出去了好几个区块，脚下始终是地面而不是虚空
   expect(before.z - after.z).toBeGreaterThan(4 * CHUNK_SIZE);
-  // 高于海平面只对平原成立，#75 改
-  expect(after.y).toBeGreaterThan(SEA_LEVEL);
   expect(after.y).toBeGreaterThanOrEqual(after.surface);
   // 前方的区块跟着生成，身后的连网格一起卸载
   expect(after.aheadLoaded).toBe(true);

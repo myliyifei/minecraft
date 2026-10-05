@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import type { Chunk } from '../../src/core/chunk';
-import { CHUNK_SIZE, SEA_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
+import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { createTerrain } from '../../src/core/terrain';
 import { ABOVE_SURFACE } from '../helpers/above-surface';
 import { STONE_LAYER } from '../helpers/stone-layer';
@@ -12,12 +12,6 @@ const OTHER_SEED = 777;
 
 const terrain = createTerrain(SEED);
 const surfaceAt = terrain.surfaceHeightAt;
-
-/**
- * 平原地表的上界：基准高度 69 加起伏上界 5。只对现在的平原实现成立，#75 换成三维密度与四种群系后改。
- * 写死而不是从地形模块导入：测试只经地形对象（#73）。
- */
-const SURFACE_UPPER_BOUND = 74;
 
 /** 草方块之下的泥土层数（CONTEXT.md「草方块，其下 3 到 4 层泥土」）。 */
 const DIRT_LAYERS_MIN = 3;
@@ -44,37 +38,13 @@ function firstDifference(a: Chunk, b: Chunk): string | null {
   return null;
 }
 
-// 确定性与整数两条由 tests/core/terrain-object.test.ts 覆盖。
-describe('地表高度查询（平原实现，#75 改）', () => {
-  it('大范围采样都高于海平面，且不超过平原的起伏上界（只对平原成立，#75 改）', () => {
-    const outOfRange: string[] = [];
-    for (let x = -300; x <= 300; x += 3) {
-      for (let z = -300; z <= 300; z += 3) {
-        const h = surfaceAt(x, z);
-        if (h <= SEA_LEVEL || h > SURFACE_UPPER_BOUND) {
-          outOfRange.push(`(${x}, ${z}) → ${h}`);
-        }
-      }
-    }
-    expect(outOfRange).toEqual([]);
-  });
-
+// 确定性与整数两条由 tests/core/terrain-object.test.ts 覆盖；高度范围、群系交界处的高差在
+// tests/core/terrain-biomes.test.ts（#75）。
+describe('地表高度查询', () => {
   it('地形有起伏：一条采样线上出现多种高度', () => {
     const heights = new Set<number>();
     for (let x = -200; x <= 200; x++) heights.add(surfaceAt(x, 7));
     expect(heights.size).toBeGreaterThan(3);
-  });
-
-  it('起伏平缓：相邻列的高度差不超过 1（只对平原成立，#75 改）', () => {
-    const steep: string[] = [];
-    for (let x = -200; x < 200; x++) {
-      for (const z of [-64, 0, 5, 128]) {
-        const dx = Math.abs(surfaceAt(x + 1, z) - surfaceAt(x, z));
-        const dz = Math.abs(surfaceAt(x, z + 1) - surfaceAt(x, z));
-        if (dx > 1 || dz > 1) steep.push(`(${x}, ${z}) → dx ${dx}, dz ${dz}`);
-      }
-    }
-    expect(steep).toEqual([]);
   });
 
   it('换种子得到不同的高度剖面', () => {
@@ -203,7 +173,7 @@ describe('地形对象生成的区块', () => {
     expect(strays).toEqual([]);
   });
 
-  it('地表以上只有空气与树', () => {
+  it('地表以上只有空气、水、冰与树', () => {
     // 树是长在地表之上的，土石不是——「地表高度」说的是地面，见 CONTEXT.md。
     const chunk = generate(-1, -1);
     const strays: string[] = [];

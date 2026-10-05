@@ -88,10 +88,10 @@ function dumpVein(world: World, vein: OreVein): string[] {
 }
 
 /**
- * 整条都在石层深处的矿脉：平原地表不低于 64、泥土最多 4 层，y 不超过 40 的格子在真实地形里
+ * 整条都在石层深处的矿脉：海底最低约 y 40（#75）、泥土最多 4 层，y 不超过 30 的格子在真实地形里
  * 必然是石头。这样的矿脉每一格都该写成了矿石，逐格断言才有意义。
  */
-const DEEP_Y = 40;
+const DEEP_Y = 30;
 function isDeep(vein: OreVein): boolean {
   return vein.cells.every((cell) => cell.y <= DEEP_Y);
 }

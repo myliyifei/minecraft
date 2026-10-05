@@ -235,9 +235,9 @@ function pondInCell(placement: PondPlacement, cellX: number, cellZ: number): Pon
 }
 
 /**
- * 盆地边缘挡不挡得住水：每一列水塘列的四邻里不是水塘列的那些，从这一列塘底之上一格到水面都要是地形方块。
- * 地表高度不低于水面只说明最高的地形方块够高，悬垂下方可能是空气，所以逐列问 `isSolidSpan`；
- * 一列边缘挨着几列水塘列时按其中最低的塘底问一次。没有 `isSolidSpan` 时按高度场处理，总是挡得住。
+ * 盆地边缘是否封闭：每一列水塘列的四邻里不是水塘列的那些，从这一列塘底之上一格到水面都要是地形方块。
+ * 地表高度不低于水面只说明最高的地形方块不低于水面，悬垂下方可能是空气，所以逐列问 `isSolidSpan`；
+ * 一列边缘挨着几列水塘列时按其中最低的塘底问一次。没有 `isSolidSpan` 时按高度场处理，总是封闭。
  */
 function rimHoldsWater(
   placement: PondPlacement,

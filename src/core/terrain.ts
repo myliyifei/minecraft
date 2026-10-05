@@ -54,7 +54,7 @@ export interface Terrain {
   /** 出生列（见 CONTEXT.md「出生点」）。 */
   readonly spawnColumn: ColumnCoord;
   /**
-   * 那一列 fromY 到 toY（含两端）是不是全是地形方块（挖水塘之前）。水塘判断盆地边缘挡不挡得住水要用（`pond.ts`）；
+   * 那一列 fromY 到 toY（含两端）是不是全是地形方块（挖水塘之前）。水塘判断盆地边缘是否封闭要用（`pond.ts`）；
    * 没有悬垂的地形（平地测试用的那几份）可以不给，按地表高度及以下都是地形方块处理。
    */
   readonly isSolidSpan?: (x: number, z: number, fromY: number, toY: number) => boolean;

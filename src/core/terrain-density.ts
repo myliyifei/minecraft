@@ -349,7 +349,7 @@ export function densitySurfaceHeight(seed: number, x: number, z: number): number
 /**
  * 一列从 fromY 到 toY（含两端）是不是全是地形方块（密度为正）。只求这一列四角的格点，不生成区块。
  *
- * 水塘判断盆地边缘要用：地表高度只说明最高的地形方块在哪，悬垂下方可能是空气，水贴着它就会露在空气里。
+ * 水塘判断盆地边缘要用：地表高度只说明最高的地形方块在哪，悬垂下方可能是空气，相邻的水就会直接挨着空气。
  * 与 `densitySurfaceHeight` 一样走 `scanColumn`，所以与区块生成里那一列的实心与空气逐格相同。
  */
 export function densitySolidSpan(seed: number, x: number, z: number, fromY: number, toY: number): boolean {

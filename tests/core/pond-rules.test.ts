@@ -146,7 +146,7 @@ describe('平地上的水塘', () => {
     let tried = 0;
     for (const pond of ponds) {
       const keys = new Set(pond.columns.map(key));
-      // 边缘一列挨着两列水塘列（都不是中心列）：把其中一列挖低，边缘这一列要实心的那一段因此往下伸
+      // 边缘一列挨着两列水塘列（都不是中心列）：把其中一列挖低，边缘这一列要实心的那一段因此向下延长
       let pick: { rim: ColumnCoord; pit: ColumnCoord } | undefined;
       for (const c of pond.columns) {
         for (const [dx, dz] of NEIGHBORS) {

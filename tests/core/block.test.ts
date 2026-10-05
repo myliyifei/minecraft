@@ -27,6 +27,7 @@ import {
   ToolMaterial,
   type MiningTool,
 } from '../../src/core/item';
+import { GRAVEL, GRAVEL_ITEM, SAND, SAND_ITEM } from '../helpers/surface-rules';
 
 /**
  * 木、石、铁三档：材质档加它的挖掘速度倍率，倍率来自 #15 的物品属性表，写死字面值。
@@ -491,6 +492,9 @@ describe('放置表', () => {
     ['白桦木板放下去是白桦木板方块', ItemType.BirchPlanks, BlockType.BirchPlanks],
     ['云杉原木放下去是云杉原木方块', ItemType.SpruceLog, BlockType.SpruceLog],
     ['云杉木板放下去是云杉木板方块', ItemType.SprucePlanks, BlockType.SprucePlanks],
+    // 沙子与沙砾放下去是对应的方块（#76）；雪草方块与草方块一样没有物品
+    ['沙子放下去是沙子方块（#76）', SAND_ITEM, SAND],
+    ['沙砾放下去是沙砾方块', GRAVEL_ITEM, GRAVEL],
   ];
 
   it('上面这张表覆盖了物品表的每一行：加一种物品就得在这里补一条', () => {

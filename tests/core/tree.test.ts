@@ -24,6 +24,7 @@ import {
 } from '../../src/core/world';
 import { flatTerrain } from '../helpers/flat-terrain';
 import { isTerrainBlock } from '../helpers/terrain-survey';
+import { SNOWY_GRASS } from '../helpers/surface-rules';
 
 // 两个与 DEFAULT_SEED 无关的种子：树的性质不该只在默认种子下成立。
 const SEED = 314_159;
@@ -298,11 +299,11 @@ describe('生成出来的橡树', () => {
     expect(trees.length).toBeGreaterThan(10);
   });
 
-  it('树干正下方是草方块或泥土', () => {
+  it('树干正下方是草方块、雪草方块或泥土（#76 起冰雪的树长在雪草方块上）', () => {
     const wrong: string[] = [];
     for (const tree of trees) {
       const below = world.getBlock(tree.x, tree.rootY - 1, tree.z);
-      if (below !== BlockType.Grass && below !== BlockType.Dirt) {
+      if (below !== BlockType.Grass && below !== SNOWY_GRASS && below !== BlockType.Dirt) {
         wrong.push(`(${tree.x}, ${tree.z}) 下方是 ${below}`);
       }
     }

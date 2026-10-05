@@ -206,7 +206,7 @@ describe('GameCore 在 Node 中的方块查询', () => {
     }
   });
 
-  it('草方块下方是 3–4 层泥土，再下方是石头（平原的铺法，#76 加上别的群系的铺法）', () => {
+  it('草方块下方是 3–4 层泥土，再下方是石头（这几列都是平原；别的群系的铺法在 terrain-surface.test.ts，#76）', () => {
     const core = sampleCore();
     for (const [x, z] of columns) {
       const surface = surfaceAt(x, z);

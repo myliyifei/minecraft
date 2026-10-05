@@ -9,8 +9,8 @@ import { NON_TERRAIN } from '../helpers/terrain-survey';
 /**
  * 地形对象（#73）：由种子构造，含区块生成器、三个纯函数查询（群系、地表高度、列顶地表方块）与出生列。
  *
- * 这里断言的是对外的约定：查询只依赖种子与列坐标，与生成结果一致。列顶地表方块与出生列仍是最简单的实现，
- * 只对这一版成立的断言都注明了哪一个 issue 要改。三维密度地形本身的断言在 terrain-biomes 与 terrain-generation。
+ * 这里断言的是对外的约定：查询只依赖种子与列坐标，与生成结果一致；真实地形上的出生列。三维密度地形本身的断言在
+ * terrain-biomes 与 terrain-generation，铺地表的规则在 terrain-surface。
  */
 
 // 与 DEFAULT_SEED 无关的几个种子：地形对象的性质不该只在默认种子下成立。
@@ -135,7 +135,7 @@ describe('地形对象的三个查询是纯函数', () => {
 });
 
 describe('地表高度与列顶地表方块的查询与生成结果一致', () => {
-  it('查询值就是那一列草方块的 y，草方块之上只有空气与树', () => {
+  it('查询值就是那一列最高的地形方块的 y，其上只有空气、水、冰与树', () => {
     for (const seed of SEEDS) {
       const terrain = createTerrain(seed);
       for (const [cx, cz] of CHUNKS) {
@@ -145,7 +145,6 @@ describe('地表高度与列顶地表方块的查询与生成结果一致', () =
           const z = cz * CHUNK_SIZE + lz;
           const surface = terrain.surfaceHeightAt(x, z);
           const where = `种子 ${seed}，列 (${x}, ${z})`;
-          expect(chunk.get(lx, surface, lz), where).toBe(BlockType.Grass);
           expect(highestTerrainY(chunk, lx, lz), where).toBe(surface);
         }
       }
@@ -179,16 +178,7 @@ describe('群系查询', () => {
   });
 });
 
-describe('列顶地表方块的最简实现（#76 改）', () => {
-
-  it('列顶地表方块总是草方块（#76 改为按铺地表的规则）', () => {
-    for (const seed of SEEDS) {
-      const terrain = createTerrain(seed);
-      for (const [x, z] of sampleColumns()) expect(terrain.surfaceBlockAt(x, z)).toBe(BlockType.Grass);
-    }
-  });
-});
-
+// 列顶地表方块按铺地表的规则给出，规则与「查询等于生成结果」的大范围断言在 tests/core/terrain-surface.test.ts（#76）。
 /**
  * 真实地形的出生列（#84）。搜索规则本身用假查询断言，在 tests/core/spawn-column.test.ts；这里断言真实地形上的结果。
  * 真实地形的原点总是平原，这几条在出生列仍是原点的实现上也成立，它们保证换上螺旋搜索之后这些性质不丢失。

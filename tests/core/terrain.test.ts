@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import type { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
-import { createTerrain } from '../../src/core/terrain';
+import { Biome, createTerrain } from '../../src/core/terrain';
 import { NON_TERRAIN } from '../helpers/terrain-survey';
 import { STONE_LAYER } from '../helpers/stone-layer';
+import { expectSurfaceBlocksDefined, SNOWY_GRASS } from '../helpers/surface-rules';
 
 // 两个与 DEFAULT_SEED 无关的种子：地形的性质不该只在默认种子下成立。
 const SEED = 314_159;
@@ -79,12 +80,18 @@ describe('地形对象生成的区块', () => {
     expect(firstDifference(generate(0, 0), generate(1, 0))).not.toBeNull();
   });
 
-  it('每一列自上而下是 草 → 泥土（3–4 层）→ 石层（平原的铺法，#76 加上别的群系的铺法）', () => {
+  it('每一列自上而下是 草方块（冰雪是雪草方块）→ 泥土（3–4 层）→ 石层（这一块横跨平原与冰雪，#76）', () => {
+    expectSurfaceBlocksDefined();
     const chunk = generate(-2, 4);
+    const tops = new Set<BlockType>();
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-        const surface = surfaceAt(-2 * CHUNK_SIZE + lx, 4 * CHUNK_SIZE + lz);
-        expect(chunk.get(lx, surface, lz)).toBe(BlockType.Grass);
+        const x = -2 * CHUNK_SIZE + lx;
+        const z = 4 * CHUNK_SIZE + lz;
+        const surface = surfaceAt(x, z);
+        const expected = terrain.biomeAt(x, z) === Biome.Snowy ? SNOWY_GRASS : BlockType.Grass;
+        expect(chunk.get(lx, surface, lz), `(${x}, ${z})`).toBe(expected);
+        tops.add(expected);
 
         const dirt = dirtDepthBelow(chunk, lx, surface, lz);
         expect(dirt).toBeGreaterThanOrEqual(DIRT_LAYERS_MIN);
@@ -93,6 +100,8 @@ describe('地形对象生成的区块', () => {
         expect(STONE_LAYER).toContain(chunk.get(lx, surface - dirt - 1, lz));
       }
     }
+    // 这一块确实横跨两种群系：两种顶层都出现
+    expect([...tops].sort()).toEqual([BlockType.Grass, SNOWY_GRASS].sort());
   });
 
   it('泥土层数在 3 与 4 之间变化，不是一个定值', () => {

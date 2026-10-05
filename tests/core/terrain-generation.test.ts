@@ -52,10 +52,6 @@ const INLAND_WALK = 48;
 /** issue 给的地表高度上界。 */
 const MAX_SURFACE_Y = 210;
 
-/** 草方块之下的泥土层数（本 issue 的铺法沿用平原的 3 到 4 层）。 */
-const DIRT_LAYERS_MIN = 3;
-const DIRT_LAYERS_MAX = 4;
-
 const ORE_BLOCKS: ReadonlySet<BlockType> = new Set(ORE_KINDS.map((kind) => kind.block));
 const LOGS: ReadonlySet<BlockType> = new Set([BlockType.OakLog, BlockType.BirchLog, BlockType.SpruceLog]);
 
@@ -227,14 +223,14 @@ describe('地表高度查询与生成结果一致', () => {
     expect(wrong).toEqual([]);
   });
 
-  it.each(SURVEY_SEEDS)('种子 %i：列顶地表方块查询等于地表高度那一格，本 issue 仍总是草方块（#76 改）', (seed) => {
+  it.each(SURVEY_SEEDS)('种子 %i：列顶地表方块查询等于地表高度那一格（按铺地表的规则，见 terrain-surface.test.ts）', (seed) => {
     expectAllBiomesFound(seed);
     const terrain = createTerrain(seed);
     const wrong: string[] = [];
     eachColumn(seed, (chunk, lx, lz, { x, z }) => {
       const queried = terrain.surfaceBlockAt(x, z);
       const generated = chunk.get(lx, terrain.surfaceHeightAt(x, z), lz);
-      if (queried !== BlockType.Grass || generated !== queried) wrong.push(`(${x}, ${z})：查询 ${queried}，生成 ${generated}`);
+      if (generated !== queried) wrong.push(`(${x}, ${z})：查询 ${queried}，生成 ${generated}`);
     });
     expect(wrong).toEqual([]);
   });
@@ -447,31 +443,7 @@ describe('悬垂', () => {
   });
 });
 
-describe('地表铺法（本 issue 最简单的一种，#76 改）', () => {
-  it.each(SURVEY_SEEDS)('种子 %i：上方是空气、水或冰的地形方块都是草方块，其下 3 到 4 层泥土（那一段不够厚时到段底为止）', (seed) => {
-    expectAllBiomesFound(seed);
-    const exposedAbove: ReadonlySet<BlockType> = new Set([BlockType.Air, BlockType.Water, BlockType.Ice]);
-    const wrong: string[] = [];
-    eachColumn(seed, (chunk, lx, lz, { x, z }) => {
-      for (let y = WORLD_MIN_Y + 1; y < WORLD_MAX_Y; y++) {
-        const block = chunk.get(lx, y, lz);
-        if (!isTerrainBlock(block) || !exposedAbove.has(chunk.get(lx, y + 1, lz))) continue;
-        if (block !== BlockType.Grass) {
-          wrong.push(`(${x}, ${y}, ${z}) 露天的顶面是 ${block}`);
-          continue;
-        }
-        let dirt = 0;
-        while (chunk.get(lx, y - dirt - 1, lz) === BlockType.Dirt) dirt++;
-        const next = chunk.get(lx, y - dirt - 1, lz);
-        const segmentEnded = !isTerrainBlock(next);
-        if (dirt > DIRT_LAYERS_MAX || (dirt < DIRT_LAYERS_MIN && !segmentEnded)) {
-          wrong.push(`(${x}, ${y}, ${z}) 草方块下 ${dirt} 层泥土，再下面是 ${next}`);
-        }
-      }
-    });
-    expect(wrong.slice(0, 20)).toEqual([]);
-  });
-});
+// 地表铺法（每一段露天的顶面按群系与坡度铺、沙滩、雪线、水下的沙子与沙砾）在 tests/core/terrain-surface.test.ts（#76）。
 
 describe('树', () => {
   it('大海群系的列即使地表高于海平面也没有原木', () => {

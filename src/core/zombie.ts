@@ -621,9 +621,17 @@ class Zombie implements ZombieView {
     return blocked;
   }
 
-  /** 碰撞箱抬高 1 格之后，沿 axis 走 delta 还会不会被挡：不会就说明挡住的只有 1 格高。 */
+  /**
+   * 两个轴都走完之后，沿 axis 走 delta 仍被挡、碰撞箱抬高 1 格之后不再被挡：挡住的只有 1 格高。
+   *
+   * 先确认仍被挡：blockedX 按 Z 走之前的碰撞箱判断，斜着沿两格高的墙滑过墙的尽头时，Z 走完之后碰撞箱已越过墙的尽头，
+   * 抬高 1 格后沿 X 不被挡，不先确认就会误跳一次。与玩家的自动跳跃同一个写法（`Player.stepsUp`）。
+   */
   private canStepUp(blocks: BlockView, axis: 'x' | 'z', delta: number): boolean {
-    return clearsAfterRising(blocks, { x: this.x, y: this.y, z: this.z }, ZOMBIE_WIDTH, ZOMBIE_HEIGHT, 1, axis, delta);
+    return (
+      isBlockedAlong(blocks, this.hitbox, axis, delta) &&
+      clearsAfterRising(blocks, { x: this.x, y: this.y, z: this.z }, ZOMBIE_WIDTH, ZOMBIE_HEIGHT, 1, axis, delta)
+    );
   }
 }
 

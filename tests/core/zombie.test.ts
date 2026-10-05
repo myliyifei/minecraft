@@ -261,6 +261,29 @@ describe('僵尸在 32 格内朝玩家直线走', () => {
     expect(zombie.position.z).toBeCloseTo(0.5, 9);
   });
 
+  it('斜着走、沿 2 格高的墙滑过墙的尽头：不跳', () => {
+    const { world, zombies, advance } = zombiesOnFlatGround();
+    // 墙在 x = 10、z ∈ [2, 5]、2 格高。僵尸从 (20.5, 10.5) 斜着朝原点的玩家走：X 被墙挡住、沿墙往 −Z 滑，
+    // 滑过 z = 2 那一端之后 X 不再被挡。滑过尽头那一 tick，按 Z 走之前的碰撞箱 X 被挡，Z 走完之后碰撞箱已越过
+    // 墙的尽头，抬高 1 格不被挡；只看后者的实现在这里误跳一次。
+    for (let z = 2; z <= 5; z++) {
+      for (let y = FLAT_STAND_Y; y < FLAT_STAND_Y + 2; y++) world.setBlock(10, y, z, BlockType.Stone);
+    }
+    zombies.spawnAt({ x: 20.5, y: FLAT_STAND_Y, z: 10.5 });
+
+    let highest = -Infinity;
+    let slid = false;
+    // 沿墙滑的那一段加上绕过尽头之后的直线不到 40 格
+    advance(Math.ceil(40 / ZOMBIE_STEP), PLAYER, (zombie) => {
+      highest = Math.max(highest, zombie.position.y);
+      if (zombie.position.z > 2 && zombie.position.z < 5 && Math.abs(zombie.position.x - (11 + ZOMBIE_WIDTH / 2)) < 1e-9) slid = true;
+    });
+    expect(highest).toBe(FLAT_STAND_Y);
+    // 场景搭对了：贴着墙的东面滑过，最后绕过墙的尽头走到玩家脚下
+    expect(slid).toBe(true);
+    expect(horizontalDistance(zombies.all()[0]!)).toBeLessThan(1e-9);
+  });
+
   it('生成在半空：往下落，落在地面上停住', () => {
     const { zombies, advance } = zombiesOnFlatGround();
     zombies.spawnAt({ x: 20.5, y: FLAT_STAND_Y + 10, z: 0.5 });

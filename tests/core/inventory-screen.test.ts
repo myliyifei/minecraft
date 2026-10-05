@@ -590,10 +590,12 @@ describe('配方书：列出这块网格能做的配方，材料充足的高亮'
     expect(entryFor(screen, ItemType.Stick).craftable).toBe(false);
   });
 
-  it('2x2 的配方书列摆得进它的五条，工作台的 3x3 列整张配方表', () => {
+  it('2x2 的配方书列摆得进它的七条，工作台的 3x3 列整张配方表', () => {
     const { screen } = opened(() => {}, grid());
     expect(screen.crafting!.recipes.map((e) => e.recipe.result.item)).toEqual([
       ItemType.OakPlanks,
+      ItemType.BirchPlanks,
+      ItemType.SprucePlanks,
       ItemType.Stick,
       ItemType.CraftingTable,
       ItemType.Torch,

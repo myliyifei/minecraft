@@ -9,7 +9,14 @@ import {
   type SlotBatch,
   type SlotStore,
 } from './item';
-import { ingredientCounts, layoutRecipe, recipesFor, type Recipe } from './recipe';
+import {
+  hasIngredients,
+  ingredientMatches,
+  layoutRecipe,
+  recipesFor,
+  type Ingredient,
+  type Recipe,
+} from './recipe';
 import type { Crafting, RuledSlotBatch, SmeltingProgress, SlotRules } from './slot-batch';
 
 /**
@@ -36,7 +43,8 @@ interface CursorHold {
  * 配方书（见 CONTEXT.md）里的一条：哪条配方，此刻材料够不够。
  *
  * 「够不够」把背包 36 格与网格里的材料合计，光标物品不计入——光标上那一堆是玩家正拿着
- * 要放到别处的，不该被配方书顺手用掉。
+ * 要放到别处的，不该被配方书顺手用掉。一组物品按组里每一种的合计判断（`hasIngredients`）：
+ * 2 块橡木板加 2 块白桦木板够做工作台。
  */
 export interface RecipeBookEntry {
   readonly recipe: Recipe;
@@ -354,9 +362,13 @@ export class InventoryScreen implements InventoryScreenView {
    * 点配方书的第 index 条：把它的材料填入网格，输出格随即显示成品。
    *
    * 三步：网格里原有的物品先退回背包；再按图案（靠左上角对齐、不镜像）逐格从背包取出
-   * 材料，每格 1 个，取的顺序按格号从小到大；材料够不够按背包与网格合计、光标不计入
-   * （`RecipeBookEntry`），不足的那条点了没有任何反应。界面关着、没有网格、下标指不到配方时
-   * 同样没有任何反应。
+   * 材料，每格 1 个，取的顺序按格号从小到大，每格从背包里格号最小的、满足这格材料的那一堆取——
+   * 木板组的格子因此可能各填一种木板；材料够不够按背包与网格合计、光标不计入，木板组按三种木板
+   * 合计（`RecipeBookEntry`、`hasIngredients`），不足的那条点了没有任何反应。界面关着、没有网格、
+   * 下标指不到配方时同样没有任何反应。
+   *
+   * 写明单个物品的格子先填、一组物品的格子后填，各自仍按格号从小到大：组的格子先填可能把某个单个物品
+   * 格要的那种物品拿走。现有配方里组与单个物品不重叠（木板组与木棍），两种顺序填出来一样。
    *
    * 网格里的物品退不完背包（36 格全满）时不填入材料，退不回去的留在原格：材料够是按
    * 「网格里的也算」判的，退不回去就取不到，硬填会把两处的材料混在一起。
@@ -373,11 +385,13 @@ export class InventoryScreen implements InventoryScreenView {
     if (!this.returnGrid(grid)) return;
 
     const layout = layoutRecipe(recipe, crafting);
-    for (let i = 0; i < layout.length; i++) {
-      const item = layout[i];
-      if (item === undefined) continue;
-      this.takeOneFromSlots(item);
-      grid.setSlot(i, { item, count: 1 });
+    for (const groups of [false, true]) {
+      for (let i = 0; i < layout.length; i++) {
+        const ingredient = layout[i];
+        if (ingredient === undefined || (typeof ingredient !== 'number') !== groups) continue;
+        const item = this.takeOneFromSlots(ingredient);
+        if (item !== undefined) grid.setSlot(i, { item, count: 1 });
+      }
     }
   }
 
@@ -399,14 +413,18 @@ export class InventoryScreen implements InventoryScreenView {
     return allReturned;
   }
 
-  /** 从背包格号最小的那一堆这种物品里拿走 1 个。调用方已确认背包里有。 */
-  private takeOneFromSlots(item: ItemType): void {
+  /**
+   * 从背包格号最小的、满足这份材料的那一堆里拿走 1 个，返回拿走的是哪种物品。调用方已确认背包里有；
+   * 万一没有返回 undefined。
+   */
+  private takeOneFromSlots(ingredient: Ingredient): ItemType | undefined {
     for (let i = 0; i < this.slots.size; i++) {
       const stack = this.slots.slot(i);
-      if (!stack || stack.item !== item) continue;
+      if (!stack || !ingredientMatches(ingredient, stack.item)) continue;
       this.slots.setSlot(i, withoutOne(stack));
-      return;
+      return stack.item;
     }
+    return undefined;
   }
 
   /**
@@ -547,10 +565,3 @@ function countItems(...batches: ReadonlyArray<SlotBatch>): Map<ItemType, number>
   return counts;
 }
 
-/** 这些材料够做这条配方吗：每一种都不少于所需的份数。 */
-function hasIngredients(recipe: Recipe, available: ReadonlyMap<ItemType, number>): boolean {
-  for (const [item, needed] of ingredientCounts(recipe)) {
-    if ((available.get(item) ?? 0) < needed) return false;
-  }
-  return true;
-}

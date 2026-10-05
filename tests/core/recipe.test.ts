@@ -98,12 +98,14 @@ describe('配方表里的原木出木板', () => {
     expect(matchRecipe(grid(TWO_BY_TWO, [0, ItemType.Dirt]), TWO_BY_TWO)).toBeUndefined();
   });
 
-  it('木板、木棍、工作台与两条火把摆得进 2x2，工具那几条要 3x3', () => {
+  it('三种木板、木棍、工作台与两条火把摆得进 2x2，工具那几条要 3x3（白桦与云杉木板见 #85）', () => {
     const twoByTwo = RECIPES.filter((recipe) => recipeFits(recipe, TWO_BY_TWO)).map(
       (recipe) => recipe.result.item,
     );
     expect(twoByTwo).toEqual([
       ItemType.OakPlanks,
+      ItemType.BirchPlanks,
+      ItemType.SprucePlanks,
       ItemType.Stick,
       ItemType.CraftingTable,
       ItemType.Torch,
@@ -599,10 +601,12 @@ describe('配方书列出哪些配方', () => {
     expect(recipesFor(THREE_BY_THREE, table)).toEqual(table);
   });
 
-  it('默认列的是配方表：3x3 列全表，2x2 列摆得进的那五条', () => {
+  it('默认列的是配方表：3x3 列全表，2x2 列摆得进的那七条', () => {
     expect(recipesFor(THREE_BY_THREE)).toEqual(RECIPES);
     expect(recipesFor(TWO_BY_TWO).map((recipe) => recipe.result.item)).toEqual([
       ItemType.OakPlanks,
+      ItemType.BirchPlanks,
+      ItemType.SprucePlanks,
       ItemType.Stick,
       ItemType.CraftingTable,
       ItemType.Torch,
@@ -633,11 +637,15 @@ describe('配方书自动填入材料的图案', () => {
     ]);
   });
 
-  it('填出来的图案正好匹配这条配方本身', () => {
-    for (const recipe of RECIPES) {
-      expect(matchRecipe(layoutRecipe(recipe, THREE_BY_THREE), THREE_BY_THREE)).toEqual(
-        recipe.result,
-      );
+  it('填出来的图案正好匹配这条配方本身：一组物品的格子填组里哪一种都匹配', () => {
+    // 一组物品的格子统一填组里第 k 种，k 取遍木板组的三种（#85）
+    for (const k of [0, 1, 2]) {
+      for (const recipe of RECIPES) {
+        const contents = layoutRecipe(recipe, THREE_BY_THREE).map((cell) =>
+          cell === undefined || typeof cell === 'number' ? cell : cell.items[k],
+        );
+        expect(matchRecipe(contents, THREE_BY_THREE), `第 ${k} 种`).toEqual(recipe.result);
+      }
     }
   });
 });

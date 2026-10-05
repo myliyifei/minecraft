@@ -16,12 +16,44 @@ export interface GridSize {
 export type GridContents = ReadonlyArray<ItemType | undefined>;
 
 /**
- * 有序配方的图案：几行，每行几格，格里是哪种物品或空着。各行长度必须相等。
+ * 一组物品（见 CONTEXT.md 的「配方」，#85）：配方里的一格写它时，组里任意一种都匹配，同一个配方里的
+ * 几格可以各摆组里不同的一种。目前只有木板组（`PLANKS`）。
+ *
+ * 写成带 `kind` 的对象而不是物品数组：配方格里的单个物品是编号，组是对象，两者一眼分得开，
+ * `ingredientMatches` 按 `typeof` 分派。
+ *
+ * 配方书判材料够不够、填入材料时假定组与组之间没有共同的物品，也不与同一条配方里写明的单个物品重叠
+ * （`hasIngredients`、`InventoryScreen.clickRecipe`）。木板组与木棍、圆石、铁锭都不重叠。
+ */
+export interface ItemGroup {
+  readonly kind: 'group';
+  readonly items: ReadonlyArray<ItemType>;
+}
+
+/** 木板组：橡木、白桦、云杉三种木板。木棍、工作台与木制的镐、斧、铲、剑都用它。 */
+export const PLANKS: ItemGroup = Object.freeze({
+  kind: 'group',
+  items: Object.freeze([ItemType.OakPlanks, ItemType.BirchPlanks, ItemType.SprucePlanks]),
+});
+
+/** 配方里的一格要什么：一种物品，或一组物品里的任意一种。 */
+export type Ingredient = ItemType | ItemGroup;
+
+/** 这一格摆的物品满足这份材料要求吗：单个物品要正好是它，一组物品要是组里的一种。 */
+export function ingredientMatches(ingredient: Ingredient, item: ItemType): boolean {
+  return typeof ingredient === 'number' ? ingredient === item : ingredient.items.includes(item);
+}
+
+/**
+ * 有序配方的图案：几行，每行几格，格里是哪种材料（一种物品或一组物品）或空着。各行长度必须相等。
  *
  * 写成二维数组而不是原版那种「字符画 + 图例」：配方就那么几条，多一层图例只是多一处
  * 对不上的可能。
  */
-export type Pattern = ReadonlyArray<ReadonlyArray<ItemType | undefined>>;
+export type Pattern = ReadonlyArray<ReadonlyArray<Ingredient | undefined>>;
+
+/** 网格裁到非空格的最小包围矩形之后的样子：几行，每行几格，格里是摆的物品或空着。 */
+type Placed = ReadonlyArray<ReadonlyArray<ItemType | undefined>>;
 
 /** 有序配方：材料要按图案摆。图案可以摆在网格里任意位置，允许镜像的还可以左右翻过来。 */
 export interface ShapedRecipe {
@@ -37,7 +69,7 @@ export interface ShapelessRecipe {
   readonly kind: 'shapeless';
   readonly result: ItemStack;
   /** 所需材料，同一种要几份就写几遍。 */
-  readonly ingredients: ReadonlyArray<ItemType>;
+  readonly ingredients: ReadonlyArray<Ingredient>;
 }
 
 export type Recipe = ShapedRecipe | ShapelessRecipe;
@@ -49,7 +81,7 @@ function one(item: ItemType): ItemStack {
 
 /** 一档工具：头部用哪种材料，造出来的镐、斧、铲、剑各是哪种物品。 */
 interface ToolTier {
-  readonly head: ItemType;
+  readonly head: Ingredient;
   readonly pickaxe: ItemType;
   readonly axe: ItemType;
   readonly shovel: ItemType;
@@ -57,7 +89,7 @@ interface ToolTier {
 }
 
 /**
- * 一档工具的四条配方：头部用 `head` 材料、柄是木棍。木制用木板，石制用圆石，铁制用铁锭，
+ * 一档工具的四条配方：头部用 `head` 材料、柄是木棍。木制用木板组，石制用圆石，铁制用铁锭，
  * 四条图案不变——所以图案只写一遍，材料当参数传进来。
  *
  * 镐、铲与剑的图案左右对称，镜像与否结果相同，写 false；斧的刃只在一边，左右镜像的摆法也算。
@@ -106,21 +138,30 @@ function toolRecipes({ head, pickaxe, axe, shovel, sword }: ToolTier): Recipe[] 
 /**
  * 配方表——纯数据（见 CONTEXT.md 的「合成」）。加配方只加一条。
  *
- * 目前有原木出木板、木板出木棍、木板出工作台三条，加木、石、铁三档各四件（镐、斧、铲、剑），再加圆石出熔炉、
- * 煤炭与木炭各出火把。
+ * 目前有三种原木各出自己的木板三条、木板出木棍、木板出工作台，加木、石、铁三档各四件（镐、斧、铲、剑），
+ * 再加圆石出熔炉、煤炭与木炭各出火把。用到木板的配方写木板组（#85），三种木板任意混用，配方书里各只列一条。
  * 金、钻石那两档各再加一组 `toolRecipes`。
  */
 export const RECIPES: ReadonlyArray<Recipe> = [
-  {
-    kind: 'shapeless',
-    result: { item: ItemType.OakPlanks, count: 4 },
-    ingredients: [ItemType.OakLog],
-  },
+  // 三种原木各出 4 块自己那种木板（#85）：原木不是一组，白桦原木出不了橡木板。
+  ...(
+    [
+      [ItemType.OakLog, ItemType.OakPlanks],
+      [ItemType.BirchLog, ItemType.BirchPlanks],
+      [ItemType.SpruceLog, ItemType.SprucePlanks],
+    ] as const
+  ).map(
+    ([log, planks]): Recipe => ({
+      kind: 'shapeless',
+      result: { item: planks, count: 4 },
+      ingredients: [log],
+    }),
+  ),
   // 两块木板竖排出 4 根木棍。图案上下对称也左右对称，镜像与否结果相同，写 false。
   {
     kind: 'shaped',
     result: { item: ItemType.Stick, count: 4 },
-    pattern: [[ItemType.OakPlanks], [ItemType.OakPlanks]],
+    pattern: [[PLANKS], [PLANKS]],
     mirrored: false,
   },
   // 四块木板摆成方形出一个工作台。方形四向对称，镜像与否结果相同，写 false。
@@ -128,13 +169,13 @@ export const RECIPES: ReadonlyArray<Recipe> = [
     kind: 'shaped',
     result: one(ItemType.CraftingTable),
     pattern: [
-      [ItemType.OakPlanks, ItemType.OakPlanks],
-      [ItemType.OakPlanks, ItemType.OakPlanks],
+      [PLANKS, PLANKS],
+      [PLANKS, PLANKS],
     ],
     mirrored: false,
   },
   ...toolRecipes({
-    head: ItemType.OakPlanks,
+    head: PLANKS,
     pickaxe: ItemType.WoodenPickaxe,
     axe: ItemType.WoodenAxe,
     shovel: ItemType.WoodenShovel,
@@ -229,27 +270,55 @@ export function recipesFor(size: GridSize, recipes: ReadonlyArray<Recipe> = RECI
 }
 
 /**
- * 一条配方要哪些材料、各几份。有序配方数图案里的非空格，无序配方数材料表。
+ * 一条配方要哪些材料、各几份。有序配方数图案里的非空格，无序配方数材料表。一组物品按组计数，
+ * 不拆成组里的每一种：工作台要的是「木板组 4 份」，不是橡木、白桦、云杉各几块。
  *
- * 配方书判「材料够不够」看的就是这张表：每一种都够才亮。
+ * 配方书判「材料够不够」看的就是这张表（`hasIngredients`）。
  */
-export function ingredientCounts(recipe: Recipe): Map<ItemType, number> {
-  const counts = new Map<ItemType, number>();
+export function ingredientCounts(recipe: Recipe): Map<Ingredient, number> {
+  const counts = new Map<Ingredient, number>();
   const cells = recipe.kind === 'shapeless' ? recipe.ingredients : recipe.pattern.flat();
-  for (const item of cells) {
-    if (item === undefined) continue;
-    counts.set(item, (counts.get(item) ?? 0) + 1);
+  for (const ingredient of cells) {
+    if (ingredient === undefined) continue;
+    counts.set(ingredient, (counts.get(ingredient) ?? 0) + 1);
   }
   return counts;
 }
 
 /**
- * 配方书自动填入材料时网格各格放什么：图案靠左上角对齐、不镜像；无序配方的材料从左上角
- * 起按行排开。每格只有种类，数量都是 1——每格只填 1 个。调用方要先用 `recipeFits` 确认
- * 摆得进去。
+ * 手上这些物品（每种各有几个）够做这条配方吗。配方书的高亮与点击拦截都用它。
+ *
+ * 先扣写明的单个物品，再扣一组物品：组按组里每一种的合计算，2 块橡木板加 2 块白桦木板够工作台
+ * 要的 4 份木板组。按这个顺序扣，是因为单个物品只能由它自己满足，组还可以换组里别的一种。
+ * 组与组、组与单个物品之间不重叠（见 `ItemGroup`），所以这样扣不会把够的判成不够。
  */
-export function layoutRecipe(recipe: Recipe, size: GridSize): GridContents {
-  const contents = Array<ItemType | undefined>(size.width * size.height).fill(undefined);
+export function hasIngredients(recipe: Recipe, available: ReadonlyMap<ItemType, number>): boolean {
+  const left = new Map(available);
+  const needs = [...ingredientCounts(recipe)].sort(([a], [b]) => groupLast(a) - groupLast(b));
+  for (const [ingredient, needed] of needs) {
+    let missing = needed;
+    for (const item of typeof ingredient === 'number' ? [ingredient] : ingredient.items) {
+      const taken = Math.min(missing, left.get(item) ?? 0);
+      left.set(item, (left.get(item) ?? 0) - taken);
+      missing -= taken;
+    }
+    if (missing > 0) return false;
+  }
+  return true;
+}
+
+/** 排序键：单个物品排在一组物品前面。 */
+function groupLast(ingredient: Ingredient): number {
+  return typeof ingredient === 'number' ? 0 : 1;
+}
+
+/**
+ * 配方书自动填入材料时网格各格要什么材料：图案靠左上角对齐、不镜像；无序配方的材料从左上角
+ * 起按行排开。每格是一种物品或一组物品，数量都是 1——每格只填 1 个；一组物品的格子填组里哪一种
+ * 由取料的那一方决定（`InventoryScreen.clickRecipe`）。调用方要先用 `recipeFits` 确认摆得进去。
+ */
+export function layoutRecipe(recipe: Recipe, size: GridSize): ReadonlyArray<Ingredient | undefined> {
+  const contents = Array<Ingredient | undefined>(size.width * size.height).fill(undefined);
   if (recipe.kind === 'shapeless') {
     recipe.ingredients.forEach((item, i) => {
       contents[i] = item;
@@ -257,15 +326,15 @@ export function layoutRecipe(recipe: Recipe, size: GridSize): GridContents {
     return contents;
   }
   recipe.pattern.forEach((row, r) => {
-    row.forEach((item, c) => {
-      contents[r * size.width + c] = item;
+    row.forEach((ingredient, c) => {
+      contents[r * size.width + c] = ingredient;
     });
   });
   return contents;
 }
 
 /** 图案有几列。各行等长，看第一行就够；没有行的图案是 0 列。 */
-function patternWidth(pattern: Pattern): number {
+function patternWidth(pattern: Pattern | Placed): number {
   return pattern[0]?.length ?? 0;
 }
 
@@ -274,7 +343,7 @@ function patternWidth(pattern: Pattern): number {
  *
  * 裁完之后有序配方的比对就是「两个图案相等吗」，网格多大、摆在哪儿都不再出现。
  */
-function crop(contents: GridContents, size: GridSize): Pattern | undefined {
+function crop(contents: GridContents, size: GridSize): Placed | undefined {
   let top = size.height;
   let bottom = -1;
   let left = size.width;
@@ -298,33 +367,51 @@ function crop(contents: GridContents, size: GridSize): Pattern | undefined {
 }
 
 /** 裁好的图案匹配这条配方吗。有序的比形状（允许镜像时再比一次镜像），无序的比材料。 */
-function matches(recipe: Recipe, cropped: Pattern): boolean {
+function matches(recipe: Recipe, cropped: Placed): boolean {
   if (recipe.kind === 'shapeless') return sameIngredients(recipe.ingredients, cropped);
   if (samePattern(recipe.pattern, cropped)) return true;
   return recipe.mirrored && samePattern(recipe.pattern, mirror(cropped));
 }
 
-/** 两个图案行列数相同、逐格相同。 */
-function samePattern(a: Pattern, b: Pattern): boolean {
-  if (a.length !== b.length || patternWidth(a) !== patternWidth(b)) return false;
-  return a.every((row, r) => row.every((cell, c) => cell === b[r]![c]));
+/**
+ * 摆的图案与配方图案行列数相同、逐格对得上：图案空着的格必须空着，有材料的格摆的物品要满足那份材料
+ * （`ingredientMatches`）。木板组的几格因此各摆哪种木板都行。
+ */
+function samePattern(pattern: Pattern, placed: Placed): boolean {
+  if (pattern.length !== placed.length || patternWidth(pattern) !== patternWidth(placed)) return false;
+  return pattern.every((row, r) =>
+    row.every((ingredient, c) => {
+      const item = placed[r]![c];
+      if (ingredient === undefined || item === undefined) return ingredient === item;
+      return ingredientMatches(ingredient, item);
+    }),
+  );
 }
 
 /** 左右镜像：每一行倒过来。 */
-function mirror(pattern: Pattern): Pattern {
-  return pattern.map((row) => [...row].reverse());
+function mirror(placed: Placed): Placed {
+  return placed.map((row) => [...row].reverse());
 }
 
 /**
- * 图案里非空格的材料多重集，正好等于所需材料吗。
+ * 摆的物品与所需材料能一一配上吗：份数相等，且每份材料都分到一件满足它的物品。
  *
- * 两边都按物品编号排好序再逐个比：材料是编号，排序之后同种的挨在一起，「各要几份」
- * 就在这一比里一起验了。
+ * 材料里有一组物品时不能再「两边排序逐个比」，改成逐份材料回溯找一件还没分出去的物品。
+ * 无序配方最多 9 份材料，回溯的开销可以忽略。
  */
-function sameIngredients(ingredients: ReadonlyArray<ItemType>, cropped: Pattern): boolean {
+function sameIngredients(ingredients: ReadonlyArray<Ingredient>, cropped: Placed): boolean {
   const placed = cropped.flat().filter((cell): cell is ItemType => cell !== undefined);
   if (placed.length !== ingredients.length) return false;
-  const sortedPlaced = [...placed].sort((a, b) => a - b);
-  const sortedNeeded = [...ingredients].sort((a, b) => a - b);
-  return sortedPlaced.every((item, i) => item === sortedNeeded[i]);
+  const used = Array<boolean>(placed.length).fill(false);
+  const assign = (next: number): boolean => {
+    if (next === ingredients.length) return true;
+    for (let i = 0; i < placed.length; i++) {
+      if (used[i] || !ingredientMatches(ingredients[next]!, placed[i]!)) continue;
+      used[i] = true;
+      if (assign(next + 1)) return true;
+      used[i] = false;
+    }
+    return false;
+  };
+  return assign(0);
 }

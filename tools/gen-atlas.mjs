@@ -54,6 +54,22 @@ const LOG_CORE = [166, 133, 86];
 const LEAVES = [63, 110, 45];
 const PLANKS = [162, 130, 78];
 const PLANKS_SEAM = [110, 84, 48];
+/**
+ * 白桦（#85）：树皮灰白、带一道道短的黑横纹，年轮与木板是浅黄的白木，树叶偏黄的浅绿。
+ * 云杉：树皮深褐，年轮与木板是偏红的深棕，树叶是发蓝的暗绿。三种树的四格放在一起按明暗就分得开。
+ */
+const BIRCH_BARK = [214, 212, 200];
+const BIRCH_MARK = [44, 42, 38];
+const BIRCH_CORE = [214, 190, 130];
+const BIRCH_RING = [184, 160, 104];
+const BIRCH_LEAVES = [112, 150, 70];
+const BIRCH_PLANKS = [206, 186, 128];
+const BIRCH_PLANKS_SEAM = [150, 132, 84];
+const SPRUCE_BARK = [72, 52, 32];
+const SPRUCE_CORE = [128, 92, 56];
+const SPRUCE_LEAVES = [44, 82, 58];
+const SPRUCE_PLANKS = [116, 84, 50];
+const SPRUCE_PLANKS_SEAM = [72, 50, 28];
 const STICK = [140, 104, 58];
 const STICK_SHADOW = [96, 70, 38];
 const TABLE_TOP = [176, 142, 86];
@@ -269,6 +285,52 @@ function toolIcon(head, colors) {
   };
 }
 
+/** 原木顶面：以中心为圆心一圈深一圈浅的年轮。`ring` 是偶数圈的颜色，`gap` 是奇数圈。 */
+function logTop(ring, gap) {
+  return (x, y, rand) => {
+    const dx = x - 7.5;
+    const dy = y - 7.5;
+    const even = Math.round(Math.sqrt(dx * dx + dy * dy)) % 2 === 0;
+    return shade(even ? ring : gap, Math.floor(rand() * 20) - 10);
+  };
+}
+
+/** 原木侧面：竖向树皮纹理，每 4 列里两列亮、两列暗。 */
+function barkSide(bark) {
+  return (x, _y, rand) => {
+    const stripe = x % 4 < 2 ? 12 : -12;
+    return shade(bark, stripe + Math.floor(rand() * 18) - 9);
+  };
+}
+
+/** 树叶：噪点上带镂空（渲染用 alphaTest 剔掉），`holes` 是镂空像素的比例。 */
+function leaves(color, holes) {
+  return (_x, _y, rand) => {
+    if (rand() < holes) return [0, 0, 0, 0];
+    return shade(color, Math.floor(rand() * 46) - 23);
+  };
+}
+
+/** 木板：四条横板，板与板之间一条深色接缝，每条板上错开一处竖向的短接缝。 */
+function planks(board, seamColor) {
+  return (x, y, rand) => {
+    const seam = y % 4 === 3 || (x === (Math.floor(y / 4) * 5) % TILE_PX && y % 4 !== 3);
+    if (seam) return shade(seamColor, Math.floor(rand() * 16) - 8);
+    return shade(board, Math.floor(rand() * 22) - 11 + (y % 4 === 0 ? 8 : 0));
+  };
+}
+
+/**
+ * 白桦树皮上的黑横纹：隔行出现，每条 2 到 4 像素长，起点按行号错开，横纹因此散在整面上、
+ * 不会上下对齐连成竖条。与随机数无关，改噪点不会挪动横纹。
+ */
+function onBirchMark(x, y) {
+  if (y % 3 !== 1) return false;
+  const start = (y * 7 + 3) % TILE_PX;
+  const length = 2 + (Math.floor(y / 3) % 3);
+  return (x - start + TILE_PX) % TILE_PX < length;
+}
+
 /** 每个格号对应的画法：painter(x, y, rand) → [r, g, b, a]。 */
 const TILES = {
   // grass_top
@@ -290,28 +352,13 @@ const TILES = {
     return shade(BEDROCK, (blotch ? -40 : 10) + Math.floor(rand() * 30) - 15);
   },
   // oak_log_top：年轮
-  5: (x, y, rand) => {
-    const dx = x - 7.5;
-    const dy = y - 7.5;
-    const ring = Math.round(Math.sqrt(dx * dx + dy * dy)) % 2 === 0;
-    return shade(ring ? LOG_CORE : LOG_BARK, Math.floor(rand() * 20) - 10);
-  },
+  5: logTop(LOG_CORE, LOG_BARK),
   // oak_log_side：竖向树皮纹理
-  6: (x, _y, rand) => {
-    const stripe = x % 4 < 2 ? 12 : -12;
-    return shade(LOG_BARK, stripe + Math.floor(rand() * 18) - 9);
-  },
-  // oak_leaves：深绿噪点，带镂空（渲染用 alphaTest 剔掉）
-  7: (_x, _y, rand) => {
-    if (rand() < 0.18) return [0, 0, 0, 0];
-    return shade(LEAVES, Math.floor(rand() * 46) - 23);
-  },
-  // oak_planks：四条横板，板与板之间一条深色接缝，每条板上错开一处竖向的短接缝
-  8: (x, y, rand) => {
-    const seam = y % 4 === 3 || (x === (Math.floor(y / 4) * 5) % TILE_PX && y % 4 !== 3);
-    if (seam) return shade(PLANKS_SEAM, Math.floor(rand() * 16) - 8);
-    return shade(PLANKS, Math.floor(rand() * 22) - 11 + (y % 4 === 0 ? 8 : 0));
-  },
+  6: barkSide(LOG_BARK),
+  // oak_leaves：深绿噪点，带镂空
+  7: leaves(LEAVES, 0.18),
+  // oak_planks
+  8: planks(PLANKS, PLANKS_SEAM),
   // stick：透明底上一根从左下到右上的斜木棍，三像素宽，右下那一条是暗面
   9: (x, y, rand) => {
     // 到反对角线（x + y = 15）的偏移：0 在线上，正数在右下
@@ -487,6 +534,29 @@ const TILES = {
     if (core < 4) return shade(FIRE_BRIGHT, noise);
     return shade(FIRE, noise);
   },
+  // birch_log_top：浅黄白木的年轮，最外一圈是灰白树皮
+  49: (x, y, rand) => {
+    const edge = x === 0 || y === 0 || x === TILE_PX - 1 || y === TILE_PX - 1;
+    if (edge) return shade(BIRCH_BARK, Math.floor(rand() * 16) - 8);
+    return logTop(BIRCH_CORE, BIRCH_RING)(x, y, rand);
+  },
+  // birch_log_side：灰白树皮上散着短的黑横纹
+  50: (x, y, rand) => {
+    if (onBirchMark(x, y)) return shade(BIRCH_MARK, Math.floor(rand() * 12) - 6);
+    return shade(BIRCH_BARK, Math.floor(rand() * 16) - 8);
+  },
+  // birch_leaves：偏黄的浅绿，镂空与橡树叶一样多
+  51: leaves(BIRCH_LEAVES, 0.18),
+  // birch_planks：浅黄的白木板
+  52: planks(BIRCH_PLANKS, BIRCH_PLANKS_SEAM),
+  // spruce_log_top：深棕年轮，深色树皮那一圈与橡木同一画法
+  53: logTop(SPRUCE_CORE, SPRUCE_BARK),
+  // spruce_log_side：深褐竖向树皮
+  54: barkSide(SPRUCE_BARK),
+  // spruce_leaves：发蓝的暗绿，针叶密，镂空比橡树叶少
+  55: leaves(SPRUCE_LEAVES, 0.1),
+  // spruce_planks：偏红的深棕木板
+  56: planks(SPRUCE_PLANKS, SPRUCE_PLANKS_SEAM),
 };
 
 /** 太阳与月亮那块方片的范围：居中 12×12，四周各留 2 像素透明边。 */

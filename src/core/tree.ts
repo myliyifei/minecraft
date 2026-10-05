@@ -94,7 +94,7 @@ export const SPRUCE_CANOPY_RADIUS = 3;
 
 /**
  * 所有树种中最大的树冠半径。区块扫描「树冠还能伸进来」的树格时按它扩一圈（ADR-0005）：按橡树的 2 扩，
- * 树根离区块边 3 格的云杉最外一圈就漏写了。
+ * 树根离区块边 3 格的云杉，最外一圈树叶就不会写进邻区块。
  */
 export const MAX_CANOPY_RADIUS = Math.max(OAK_CANOPY_RADIUS, SPRUCE_CANOPY_RADIUS);
 
@@ -102,8 +102,8 @@ export const MAX_CANOPY_RADIUS = Math.max(OAK_CANOPY_RADIUS, SPRUCE_CANOPY_RADIU
  * 出生列周围不长树的半径（方块，切比雪夫距离）。指的是树根：树冠还会再伸出
  * 树冠半径那么多格。
  *
- * 出生点在出生列上（`TreePlacement.spawnColumn`、`GameCore.spawnPoint`）。树叶是实心的：树冠盖到出生点，玩家
- * 一进世界就卡在树叶里；盖到旁边几格，他刚迈步就撞上。所以给出生点留一小片空地，按
+ * 出生点在出生列上（`TreePlacement.spawnColumn`、`GameCore.spawnPoint`）。树叶是实心的：树冠伸到出生点，玩家
+ * 一进世界就卡在树叶里；伸到旁边几格，玩家刚迈步就撞上。所以给出生点留一小片空地，按
  * 「随便朝哪个方向走一秒都还撞不到东西」定大小——一秒 4.3 格，加半个碰撞箱是 4.6 格，
  * 所以橡树冠不能进 |5| 格，树根因此不能进 |7| 格。出生列在平原（CONTEXT.md「出生点」），周围长的是橡树与白桦；
  * 云杉的树冠宽一格，出生列落在平原之外时云杉的树冠能伸到 |4| 格，这种情形少见，不另加大。
@@ -165,7 +165,7 @@ const OAK_CANOPY_LAYERS: readonly CanopyLayer[] = [
  * 云杉的尖塔形树冠，自下而上，共 7 层（ADR-0005 补记）。
  *
  * 最下面一层 7×7 去掉四角，往上半径 2、1、2、1 交替收窄，树干顶那一层是 3×3 去掉四角的十字，
- * 树干顶之上再盖一格树叶。半径交替收放是原版云杉的样子：从侧面看是一圈一圈的，不是一个光滑的锥。
+ * 树干顶之上再放一格树叶。半径交替变化与原版云杉一致：从侧面看是分层的，不是平滑的锥面。
  */
 const SPRUCE_CANOPY_LAYERS: readonly CanopyLayer[] = [
   { dy: -5, radius: SPRUCE_CANOPY_RADIUS, corners: false },
@@ -217,7 +217,7 @@ const TREE_FORMS: Readonly<Record<TreeSpecies, TreeForm>> = {
  * （TREE_CELL_SIZE 大于最大的间距 2 × MAX_CANOPY_RADIUS + 1）。这里只取字典序在本格之前的那 4 个，
  * 于是「谁给谁让位」有个固定的先后，不会两棵树互相让、最后一棵都不长。
  *
- * 让位的那一棵仍然算数：它自己被让掉了，却还能挤掉字典序在它之后的树。这么做是为了
+ * 让位的那一棵仍然参与判断：它自己不长了，字典序在它之后、离它太近的树仍要给它让位。这么做是为了
  * 一格只算一次、不必顺着链条递归下去；代价只是偶尔多一处空档，看不出来。
  */
 const EARLIER_CELLS: ReadonlyArray<readonly [number, number]> = [
@@ -242,8 +242,8 @@ interface Site {
 }
 
 /**
- * 某个树格里的落点。这一格不长树、落点在出生列周围、落点是大海，或者落点在冰雪里却没抽中，则 undefined，
- * 它也就不挤掉邻格的树。
+ * 某个树格里的落点。这一格不长树、落点在出生列周围、落点是大海，或者落点在冰雪里而树种那段随机数不在长树的范围内，
+ * 则 undefined，邻格的树也就不必给它让位。
  *
  * 只问种子、出生列与群系，不问地表高度——判断两棵树是否相距足够只看水平距离与树冠半径，而地表高度是这里
  * 开销最大的一次计算（要求那一列四角格点的三维密度），邻格检查不该承担这个开销。群系查询便宜得多，树冠半径
@@ -281,8 +281,8 @@ function treeInCell(placement: TreePlacement, cellX: number, cellZ: number): Tre
   const site = siteInCell(placement, cellX, cellZ);
   if (!site) return undefined;
 
-  // 两棵树的最小间距取「两个树冠刚好贴到一起」的那个距离（切比雪夫距离）：再近一格树冠就互相穿插，
-  // 两棵树长成连体——原版放树也会检查落点的空间。云杉与橡树挨着时按各自的半径算。
+  // 两棵树的最小间距取两个树冠相邻而不重叠的那个距离（切比雪夫距离）：再近一格两个树冠就有重叠的格，
+  // 原版放树也会检查落点的空间。云杉与橡树相邻时按各自的半径算。
   for (const [dx, dz] of EARLIER_CELLS) {
     const earlier = siteInCell(placement, cellX + dx, cellZ + dz);
     if (!earlier) continue;
@@ -316,10 +316,10 @@ function reachesChunk(tree: Tree, originX: number, originZ: number): boolean {
  * 会写进某个区块的全部树（三种），按写入顺序排好。
  *
  * 树根可能在邻近区块里：树冠越过边界时两边的区块各写自己那一半，合起来才是一棵完整的
- * 树。所以扫的是「最宽的树冠还能伸进这个区块」的那一圈树格，而不只是区块自己盖住的那几格。
+ * 树。所以扫的是「最宽的树冠还能伸进这个区块」的那一圈树格，而不只是区块自己范围内的那几格。
  * 每个区块各算一遍、只写自己的格子，结果因此与加载顺序无关，见 ADR-0005。
  *
- * 顺序按树格坐标从小到大，在任何区块里都一样——两棵树写同一格时谁盖住谁因此是确定的。
+ * 顺序按树格坐标从小到大，在任何区块里都一样——两棵树写同一格时谁覆盖谁因此是确定的。
  */
 export function treesTouching(placement: TreePlacement, cx: number, cz: number): Tree[] {
   const originX = cx * CHUNK_SIZE;
@@ -348,7 +348,7 @@ export function plantTrees(placement: TreePlacement, chunk: Chunk): void {
 /**
  * 把一棵树落在这个区块里的部分写进去。落在区块外的格子由 `Chunk` 自己丢掉，那部分由邻居区块写。
  *
- * 先树冠后树干：两者在树干顶端那几格重叠，原木盖住树叶。
+ * 先树冠后树干：两者在树干顶端那几格重叠，原木覆盖树叶。
  */
 export function plantTree(chunk: Chunk, tree: Tree): void {
   const lx = tree.x - chunk.cx * CHUNK_SIZE;

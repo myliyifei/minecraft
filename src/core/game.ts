@@ -51,6 +51,11 @@ export interface GameCoreOptions {
   readonly seed?: number;
   /** 视距（区块数）：这个半径内的区块保持加载，见 CONTEXT.md 的「视距」。之后可以改，见 `setViewRadius`。 */
   readonly viewRadius?: number;
+  /**
+   * 自动跳跃（见 CONTEXT.md）开着没有，省略时开（与设置的默认值一致）。之后可以改，见 `setAutoJump`。它是设置里的
+   * 一项，不进快照：从快照构造时同样按这里给的值（ADR-0020）。
+   */
+  readonly autoJump?: boolean;
   /** 难度（见 CONTEXT.md），默认普通。只在新建世界时给；读档时以快照里的为准。 */
   readonly difficulty?: Difficulty;
   /**
@@ -87,6 +92,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   /** 极限难度下玩家死过没有。进快照，读档时放回；死亡那一 tick 置真（`die`）。 */
   private worldHardcoreDead: boolean;
   private radius: number;
+  private autoJumpEnabled: boolean;
   private readonly playerState: Player;
   private readonly dropsState: Drops;
   private readonly xpOrbsState: XpOrbs;
@@ -159,6 +165,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.worldDifficulty = restore?.difficulty ?? options.difficulty ?? DEFAULT_DIFFICULTY;
     this.worldHardcoreDead = restore?.hardcoreDead ?? false;
     this.radius = options.viewRadius ?? DEFAULT_VIEW_RADIUS;
+    this.autoJumpEnabled = options.autoJump ?? true;
     // 支撑没了的火把交给掉落物（`World.dropDetachedTorches`）。掉落物要拿世界算碰撞，比世界晚建，
     // 所以这里传一个转发给掉落物的函数。世界在这个构造函数里只加载区块、不写方块，调用到它时掉落物已经建好。
     const terrain = (options.terrain ?? createTerrain)(this.worldSeed);
@@ -733,6 +740,19 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.world.unloadOutside(this.playerChunk, radius + UNLOAD_MARGIN);
   }
 
+  /** 自动跳跃（见 CONTEXT.md）开着没有。 */
+  get autoJump(): boolean {
+    return this.autoJumpEnabled;
+  }
+
+  /**
+   * 开关自动跳跃（ADR-0020）：设置改动经订阅调这里，与视距（`setViewRadius`）同一种写法。只记下开关，下一个 tick
+   * 的移动起按新值判断。
+   */
+  setAutoJump(enabled: boolean): void {
+    this.autoJumpEnabled = enabled;
+  }
+
   /** 玩家所在的区块。加载与卸载都以它为中心。 */
   get playerChunk(): ChunkCoord {
     const { x, z } = this.playerState.position;
@@ -778,7 +798,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     if (wasDead) {
       this.playerState.hold();
     } else {
-      const fell = this.playerState.step(this.uiMode ? IDLE_INTENT : this.intent);
+      const fell = this.playerState.step(this.uiMode ? IDLE_INTENT : this.intent, this.autoJumpEnabled);
       this.healthState.hurt(fallDamage(fell), this.ticks);
       // 选中格先生效，再瞄准与使用：同一 tick 里切了格又按使用键，放下的是新格里的东西。
       this.inventoryState.select(this.nextSlot);

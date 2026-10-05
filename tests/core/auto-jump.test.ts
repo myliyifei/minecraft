@@ -159,6 +159,22 @@ describe('自动跳跃：不该跳的时候不跳（#78）', () => {
     expect(game.player.position.z).toBeGreaterThan(BLOCKED_Z + 1);
   });
 
+  it('贴着一格高的台阶站着、没有移动输入、只被击退推着朝台阶：水平被挡住，但不跳', () => {
+    const blocked = core({ autoJump: false });
+    stepAhead(blocked, 1);
+    heights(blocked, FORWARD, 10);
+    expect(blocked.player.position.z).toBeCloseTo(BLOCKED_Z, 10);
+    // 击退的水平速度只能经快照放进去：朝 −Z（台阶那一侧）0.4 格/tick，与挨一下打时的大小相同，不带上抛
+    const snapshot = blocked.snapshot();
+    const game = core({ restore: { ...snapshot, player: { ...snapshot.player, knockback: { x: 0, z: -0.4 } } } });
+    // 场景搭对了：开关开着，还在地上贴着台阶
+    expect(game.autoJump).toBe(true);
+    expect(game.player.onGround).toBe(true);
+    const ys = heights(game, IDLE_INTENT, 20);
+    expect(Math.max(...ys)).toBe(FLAT_STAND_Y);
+    expect(game.player.position.z).toBeCloseTo(BLOCKED_Z, 10);
+  });
+
   it('不在地面上：脚下悬空、前方是一格高的石头，被它挡住时不起跳，一路落到竖井底', () => {
     const game = core();
     // 场景搭对了：开关开着，不跳是因为规则，不是因为没开

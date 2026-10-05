@@ -8,12 +8,13 @@ import {
   type BlockStateView,
 } from './block-state';
 import { Chunk } from './chunk';
+import { faceCulling } from './face-culling';
 import { CHUNK_SHIFT, CHUNK_SIZE, MAX_LIGHT_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from './constants';
 import type { DropSink } from './drop';
 import { BARE_HAND } from './item';
 import { Lighting } from './light';
 import type { BlockStateRecord, ChunkRecord } from './snapshot';
-import { TORCH_ATTACH_OFFSETS, isTorch, torchSupportCell } from './torch';
+import { TORCH_ATTACH_OFFSETS, torchSupportCell } from './torch';
 
 export interface ChunkCoord {
   readonly cx: number;
@@ -74,8 +75,8 @@ export class World implements BlockEdit, BlockStateView {
   /**
    * 自上次取走以来方块变了的区块，按区块键去重（见 `StaleChunks.blocks`）。
    *
-   * 由 `setBlock` 记：方块自己的区块一定在里面；它坐在区块边界上、而且隔壁的面因它而变（它从挡住隔壁的面
-   * 变成不挡，或者反过来，见 `faceCulling`）时，那一侧的邻居也在里面——只重建自己就会在挖开的地方留下一个
+   * 由 `setBlock` 记：方块自己的区块一定在里面；它坐在区块边界上、而且隔壁的面因它而变（它在剔除上的那一档
+   * 变了，比如从挡住隔壁的面变成不挡，见 `faceCulling`）时，那一侧的邻居也在里面——只重建自己就会在挖开的地方留下一个
    * 看穿到虚空的洞，或者留下一堵本该消失的墙。只记四个侧向的邻居，不记斜角：面的剔除只问六个轴向的邻居。
    *
    * 没加载的邻居也记：要不要重建网格由渲染层判断。没人来取时记录会一直累积——浏览器里渲染层
@@ -417,22 +418,6 @@ export class World implements BlockEdit, BlockStateView {
 
 /** 不接掉落物的世界用的那一份：收到什么都丢掉。 */
 const NO_DROPS: DropSink = Object.freeze({ spawnInBlock: () => {} });
-
-/** `faceCulling` 里不透明方块的那一档：比任何方块编号都小。 */
-const OPAQUE_FACES = -1;
-
-/**
- * 隔壁区块的网格从这一格读到的东西（见 `buildChunkMesh`）：不透明方块挡住隔壁贴着它的面；不是不透明的方块不挡，
- * 但与隔壁那一格是同一种方块时两个面重合、都不画（树叶），所以按编号区分。空气与火把对隔壁一样——不挡，也不会与隔壁那一格
- * 是同一种方块：火把不走六面剔除，它从不让别的方块少画一个面。
- *
- * 这一格换了方块之后，这个值不变的话隔壁的面就一个都不变，隔壁要重建只可能是因为光照变了。
- */
-function faceCulling(block: BlockType): number {
-  if (isOpaque(block)) return OPAQUE_FACES;
-  if (isTorch(block)) return BlockType.Air;
-  return block;
-}
 
 /** 方块状态表的坐标键。要求整数输入。 */
 function blockKey(x: number, y: number, z: number): string {

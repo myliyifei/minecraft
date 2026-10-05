@@ -2,22 +2,23 @@ import { BlockType } from './block';
 import { Biome } from './biome';
 import type { Chunk } from './chunk';
 import { SEA_LEVEL } from './constants';
-import { OCEAN_CONTINENTALNESS } from './terrain-density';
+import { MOUNTAIN_RELIEF, OCEAN_CONTINENTALNESS } from './terrain-density';
 
 /**
  * 地表铺法（#76，CONTEXT.md「沙滩」「雪线」「群系」）：上方是空气或水的每一段地形方块，顶层按群系与坡度换成
  * 草方块、雪草方块、石头、沙子或沙砾，其下几层换成泥土或沙子。
  *
- * 规则只读「样本」：任意一列的地表高度、群系与大陆度。列顶地表方块查询从地形对象的纯函数取样本，区块生成从
- * 区块里已算好的数（区块连同四周一圈的地表高度、按列缓存的群系）取样本，两边调同一个 `highestTopBlock`，
- * 所以查询值与生成结果逐列一致，区块边缘的列也是。
+ * 规则只读「样本」：任意一列的地表高度、群系、大陆度、起伏与温度。列顶地表方块查询从地形对象的纯函数取样本，
+ * 区块生成从区块里已算好的数（区块连同四周一圈的地表高度、按列缓存的群系）取样本，两边调同一个
+ * `highestTopBlock`，所以查询值与生成结果逐列一致，区块边缘的列也是。
  *
  * 最高那一段（地表高度那一格）的优先次序：
  * 1. 被水盖住（地表低于海平面）：顶面 y ≥ SHALLOW_FLOOR_MIN_Y 是沙子，更低是沙砾，不论群系。
  * 2. 陡坡：与东南西北四个相邻列的地表高度差最大的那个 ≥ STEEP_RISE，石头，不铺泥土。
- * 3. 海岸：地表不高于 BEACH_MAX_Y 的列，平原与冰雪在 BEACH_REACH 格内有大海时是沙滩（沙子），高山是石头岸；
- *    大海群系里露出水面的列在 BEACH_SEAWARD_REACH 格内与平原或冰雪相邻时也是沙子，沙滩向海一侧延伸两格。
- * 4. 雪线以上的高山、任意高度的冰雪、寒冷处大海群系里露出水面的列：雪草方块。
+ * 3. 海岸：地表不高于 BEACH_MAX_Y 的列。平原与冰雪在 BEACH_REACH 格内有大海时是沙滩（沙子），高山是石头岸；
+ *    大海群系里露出水面的列按这一列自身的起伏与温度铺：起伏高于 MOUNTAIN_RELIEF 是石头，否则寒冷处是雪草方块，
+ *    其余是沙子。沙滩因此从陆地一侧约 BEACH_REACH 格一直铺到水边。
+ * 4. 雪线以上的高山、任意高度的冰雪、寒冷处大海群系里地表高于 BEACH_MAX_Y 的列：雪草方块。
  * 5. 其余：草方块。
  *
  * 悬垂下方的段只按 1、4、5 铺（陡坡与海岸只看最高那一段），雪线按那一段顶面的 y 判断。
@@ -36,15 +37,11 @@ export const SHALLOW_FLOOR_MIN_Y = 56;
 export const BEACH_MAX_Y = SEA_LEVEL + 4;
 
 /**
- * 海岸的判定距离（格）：平原、冰雪与高山的列沿 x、沿 z 四个方向各看 1 到 BEACH_REACH 格，有大海的列就是临海；
- * 大海群系里露出水面的列各看 1 到 BEACH_SEAWARD_REACH 格，与平原或冰雪相邻就铺沙子，沙滩向海一侧延伸。
- * 沙滩因此最宽 BEACH_REACH + BEACH_SEAWARD_REACH 格。
- *
- * 大海一侧只铺两格：三维密度地形的岸边是缓坡，水边多在大海群系里约 10 格处（三个种子的中位数 9 到 11 格），
- * 一直铺到水边沙滩就有十几格宽，所以沙滩与水边之间仍会留一条大海群系的草方块（寒冷处是雪草方块）。
+ * 海岸的判定距离（格）：平原、冰雪与高山的列沿 x、沿 z 四个方向各看 1 到 BEACH_REACH 格，有大海的列就是临海。
+ * 大海群系里的列不找邻列。三维密度地形的岸边是缓坡，水边多在大海群系里约 10 格处（三个种子的中位数 9 到 11 格），
+ * 所以平原临海的沙滩宽度中位数约 12 到 14 格，岸坡缓的地方二十多格。
  */
 export const BEACH_REACH = 4;
-export const BEACH_SEAWARD_REACH = 2;
 
 /**
  * 大陆度离大海阈值不超过这么多的列才去找附近的大海。大陆度每格最多变 0.0035（四个种子的大范围采样），
@@ -52,11 +49,15 @@ export const BEACH_SEAWARD_REACH = 2;
  */
 export const COAST_CONTINENTALNESS_BAND = 0.02;
 
-/** 规则读的样本：任意一列的地表高度、群系、大陆度，与是不是寒冷处（与海平面那层结冰同一个阈值）。 */
+/**
+ * 规则读的样本：任意一列的地表高度、群系、大陆度、起伏，与是不是寒冷处（与海平面那层结冰同一个阈值）。
+ * 起伏与温度只问大海群系里露出水面的那一列自身，不问邻列。
+ */
 export interface SurfaceSamples {
   readonly heightAt: (x: number, z: number) => number;
   readonly biomeAt: (x: number, z: number) => Biome;
   readonly continentalnessAt: (x: number, z: number) => number;
+  readonly reliefAt: (x: number, z: number) => number;
   readonly isColdAt: (x: number, z: number) => boolean;
 }
 
@@ -74,7 +75,6 @@ function axisOffsets(reach: number): ReadonlyArray<readonly [number, number]> {
 }
 
 const LANDWARD_OFFSETS = axisOffsets(BEACH_REACH);
-const SEAWARD_OFFSETS = axisOffsets(BEACH_SEAWARD_REACH);
 
 /** 被水盖住的顶面：浅处沙子，深处沙砾。 */
 export function underwaterFloorAt(y: number): BlockType {
@@ -117,20 +117,20 @@ function anyNear(
   return false;
 }
 
-/** 海岸上的列顶：沙子或石头；不在海岸返回 undefined。地表已知露出水面且不高于 BEACH_MAX_Y。 */
+/**
+ * 海岸上的列顶：沙子、雪草方块或石头；不在海岸返回 undefined。地表已知露出水面、不高于 BEACH_MAX_Y、不是陡坡。
+ *
+ * 大海群系的列总在海岸上，按这一列自身判断：起伏高于 MOUNTAIN_RELIEF（与群系判断同一个比较）是石头，高山临海
+ * 因此整段是石头岸；否则寒冷处是雪草方块，与海平面那层结冰一致；其余是沙子。陆地一侧的列 BEACH_REACH 格内
+ * 有大海时，平原与冰雪是沙子，高山是石头。
+ */
 function coastTop(samples: SurfaceSamples, x: number, z: number, biome: Biome): BlockType | undefined {
-  const c = samples.continentalnessAt(x, z);
-  const ocean = OCEAN_CONTINENTALNESS;
   if (biome === Biome.Ocean) {
-    // 大海一侧露出水面的列：与平原或冰雪相邻时铺沙子，沙滩向海一侧延伸两格。
-    if (c < ocean - COAST_CONTINENTALNESS_BAND) return undefined;
-    const beachLand = (bx: number, bz: number): boolean => {
-      const b = samples.biomeAt(bx, bz);
-      return b === Biome.Plains || b === Biome.Snowy;
-    };
-    return anyNear(SEAWARD_OFFSETS, x, z, beachLand) ? BlockType.Sand : undefined;
+    if (samples.reliefAt(x, z) > MOUNTAIN_RELIEF) return BlockType.Stone;
+    return samples.isColdAt(x, z) ? BlockType.SnowyGrass : BlockType.Sand;
   }
-  if (c >= ocean + COAST_CONTINENTALNESS_BAND) return undefined;
+  const ocean = OCEAN_CONTINENTALNESS;
+  if (samples.continentalnessAt(x, z) >= ocean + COAST_CONTINENTALNESS_BAND) return undefined;
   if (!anyNear(LANDWARD_OFFSETS, x, z, (ox, oz) => samples.continentalnessAt(ox, oz) < ocean)) return undefined;
   return biome === Biome.Mountains ? BlockType.Stone : BlockType.Sand;
 }

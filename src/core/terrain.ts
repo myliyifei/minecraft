@@ -16,13 +16,7 @@ import {
   temperatureAt,
 } from './terrain-density';
 import { Biome } from './biome';
-import {
-  BEACH_REACH,
-  BEACH_SEAWARD_REACH,
-  coverColumn,
-  highestTopBlock,
-  type SurfaceSamples,
-} from './surface';
+import { BEACH_REACH, coverColumn, highestTopBlock, type SurfaceSamples } from './surface';
 import { plantOakTrees, type SurfaceHeightAt, type TreePlacement } from './tree';
 
 import type { ColumnCoord } from './world';
@@ -122,6 +116,7 @@ export function createTerrain(seed: number): Terrain {
     heightAt: (x, z) => densitySurfaceHeight(seed, x, z),
     biomeAt: (x, z) => biomeAt(seed, x, z, continentalnessAt(seed, x, z)),
     continentalnessAt: (x, z) => continentalnessAt(seed, x, z),
+    reliefAt: (x, z) => reliefAt(seed, x, z),
     isColdAt: (x, z) => isColdAt(seed, x, z),
   };
   const queries: Omit<Terrain, 'generateChunk' | 'spawnColumn'> = {
@@ -166,7 +161,7 @@ function dirtDepthAt(seed: number, x: number, z: number): number {
 }
 
 /** 区块生成时群系与大陆度缓存的范围：区块四周各 BEACH_REACH 列，铺地表找海岸只看到这么远。 */
-const CLIMATE_MARGIN = Math.max(BEACH_REACH, BEACH_SEAWARD_REACH);
+const CLIMATE_MARGIN = BEACH_REACH;
 const CLIMATE_WINDOW = CHUNK_SIZE + 2 * CLIMATE_MARGIN;
 
 /**
@@ -218,6 +213,8 @@ function chunkSamples(
       return biome;
     },
     continentalnessAt: continentalnessOf,
+    // 起伏只有大海群系里露出水面的低处列才问，每列最多一次，不缓存。
+    reliefAt: (x, z) => reliefAt(seed, x, z),
     // 只有大海群系露出水面的列才问，次数少，不缓存。
     isColdAt: (x, z) => isColdAt(seed, x, z),
   };

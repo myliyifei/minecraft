@@ -27,6 +27,14 @@ export const flatTestTerrain: TerrainGenerator = (cx, cz) => {
   return chunk;
 };
 
+/**
+ * 高度场的实心段查询（`Terrain.isSolidSpan`）：每一列地表高度及以下都是地形方块，没有悬垂。
+ * 平地与合成地表的地形对象、水塘放置输入用它。
+ */
+export function solidUpToSurface(surfaceHeightAt: (x: number, z: number) => number): Terrain['isSolidSpan'] {
+  return (x, z, _fromY, toY) => toY <= surfaceHeightAt(x, z);
+}
+
 /** 测试世界加载的区块半径。3×3 个区块够物理测试走上一阵，也不必等生成太久。 */
 const TEST_CHUNK_RADIUS = 1;
 
@@ -62,5 +70,6 @@ export function flatTerrain(seed: number): Terrain {
     surfaceHeightAt: () => FLAT_GROUND_Y,
     surfaceBlockAt: () => BlockType.Grass,
     spawnColumn: { x: 0, z: 0 },
+    isSolidSpan: solidUpToSurface(() => FLAT_GROUND_Y),
   };
 }

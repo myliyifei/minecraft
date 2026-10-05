@@ -5,6 +5,7 @@ import { perlin2 } from '../../src/core/noise';
 import { pondsTouching, type Pond, type PondPlacement } from '../../src/core/pond';
 import { Biome, createTerrain, type ColumnCoord, type Terrain } from '../../src/core/terrain';
 import { chunkOf, localOf } from '../../src/core/world';
+import { solidUpToSurface } from '../helpers/flat-terrain';
 
 /**
  * 水塘的规则在合成地形上的边界（#81，补 tests/core/pond.test.ts）：真实平原的水塘几乎都落在地表同高的平地上，
@@ -30,7 +31,7 @@ function pondsIn(placement: PondPlacement, coords: Iterable<{ cx: number; cz: nu
 }
 
 function placement(surfaceHeightAt: (x: number, z: number) => number, spawnColumn = FAR_SPAWN, seed = 314_159): PondPlacement {
-  return { seed, spawnColumn, biomeAt: () => Biome.Plains, surfaceHeightAt };
+  return { seed, spawnColumn, biomeAt: () => Biome.Plains, surfaceHeightAt, isSolidSpan: solidUpToSurface(surfaceHeightAt) };
 }
 
 /**

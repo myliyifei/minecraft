@@ -6,6 +6,7 @@ import { SNOW_LINE_Y } from '../../src/core/surface';
 import { Biome, createTerrain, type ColumnCoord, type Terrain } from '../../src/core/terrain';
 import { treesTouching } from '../../src/core/tree';
 import { chunkOf, localOf, type ChunkCoord } from '../../src/core/world';
+import { solidUpToSurface } from '../helpers/flat-terrain';
 import { isPlantBlock } from '../helpers/plants';
 import { columnKey, pondKey, pondsTouching, type Pond, type PondPlacement } from '../helpers/ponds';
 import { gridColumns, highestTerrainY, isInterior, isTerrainBlock, SURVEY_SEEDS } from '../helpers/terrain-survey';
@@ -240,7 +241,7 @@ function expectEnoughPonds(): Array<{ seed: number; pond: GeneratedPond }> {
 
 /** 平地的放置输入：地表处处同高，群系由调用方给。 */
 function flatPlacement(seed: number, biomeAt: (x: number, z: number) => Biome, surfaceY: number, spawn: ColumnCoord): PondPlacement {
-  return { seed, spawnColumn: spawn, biomeAt, surfaceHeightAt: () => surfaceY };
+  return { seed, spawnColumn: spawn, biomeAt, surfaceHeightAt: () => surfaceY, isSolidSpan: solidUpToSurface(() => surfaceY) };
 }
 
 /** 一片区块里 pondsTouching 给出的水塘，按 pondKey 去重。 */

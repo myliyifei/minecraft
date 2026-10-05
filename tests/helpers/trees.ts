@@ -5,7 +5,7 @@ import { SNOW_LINE_Y } from '../../src/core/surface';
 import { Biome, createTerrain, type ColumnCoord, type Terrain } from '../../src/core/terrain';
 import { plantTree, plantTrees, TreeSpecies, treesTouching, type Tree, type TreePlacement } from '../../src/core/tree';
 import { chunkOf, type ChunkCoord } from '../../src/core/world';
-import { FLAT_GROUND_Y } from './flat-terrain';
+import { FLAT_GROUND_Y, solidUpToSurface } from './flat-terrain';
 import { BIRCH, OAK, SPRUCE, type WoodSpecies } from './wood-species';
 
 /**
@@ -133,6 +133,7 @@ export function flatForest(seed: number, biome: Biome, options: FlatForestOption
     surfaceHeightAt: () => surfaceY,
     surfaceBlockAt: (x, z) => flatTopBlock(biomeAt(x, z), surfaceY),
     spawnColumn: options.spawnColumn ?? { x: 0, z: 0 },
+    isSolidSpan: solidUpToSurface(() => surfaceY),
   };
   return {
     ...placement,

@@ -2,7 +2,7 @@ import { BlockType } from '../../src/core/block';
 import { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, SEA_LEVEL, WORLD_MIN_Y } from '../../src/core/constants';
 import { Biome, type ColumnCoord, type Terrain } from '../../src/core/terrain';
-import { FLAT_GROUND_Y, flatTestTerrain } from './flat-terrain';
+import { FLAT_GROUND_Y, flatTestTerrain, solidUpToSurface } from './flat-terrain';
 
 /**
  * 原点是大海的假地形（#84）。
@@ -52,5 +52,11 @@ export function oceanOriginChunk(cx: number, cz: number): Chunk {
 
 /** 原点是大海的地形对象。签名与 `GameCoreOptions.terrain` 相同。 */
 export function oceanOriginTerrain(seed: number): Terrain {
-  return { seed, ...oceanOriginQueries, generateChunk: oceanOriginChunk, spawnColumn: OCEAN_ORIGIN_SPAWN };
+  return {
+    seed,
+    ...oceanOriginQueries,
+    generateChunk: oceanOriginChunk,
+    spawnColumn: OCEAN_ORIGIN_SPAWN,
+    isSolidSpan: solidUpToSurface(oceanOriginQueries.surfaceHeightAt),
+  };
 }

@@ -4,6 +4,7 @@ import { CHUNK_SIZE, SEA_LEVEL, WORLD_MIN_Y } from './constants';
 import { hashCoords } from './noise';
 import { plantOreVeins } from './ore';
 import { plantSurfacePlants } from './plant';
+import { digPonds, isPondColumn, type PondPlacement } from './pond';
 import {
   COLD_TEMPERATURE,
   continentalnessAt,
@@ -120,14 +121,22 @@ export function createTerrain(seed: number): Terrain {
     reliefAt: (x, z) => reliefAt(seed, x, z),
     isColdAt: (x, z) => isColdAt(seed, x, z),
   };
-  const queries: Omit<Terrain, 'generateChunk' | 'spawnColumn'> = {
-    seed,
+  const beforePonds: SpawnColumnQueries = {
     biomeAt: samples.biomeAt,
     surfaceHeightAt: samples.heightAt,
     surfaceBlockAt: (x, z) => highestTopBlock(samples, x, z),
   };
-  const placement = { ...queries, spawnColumn: findSpawnColumn(queries) };
-  return { ...placement, generateChunk: densityGenerator(placement) };
+  // 出生列按挖水塘之前的列顶地表方块找：水塘要避开出生列，出生列再看水塘就成了循环。水塘不进出生列周围
+  // POND_SPAWN_CLEARANCE 格，所以出生列那一列挖不挖水塘结论都一样。
+  const spawnColumn = findSpawnColumn(beforePonds);
+  const ponds: PondPlacement = { seed, spawnColumn, biomeAt: samples.biomeAt, surfaceHeightAt: samples.heightAt };
+  const placement: Omit<Terrain, 'generateChunk'> = {
+    ...beforePonds,
+    seed,
+    spawnColumn,
+    surfaceBlockAt: (x, z) => (isPondColumn(ponds, x, z) ? BlockType.Water : highestTopBlock(samples, x, z)),
+  };
+  return { ...placement, generateChunk: densityGenerator(placement, ponds) };
 }
 
 /**
@@ -251,7 +260,7 @@ function chunkSamples(
  * 7. 放地表植物（`plantSurfacePlants`）：在区块内逐列放，列顶是草方块或雪草方块、上面是空气时按群系与种子哈希决定，
  *    在树之后放，所以不长在原木与树叶的格里；出生列周围不长。
  */
-function densityGenerator(queries: Omit<Terrain, 'generateChunk'>): TerrainGenerator {
+function densityGenerator(queries: Omit<Terrain, 'generateChunk'>, ponds: PondPlacement): TerrainGenerator {
   const { seed } = queries;
   return (cx, cz) => {
     const chunk = new Chunk(cx, cz);
@@ -296,7 +305,12 @@ function densityGenerator(queries: Omit<Terrain, 'generateChunk'>): TerrainGener
         chunk.set(lx, heights[(lz + 1) * HEIGHT_WINDOW + (lx + 1)]!, lz, BlockType.Stone);
       }
     }
-    // 再种树：树叶只往空气里长，得先有地面才知道哪里是空气。区块里的列直接读上面铺好的顶层。
+    // 再挖水塘：水塘列的顶层记成水，下面放树、放植物时区块里的列读到的才与列顶地表方块查询一致。
+    digPonds(ponds, chunk, (lx, lz) => {
+      highest[lz * CHUNK_SIZE + lx] = BlockType.Water;
+    });
+    // 再种树：树叶只往空气里长，得先有地面才知道哪里是空气。区块里的列直接读上面铺好的顶层（水塘列是水），
+    // 区块外的列调列顶地表方块查询（含水塘）。
     const placement: TreePlacement = {
       seed,
       spawnColumn: queries.spawnColumn,
@@ -306,7 +320,8 @@ function densityGenerator(queries: Omit<Terrain, 'generateChunk'>): TerrainGener
         const lx = x - originX;
         const lz = z - originZ;
         const inChunk = lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE;
-        return inChunk ? (highest[lz * CHUNK_SIZE + lx] as BlockType) : highestTopBlock(samples, x, z);
+        if (inChunk) return highest[lz * CHUNK_SIZE + lx] as BlockType;
+        return isPondColumn(ponds, x, z) ? BlockType.Water : highestTopBlock(samples, x, z);
       },
     };
     plantTrees(placement, chunk);

@@ -330,6 +330,45 @@ describe('水塘的形状（#81）', () => {
     expect(wrong.slice(0, 20)).toEqual([]);
   });
 
+  it('边缘不缺口（高山，含悬垂）：三个种子雪线以下的高山内部各 12×12 个区块，pondsTouching 给出的每个水塘里每一格水的四邻是水或地形方块', () => {
+    const wrong: string[] = [];
+    let ponds = 0;
+    for (const seed of SURVEY_SEEDS) {
+      const terrain = createTerrain(seed);
+      let center: ChunkCoord | undefined;
+      for (const column of gridColumns(FIND_HALF, FIND_STEP)) {
+        if (terrain.biomeAt(column.x, column.z) !== Biome.Mountains) continue;
+        if (terrain.surfaceHeightAt(column.x, column.z) >= SNOW_LINE_Y - 30 || !isInterior(terrain, column, 32)) continue;
+        center = { cx: chunkOf(column.x), cz: chunkOf(column.z) };
+        break;
+      }
+      expect(center, `种子 ${seed} 找不到雪线以下的高山`).toBeDefined();
+      const chunks = new Map<string, Chunk>();
+      const blockAt = (x: number, y: number, z: number): BlockType => {
+        const coord = { cx: chunkOf(x), cz: chunkOf(z) };
+        let chunk = chunks.get(chunkKeyOf(coord));
+        if (!chunk) {
+          chunk = terrain.generateChunk(coord.cx, coord.cz);
+          chunks.set(chunkKeyOf(coord), chunk);
+        }
+        return chunk.get(localOf(x), y, localOf(z));
+      };
+      for (const pond of pondsIn(terrain, chunkSquare(center!, 12, -6))) {
+        ponds++;
+        for (const { x, z } of pond.columns) {
+          for (let y = pond.waterY; blockAt(x, y, z) === BlockType.Water; y--) {
+            for (const [dx, dz] of NEIGHBORS) {
+              const block = blockAt(x + dx, y, z + dz);
+              if (block !== BlockType.Water && !isTerrainBlock(block)) wrong.push(`种子 ${seed} (${x}, ${y}, ${z}) 旁边是 ${block}`);
+            }
+          }
+        }
+      }
+    }
+    expect(ponds, '高山里的水塘').toBeGreaterThan(5);
+    expect(wrong.slice(0, 20)).toEqual([]);
+  });
+
   it('盆地边缘保持原样：紧挨水塘、本身不是水塘列的列，最高的地形方块仍在地表高度，不低于水面，列顶地表方块与查询一致', () => {
     const wrong: string[] = [];
     let rims = 0;

@@ -346,6 +346,31 @@ export function densitySurfaceHeight(seed: number, x: number, z: number): number
   );
 }
 
+/**
+ * 一列从 fromY 到 toY（含两端）是不是全是地形方块（密度为正）。只求这一列四角的格点，不生成区块。
+ *
+ * 水塘判断盆地边缘要用：地表高度只说明最高的地形方块在哪，悬垂下方可能是空气，水贴着它就会露在空气里。
+ * 与 `densitySurfaceHeight` 一样走 `scanColumn`，所以与区块生成里那一列的实心与空气逐格相同。
+ */
+export function densitySolidSpan(seed: number, x: number, z: number, fromY: number, toY: number): boolean {
+  const { g: gx, f: fx } = gridCell(x);
+  const { g: gz, f: fz } = gridCell(z);
+  const corners = cornersOf(
+    new GridColumn(seed, gx, gz),
+    new GridColumn(seed, gx + 1, gz),
+    new GridColumn(seed, gx, gz + 1),
+    new GridColumn(seed, gx + 1, gz + 1),
+    fx,
+    fz,
+  );
+  let all = true;
+  scanColumn(corners, toY, fromY, (_y, solid) => {
+    all = solid;
+    return solid;
+  });
+  return all;
+}
+
 /** 地表高度窗口的边长：区块本身加四周各一列（铺地表判陡坡要看东南西北四个相邻列）。 */
 export const HEIGHT_WINDOW = CHUNK_SIZE + 2;
 

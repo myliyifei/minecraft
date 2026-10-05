@@ -8,6 +8,7 @@ import { digPonds, isPondColumn, type PondPlacement } from './pond';
 import {
   COLD_TEMPERATURE,
   continentalnessAt,
+  densitySolidSpan,
   densitySurfaceHeight,
   fillDensity,
   HEIGHT_WINDOW,
@@ -52,6 +53,11 @@ export interface Terrain {
   readonly surfaceBlockAt: (x: number, z: number) => BlockType;
   /** 出生列（见 CONTEXT.md「出生点」）。 */
   readonly spawnColumn: ColumnCoord;
+  /**
+   * 那一列 fromY 到 toY（含两端）是不是全是地形方块（挖水塘之前）。水塘判断盆地边缘挡不挡得住水要用（`pond.ts`）；
+   * 没有悬垂的地形（平地测试用的那几份）可以不给，按地表高度及以下都是地形方块处理。
+   */
+  readonly isSolidSpan?: (x: number, z: number, fromY: number, toY: number) => boolean;
 }
 
 /** 出生列搜索的步长（方块）：只查 x、z 都是它的倍数的列。 */
@@ -131,14 +137,25 @@ export function createTerrain(seed: number): Terrain {
   // 出生列按挖水塘之前的列顶地表方块找：水塘要避开出生列，出生列再看水塘就成了循环。水塘不进出生列周围
   // POND_SPAWN_CLEARANCE 格，所以出生列那一列挖不挖水塘结论都一样。
   const spawnColumn = findSpawnColumn(beforePonds);
-  const ponds: PondPlacement = { seed, spawnColumn, biomeAt: samples.biomeAt, surfaceHeightAt: samples.heightAt };
+  const isSolidSpan = (x: number, z: number, fromY: number, toY: number): boolean =>
+    densitySolidSpan(seed, x, z, fromY, toY);
+  const ponds: PondPlacement = { seed, spawnColumn, biomeAt: samples.biomeAt, surfaceHeightAt: samples.heightAt, isSolidSpan };
   const placement: Omit<Terrain, 'generateChunk'> = {
     ...beforePonds,
     seed,
     spawnColumn,
-    surfaceBlockAt: (x, z) => (isPondColumn(ponds, x, z) ? BlockType.Water : highestTopBlock(samples, x, z)),
+    isSolidSpan,
+    surfaceBlockAt: (x, z) => surfaceBlockWithPonds(ponds, samples, x, z),
   };
   return { ...placement, generateChunk: densityGenerator(placement, ponds) };
+}
+
+/**
+ * 列顶地表方块（CONTEXT.md「列顶地表方块」）：水塘列是水，其余按铺地表的规则（`surface.ts`）。地形对象的查询与
+ * 生成器放树时区块外的列都调它，两边对水塘列给出同一个结论；样本可以是查询用的那份，也可以是区块生成那份。
+ */
+function surfaceBlockWithPonds(ponds: PondPlacement, samples: SurfaceSamples, x: number, z: number): BlockType {
+  return isPondColumn(ponds, x, z) ? BlockType.Water : highestTopBlock(samples, x, z);
 }
 
 /**
@@ -324,7 +341,7 @@ function densityGenerator(queries: Omit<Terrain, 'generateChunk'>, ponds: PondPl
         const lz = z - originZ;
         const inChunk = lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE;
         if (inChunk) return highest[lz * CHUNK_SIZE + lx] as BlockType;
-        return isPondColumn(ponds, x, z) ? BlockType.Water : highestTopBlock(samples, x, z);
+        return surfaceBlockWithPonds(ponds, samples, x, z);
       },
     };
     plantTrees(placement, chunk);

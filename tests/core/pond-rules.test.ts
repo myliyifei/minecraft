@@ -3,7 +3,7 @@ import { BlockType } from '../../src/core/block';
 import { SEA_LEVEL } from '../../src/core/constants';
 import { perlin2 } from '../../src/core/noise';
 import { pondsTouching, type Pond, type PondPlacement } from '../../src/core/pond';
-import { Biome, createTerrain, type ColumnCoord } from '../../src/core/terrain';
+import { Biome, createTerrain, type ColumnCoord, type Terrain } from '../../src/core/terrain';
 import { chunkOf, localOf } from '../../src/core/world';
 
 /**
@@ -140,6 +140,44 @@ describe('平地上的水塘', () => {
     expect(wrong).toEqual([]);
   });
 
+  it('盆地边缘的实心段：边缘一列挨着的水塘列里塘底最低的那列之上一格到水面都要实心，那一格是空气时不生成水塘，再低一格是空气时照常生成', () => {
+    const ponds = pondsIn(flat(80), chunkSquare(12));
+    const wrong: string[] = [];
+    let tried = 0;
+    for (const pond of ponds) {
+      const keys = new Set(pond.columns.map(key));
+      // 边缘一列挨着两列水塘列（都不是中心列）：把其中一列挖低，边缘这一列要实心的那一段因此往下伸
+      let pick: { rim: ColumnCoord; pit: ColumnCoord } | undefined;
+      for (const c of pond.columns) {
+        for (const [dx, dz] of NEIGHBORS) {
+          const rim = { x: c.x + dx, z: c.z + dz };
+          if (keys.has(key(rim))) continue;
+          const touching = NEIGHBORS.map(([ex, ez]) => ({ x: rim.x + ex, z: rim.z + ez })).filter(
+            (n) => keys.has(key(n)) && (n.x !== pond.x || n.z !== pond.z),
+          );
+          if (touching.length >= 2) pick = { rim, pit: touching[0]! };
+        }
+      }
+      if (!pick) continue;
+      tried++;
+      const { rim, pit } = pick;
+      // 挖低的那列地表在 水面 − 3，塘底在 水面 − 4，边缘这一列从 水面 − 3 到水面都要实心
+      const surface = (x: number, z: number): number => (x === pit.x && z === pit.z ? pond.waterY - 3 : 80);
+      for (const gapY of [pond.waterY - 3, pond.waterY - 4]) {
+        const holed: PondPlacement = {
+          ...placement(surface),
+          isSolidSpan: (x, z, from, to) => !(x === rim.x && z === rim.z && from <= gapY && gapY <= to) && to <= surface(x, z),
+        };
+        const found = pondsIn(holed, [{ cx: chunkOf(pond.x), cz: chunkOf(pond.z) }]);
+        const present = found.some((p) => p.x === pond.x && p.z === pond.z);
+        const expected = gapY === pond.waterY - 4;
+        if (present !== expected) wrong.push(`(${pond.x}, ${pond.z}) 边缘 ${key(rim)} 在 y ${gapY} 是空气：${present ? '生成了' : '没生成'}`);
+      }
+    }
+    expect(tried).toBeGreaterThan(5);
+    expect(wrong).toEqual([]);
+  });
+
   it('出生列的边界：出生列离水塘最近的一列正好 8 格时水塘照放，7 格时整个不放', () => {
     const ponds = pondsIn(flat(80), chunkSquare(12)).slice(0, 10);
     expect(ponds.length).toBe(10);
@@ -197,7 +235,7 @@ describe('陡坡上的水塘列', () => {
     [777, -790, 2322],
     [777, -789, 2323],
     [-42, -1486, 2285],
-    [-42, 621, 2031],
+    [-42, -1487, 2286],
   ];
 
   it.each(STEEP_POND_COLUMNS)('种子 %i 列 (%i, %i)：列顶地表方块查询是水，生成结果里地表高度那一格也是水', (seed, x, z) => {
@@ -207,5 +245,47 @@ describe('陡坡上的水塘列', () => {
     expect(rise, '是陡坡').toBeGreaterThanOrEqual(3);
     expect(terrain.surfaceBlockAt(x, z)).toBe(BlockType.Water);
     expect(terrain.generateChunk(chunkOf(x), chunkOf(z)).get(localOf(x), h, localOf(z))).toBe(BlockType.Water);
+  });
+});
+
+describe('悬垂地形上的水塘', () => {
+  /**
+   * 种子 1 的高山里，中心列 (1927, 1514) 一带：邻列 (1927, 1511) 的地表高度是 y 136 一格悬空的石头，其下 y 126 到 135
+   * 是空气。只看地表高度时这一列算盆地边缘（地表不低于水面 126），水塘列 (1927, 1512) 在 y 126 的水侧面就挨着空气。
+   */
+  const SEED = 1;
+  const OVERHANG = { x: 1927, z: 1511 };
+
+  it('盆地边缘那一列在水面高度上是空气时不生成水塘：附近的区块里每一格水的四邻是水或地形方块', () => {
+    const terrain = createTerrain(SEED);
+    const chunkAt = new Map<string, ReturnType<Terrain['generateChunk']>>();
+    const blockAt = (x: number, y: number, z: number): BlockType => {
+      const k = `${chunkOf(x)},${chunkOf(z)}`;
+      let chunk = chunkAt.get(k);
+      if (!chunk) {
+        chunk = terrain.generateChunk(chunkOf(x), chunkOf(z));
+        chunkAt.set(k, chunk);
+      }
+      return chunk.get(localOf(x), y, localOf(z));
+    };
+    // 前提：那一列确实是悬垂，地表高度在 y 136，y 126 是空气
+    expect(terrain.surfaceHeightAt(OVERHANG.x, OVERHANG.z)).toBe(136);
+    expect(blockAt(OVERHANG.x, 126, OVERHANG.z)).toBe(BlockType.Air);
+
+    const wrong: string[] = [];
+    for (let x = OVERHANG.x - 24; x <= OVERHANG.x + 24; x++) {
+      for (let z = OVERHANG.z - 24; z <= OVERHANG.z + 24; z++) {
+        if (terrain.surfaceBlockAt(x, z) !== BlockType.Water) continue;
+        const surface = terrain.surfaceHeightAt(x, z);
+        for (let y = surface; blockAt(x, y, z) === BlockType.Water; y--) {
+          for (const [dx, dz] of NEIGHBORS) {
+            const n = blockAt(x + dx, y, z + dz);
+            if (n === BlockType.Air) wrong.push(`(${x}, ${y}, ${z}) 旁边 (${x + dx}, ${y}, ${z + dz}) 是空气`);
+          }
+        }
+      }
+    }
+    expect(wrong).toEqual([]);
+    expect(terrain.surfaceBlockAt(1927, 1512)).not.toBe(BlockType.Water);
   });
 });

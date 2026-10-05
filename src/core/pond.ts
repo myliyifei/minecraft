@@ -24,8 +24,16 @@ import type { ColumnCoord } from './world';
  * 地表高度查询不随水塘变（CONTEXT.md「地表高度」）：这里读的是挖之前的高度，挖水塘只改区块里写下的方块。
  */
 
-/** 放水塘要的输入。成员名与地形对象、`TreePlacement` 的同名成员一致，地形对象可以直接当它传。不含列顶地表方块：那个查询要问水塘。 */
-export type PondPlacement = Pick<TreePlacement, 'seed' | 'spawnColumn' | 'biomeAt' | 'surfaceHeightAt'>;
+/**
+ * 放水塘要的输入。成员名与地形对象、`TreePlacement` 的同名成员一致，地形对象可以直接当它传。不含列顶地表方块：那个查询要问水塘。
+ *
+ * `isSolidSpan` 可以不给：不给时按「每一列地表高度及以下都是地形方块」处理（平地与测试用的高度场就是这样）。
+ * 三维密度地形有悬垂，地形对象给出它。
+ */
+export type PondPlacement = Pick<TreePlacement, 'seed' | 'spawnColumn' | 'biomeAt' | 'surfaceHeightAt'> & {
+  /** (x, z) 那一列 fromY 到 toY（含两端）是不是全是地形方块。 */
+  readonly isSolidSpan?: (x: number, z: number, fromY: number, toY: number) => boolean;
+};
 
 /** 一个水塘。 */
 export interface Pond {
@@ -222,7 +230,36 @@ function pondInCell(placement: PondPlacement, cellX: number, cellZ: number): Pon
     }
   }
   if (Math.max(maxX - minX, maxZ - minZ) + 1 < POND_DIAMETER_MIN) return undefined;
+  if (!rimHoldsWater(placement, columns, floors, waterY)) return undefined;
   return { x: shape.x, z: shape.z, waterY, columns, floors };
+}
+
+/**
+ * 盆地边缘挡不挡得住水：每一列水塘列的四邻里不是水塘列的那些，从这一列塘底之上一格到水面都要是地形方块。
+ * 地表高度不低于水面只说明最高的地形方块够高，悬垂下方可能是空气，所以逐列问 `isSolidSpan`；
+ * 一列边缘挨着几列水塘列时按其中最低的塘底问一次。没有 `isSolidSpan` 时按高度场处理，总是挡得住。
+ */
+function rimHoldsWater(
+  placement: PondPlacement,
+  columns: readonly ColumnCoord[],
+  floors: readonly number[],
+  waterY: number,
+): boolean {
+  const isSolidSpan = placement.isSolidSpan;
+  if (!isSolidSpan) return true;
+  const inPond = new Set(columns.map(({ x, z }) => columnKey(x, z)));
+  const lowest = new Map<number, { x: number; z: number; from: number }>();
+  columns.forEach(({ x, z }, i) => {
+    for (const [ex, ez] of NEIGHBORS) {
+      const k = columnKey(x + ex, z + ez);
+      if (inPond.has(k)) continue;
+      const from = floors[i]! + 1;
+      const known = lowest.get(k);
+      if (!known || from < known.from) lowest.set(k, { x: x + ex, z: z + ez, from });
+    }
+  });
+  for (const { x, z, from } of lowest.values()) if (!isSolidSpan(x, z, from, waterY)) return false;
+  return true;
 }
 
 /** 缓存里的一格：这一格的水塘与它的水塘列（键见 `columnKey`）；不放水塘是 null。 */

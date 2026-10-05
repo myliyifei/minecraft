@@ -64,10 +64,9 @@ function nearestColumn(center: ColumnCoord, reach: number, match: (x: number, z:
   return undefined;
 }
 
-/** 露出水面的沙滩列：平原或冰雪，地表在海平面到海平面上 4 格之间，列顶地表方块是沙子。 */
+/** 露出水面的沙滩列：平原（冰雪临海不铺沙子），地表在海平面到海平面上 4 格之间，列顶地表方块是沙子。 */
 function isBeach(x: number, z: number): boolean {
-  const biome = TERRAIN.biomeAt(x, z);
-  if (biome !== Biome.Plains && biome !== Biome.Snowy) return false;
+  if (TERRAIN.biomeAt(x, z) !== Biome.Plains) return false;
   const surface = TERRAIN.surfaceHeightAt(x, z);
   if (surface < SEA_LEVEL || surface > SEA_LEVEL + BEACH_MAX_ABOVE_SEA) return false;
   return TERRAIN.surfaceBlockAt(x, z) === SAND;

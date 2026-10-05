@@ -15,9 +15,10 @@ import { MOUNTAIN_RELIEF, OCEAN_CONTINENTALNESS } from './terrain-density';
  * 最高那一段（地表高度那一格）的优先次序：
  * 1. 被水盖住（地表低于海平面）：顶面 y ≥ SHALLOW_FLOOR_MIN_Y 是沙子，更低是沙砾，不论群系。
  * 2. 陡坡：与东南西北四个相邻列的地表高度差最大的那个 ≥ STEEP_RISE，石头，不铺泥土。
- * 3. 海岸：地表不高于 BEACH_MAX_Y 的列。平原与冰雪在 BEACH_REACH 格内有大海时是沙滩（沙子），高山是石头岸；
+ * 3. 海岸：地表不高于 BEACH_MAX_Y 的列。平原在 BEACH_REACH 格内有大海时是沙滩（沙子），高山是石头岸，
+ *    冰雪不算海岸、照规则 4 铺雪草方块；
  *    大海群系里露出水面的列按这一列自身的起伏与温度铺：起伏高于 MOUNTAIN_RELIEF 是石头，否则寒冷处是雪草方块，
- *    其余是沙子。沙滩因此从陆地一侧约 BEACH_REACH 格一直铺到水边。
+ *    其余是沙子。平原临海的沙滩因此从陆地一侧约 BEACH_REACH 格一直铺到水边；冰雪临海从雪地到冰面全是雪草方块。
  * 4. 雪线以上的高山、任意高度的冰雪、寒冷处大海群系里地表高于 BEACH_MAX_Y 的列：雪草方块。
  * 5. 其余：草方块。
  *
@@ -38,7 +39,7 @@ export const SHALLOW_FLOOR_MIN_Y = 56;
 export const BEACH_MAX_Y = SEA_LEVEL + 4;
 
 /**
- * 海岸的判定距离（格）：平原、冰雪与高山的列沿 x、沿 z 四个方向各看 1 到 BEACH_REACH 格，有大海的列就是临海。
+ * 海岸的判定距离（格）：平原与高山的列沿 x、沿 z 四个方向各看 1 到 BEACH_REACH 格，有大海的列就是临海。
  * 大海群系里的列不找邻列。三维密度地形的岸边是缓坡，水边多在大海群系里约 10 格处（三个种子的中位数 9 到 11 格），
  * 所以平原临海的沙滩宽度中位数约 12 到 14 格，岸坡缓的地方二十多格。
  */
@@ -123,13 +124,14 @@ function anyNear(
  *
  * 大海群系的列总在海岸上，按这一列自身判断：起伏高于 MOUNTAIN_RELIEF（与群系判断同一个比较）是石头，
  * 高山临海处大海一侧起伏高的低处列因此也是石头；否则寒冷处是雪草方块，与海平面那层结冰一致；其余是沙子。
- * 陆地一侧的列 BEACH_REACH 格内有大海时，平原与冰雪是沙子，高山是石头。
+ * 陆地一侧的列 BEACH_REACH 格内有大海时，平原是沙子，高山是石头；冰雪不在海岸上（用户决定冰雪临海不铺沙子）。
  */
 function coastTop(samples: SurfaceSamples, x: number, z: number, biome: Biome): BlockType | undefined {
   if (biome === Biome.Ocean) {
     if (samples.reliefAt(x, z) > MOUNTAIN_RELIEF) return BlockType.Stone;
     return samples.isColdAt(x, z) ? BlockType.SnowyGrass : BlockType.Sand;
   }
+  if (biome === Biome.Snowy) return undefined;
   const ocean = OCEAN_CONTINENTALNESS;
   if (samples.continentalnessAt(x, z) >= ocean + COAST_CONTINENTALNESS_BAND) return undefined;
   if (!anyNear(LANDWARD_OFFSETS, x, z, (ox, oz) => samples.continentalnessAt(ox, oz) < ocean)) return undefined;

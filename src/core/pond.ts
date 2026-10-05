@@ -13,11 +13,11 @@ import type { ColumnCoord } from './world';
  *
  * 一个水塘格里最多一个水塘：
  * 1. 格的哈希决定有没有、中心列、椭圆的两个半径与中心深度。
- * 2. 水面 = 椭圆外紧挨椭圆的那一圈列里最低的地表高度。盆地边缘因此都不低于水面，水不会从边上漫出去。
- * 3. 从中心列起按东南西北相邻漫开，只收椭圆内、地表高度不超过水面的列，这些列是水塘列。
+ * 2. 水面 = 椭圆外紧挨椭圆的那一圈列里最低的地表高度。盆地边缘因此都不低于水面，水不会越过盆地边缘。
+ * 3. 从中心列起按四邻接逐列扩展，只收椭圆内、地表高度不超过水面的列，这些列是水塘列。
  * 4. 每一列的深度从中心往外变浅（至少 1）；塘底 = min(地表高度 − 1, 水面 − 深度)，塘底铺沙子，其上到水面灌水。
  *    塘底至少比地表高度低一格，所以水塘列地表高度那一格总是水，列顶地表方块查询给出水与生成结果一致。
- * 5. 下面任何一条成立就整个不放：中心列高于水面、有一列水深超过 POND_DEPTH_MAX、跨度不到 POND_DIAMETER_MIN、
+ * 5. 下面任何一条成立就不生成这个水塘：中心列高于水面、有一列水深超过 POND_DEPTH_MAX、跨度不到 POND_DIAMETER_MIN、
  *    水面不高于海平面、有一列在大海或冰雪里、有一列在高山雪线以上、有一列离出生列不超过 POND_SPAWN_CLEARANCE 格。
  *    最深一列至少 2 格不必另判：中心列不高于水面，它的水深不小于中心深度。
  *
@@ -94,7 +94,7 @@ const POND_SALT = 0x6d2b_79f5;
 
 /**
  * 格的哈希切成几段互不重叠的位：有没有水塘、中心列 x、中心列 z、两个半径、中心深度。
- * 中心列各取 5 位再对 POND_CENTER_SPAN 取余，余数稍有偏斜，看不出来。
+ * 中心列各取 5 位再对 POND_CENTER_SPAN 取余，余数稍有偏斜，偏差可以忽略。
  */
 const PRESENCE_MASK = 0xff;
 const CENTER_X_SHIFT = 8;
@@ -107,8 +107,8 @@ const DEPTH_SHIFT = 24;
 const DEPTH_MASK = 0xff;
 
 /**
- * 有没有水塘那段随机数小于它的格才试着放水塘：240/256 ≈ 94%。一个水塘格是 4 个区块，三个种子的平原里试放的格
- * 约一半因为盆地边缘比中心列低、太深或太小而不放，结果约每 8 个区块一个（实测见 ADR-0021 的 #81 补记）。
+ * 有没有水塘那段随机数小于它的格才尝试放置水塘：240/256 ≈ 94%。一个水塘格是 4 个区块，三个种子的平原里尝试放置的格
+ * 约一半因为盆地边缘比中心列低、太深或太小而不生成，结果约每 8 个区块一个（实测见 ADR-0021 的 #81 补记）。
  */
 const POND_CHANCE = 240;
 
@@ -133,7 +133,7 @@ interface Shape {
   readonly depth: number;
 }
 
-/** 某个水塘格的形状参数；这一格不放水塘则 undefined。 */
+/** 某个水塘格的形状参数；这一格不尝试放置水塘则 undefined。 */
 function shapeInCell(seed: number, cellX: number, cellZ: number): Shape | undefined {
   const roll = hashCoords(seed ^ POND_SALT, cellX, cellZ);
   if ((roll & PRESENCE_MASK) >= POND_CHANCE) return undefined;
@@ -165,7 +165,7 @@ function allowedAt(placement: PondPlacement, x: number, z: number, surface: numb
 /** 地表高度还没问的标记：比世界最低处低得多。 */
 const UNKNOWN_HEIGHT = -0x8000_0000;
 
-/** 某个水塘格里的水塘（规则见本模块开头）；不放则 undefined。只经 placement 的查询读地形。 */
+/** 某个水塘格里的水塘（规则见本模块开头）；不生成则 undefined。只经 placement 的查询读地形。 */
 function pondInCell(placement: PondPlacement, cellX: number, cellZ: number): Pond | undefined {
   const shape = shapeInCell(placement.seed, cellX, cellZ);
   if (!shape) return undefined;
@@ -184,7 +184,7 @@ function pondInCell(placement: PondPlacement, cellX: number, cellZ: number): Pon
     return h;
   };
 
-  // 中心列先问：它高于水面就不放，水面要问的那一圈往往比它多得多，高的中心列可以少问几次。
+  // 中心列先问：它高于水面就不生成，水面要问的那一圈往往比它多得多，高的中心列可以少问几次。
   const center = heightAt(0, 0);
   let waterY = Number.POSITIVE_INFINITY;
   for (let dz = -POND_REACH; dz <= POND_REACH; dz++) {
@@ -262,7 +262,7 @@ function rimHoldsWater(
   return true;
 }
 
-/** 缓存里的一格：这一格的水塘与它的水塘列（键见 `columnKey`）；不放水塘是 null。 */
+/** 缓存里的一格：这一格的水塘与它的水塘列（键见 `columnKey`）；没有水塘是 null。 */
 type CachedCell = { readonly pond: Pond; readonly columns: ReadonlySet<number> } | null;
 
 /**

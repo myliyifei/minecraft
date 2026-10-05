@@ -123,7 +123,7 @@ describe('平地上的水塘', () => {
     expect(pondsIn(flat(SEA_LEVEL + 1), chunkSquare(12)).length).toBeGreaterThan(0);
   });
 
-  it('水深的边界：水塘里一列地表挖低到塘底比水面低 4 格时照放，低 5 格时整个不放', () => {
+  it('水深的边界：水塘里一列地表挖低到塘底比水面低 4 格时照常生成，低 5 格时不生成这个水塘', () => {
     const ponds = pondsIn(flat(80), chunkSquare(12)).slice(0, 10);
     expect(ponds.length).toBe(10);
     const wrong: string[] = [];
@@ -134,7 +134,7 @@ describe('平地上的水塘', () => {
         const surface = (x: number, z: number): number => (x === pit.x && z === pit.z ? pond.waterY - below : 80);
         const found = pondsIn(placement(surface), [{ cx: chunkOf(pond.x), cz: chunkOf(pond.z) }]);
         const present = found.some((p) => p.x === pond.x && p.z === pond.z);
-        if (present !== (below === 3)) wrong.push(`(${pond.x}, ${pond.z}) 的 ${key(pit)} 低 ${below} 格：${present ? '放了' : '没放'}`);
+        if (present !== (below === 3)) wrong.push(`(${pond.x}, ${pond.z}) 的 ${key(pit)} 低 ${below} 格：${present ? '生成了' : '没生成'}`);
       }
     }
     expect(wrong).toEqual([]);
@@ -178,7 +178,7 @@ describe('平地上的水塘', () => {
     expect(wrong).toEqual([]);
   });
 
-  it('出生列的边界：出生列离水塘最近的一列正好 8 格时水塘照放，7 格时整个不放', () => {
+  it('出生列的边界：出生列离水塘最近的一列正好 8 格时水塘照常生成，7 格时不生成这个水塘', () => {
     const ponds = pondsIn(flat(80), chunkSquare(12)).slice(0, 10);
     expect(ponds.length).toBe(10);
     const wrong: string[] = [];
@@ -188,7 +188,7 @@ describe('平地上的水塘', () => {
         const spawn = { x: minX - gap, z: pond.z };
         const found = pondsIn(placement(() => 80, spawn), [{ cx: chunkOf(pond.x), cz: chunkOf(pond.z) }]);
         const present = found.some((p) => p.x === pond.x && p.z === pond.z);
-        if (present !== (gap === 8)) wrong.push(`(${pond.x}, ${pond.z}) 出生列在 ${gap} 格：${present ? '放了' : '没放'}`);
+        if (present !== (gap === 8)) wrong.push(`(${pond.x}, ${pond.z}) 出生列在 ${gap} 格：${present ? '生成了' : '没生成'}`);
       }
     }
     expect(wrong).toEqual([]);

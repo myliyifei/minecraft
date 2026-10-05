@@ -151,7 +151,7 @@ export function createTerrain(seed: number): Terrain {
 }
 
 /**
- * 列顶地表方块（CONTEXT.md「列顶地表方块」）：水塘列是水，其余按铺地表的规则（`surface.ts`）。地形对象的查询与
+ * 列顶地表方块（ADR-0021）：水塘列是水，其余按铺地表的规则（`surface.ts`）。地形对象的查询与
  * 生成器放树时区块外的列都调它，两边对水塘列给出同一个结论；样本可以是查询用的那份，也可以是区块生成那份。
  */
 function surfaceBlockWithPonds(ponds: PondPlacement, samples: SurfaceSamples, x: number, z: number): BlockType {

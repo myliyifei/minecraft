@@ -7,7 +7,7 @@ import {
   WORLD_MAX_Y,
   WORLD_MIN_Y,
 } from '../../src/core/constants';
-import { plainsTerrain, plainsTreePlacement } from '../../src/core/terrain';
+import { createTerrain } from '../../src/core/terrain';
 import { oakTreesTouching } from '../../src/core/tree';
 import { chunkOf, chunksAround, ORIGIN_CHUNK, World } from '../../src/core/world';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
@@ -539,9 +539,9 @@ describe('生成地形的网格', () => {
   it('长了树的区块，网格里有橡木原木与橡树叶的贴图', () => {
     // 从种子生成的世界一路走到网格：树长出来了，而且带着对的贴图上了画面。
     // 单块方块的六面贴图在上一节断言过，这里补的是「生成的树真的进了网格」这一段。
-    const world = new World(plainsTerrain(DEFAULT_SEED));
+    const world = new World(createTerrain(DEFAULT_SEED).generateChunk);
     for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 1)) world.loadChunk(cx, cz);
-    const tree = oakTreesTouching(plainsTreePlacement(DEFAULT_SEED), 0, 0)[0];
+    const tree = oakTreesTouching({ seed: DEFAULT_SEED, surfaceAt: createTerrain(DEFAULT_SEED).surfaceHeightAt }, 0, 0)[0];
     if (!tree) throw new Error('原点区块附近应有一棵橡树');
 
     const tiles = meshTiles(meshOf(fromWorld(world, chunkOf(tree.x), chunkOf(tree.z))).uvs);
@@ -555,7 +555,7 @@ describe('生成地形的网格', () => {
 describe('区块边上的格直读隔壁区块的数据（#62）', () => {
   it('给出隔壁区块的数据与只能逐格问 getBlock，建出的网格完全一样', () => {
     // 四条区块边上从地表往下挖出竖井、在地下挖出横穿边界的洞，让边上的格既有被挡住的，也有露出来的
-    const world = new World(plainsTerrain(DEFAULT_SEED));
+    const world = new World(createTerrain(DEFAULT_SEED).generateChunk);
     for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 2)) world.loadChunk(cx, cz);
     for (let k = 0; k < CHUNK_SIZE; k += 3) {
       for (let y = 40; y <= world.highestBlockY(0, k); y++) world.setBlock(0, y, k, BlockType.Air);

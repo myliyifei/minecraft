@@ -31,7 +31,7 @@ import {
   WALK_SPEED,
   WALK_STEP,
 } from '../src/core/player';
-import { plainsTreePlacement } from '../src/core/terrain';
+import { createTerrain } from '../src/core/terrain';
 import { OAK_CANOPY_RADIUS, oakTreesTouching, type OakTree } from '../src/core/tree';
 import type { Vec3 } from '../src/core/vec3';
 import {
@@ -119,7 +119,7 @@ const XP_ABSORB_TICKS = TICK_RATE;
  * Worker 生成的区块与核心认的是同一个世界（ADR-0003）。
  */
 function spawnAreaTree(): OakTree {
-  const tree = oakTreesTouching(plainsTreePlacement(DEFAULT_SEED), 0, 0)[0];
+  const tree = oakTreesTouching({ seed: DEFAULT_SEED, surfaceAt: createTerrain(DEFAULT_SEED).surfaceHeightAt }, 0, 0)[0];
   if (!tree) throw new Error('默认种子的原点区块附近应有一棵橡树');
   return tree;
 }

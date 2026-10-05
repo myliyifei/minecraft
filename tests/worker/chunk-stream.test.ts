@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { CHUNK_BLOCK_COUNT } from '../../src/core/chunk';
-import { plainsSurfaceHeight, plainsTerrain } from '../../src/core/terrain';
+import { createTerrain } from '../../src/core/terrain';
 import { chunksAround, ORIGIN_CHUNK } from '../../src/core/world';
 import {
   createChunkStream,
@@ -31,7 +31,7 @@ function fakePort(): ChunkWorkerPort & {
       const request = requests[index];
       if (!request) throw new Error(`没有第 ${index} 个请求可以答`);
       requests.splice(index, 1);
-      const chunk = plainsTerrain(request.seed)(request.cx, request.cz);
+      const chunk = createTerrain(request.seed).generateChunk(request.cx, request.cz);
       port.onmessage?.({
         data: { cx: request.cx, cz: request.cz, blocks: chunk.blocks },
       } as never);
@@ -86,7 +86,7 @@ describe('由 Worker 生成的区块来源', () => {
 
     const chunk = stream.source(1, 0)!;
     const x = 16;
-    const surface = plainsSurfaceHeight(SEED, x, 0);
+    const surface = createTerrain(SEED).surfaceHeightAt(x, 0);
     expect(chunk.get(0, surface, 0)).toBe(BlockType.Grass);
     expect(chunk.get(0, surface + 1, 0)).toBe(BlockType.Air);
   });

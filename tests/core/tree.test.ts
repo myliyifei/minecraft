@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, DEFAULT_SEED, WORLD_MIN_Y } from '../../src/core/constants';
-import { plainsTerrain, plainsTreePlacement } from '../../src/core/terrain';
+import { createTerrain } from '../../src/core/terrain';
 import {
   OAK_CANOPY_RADIUS,
   OAK_MIN_SPACING,
@@ -37,7 +37,7 @@ const SCAN_RADIUS = 4;
  * 范围边上那些只伸进来半个树冠的不算，密度才数得准。
  */
 function oakTreesIn(seed: number, radius: number): OakTree[] {
-  const placement = plainsTreePlacement(seed);
+  const placement = { seed, surfaceAt: createTerrain(seed).surfaceHeightAt };
   const found = new Map<string, OakTree>();
   for (let cx = -radius; cx <= radius; cx++) {
     for (let cz = -radius; cz <= radius; cz++) {
@@ -52,7 +52,7 @@ function oakTreesIn(seed: number, radius: number): OakTree[] {
 
 /** 加载了这些区块的世界。加载顺序由调用方给，用来断言顺序不影响结果。 */
 function worldWith(seed: number, coords: ChunkCoord[]): World {
-  const world = new World(plainsTerrain(seed));
+  const world = new World(createTerrain(seed).generateChunk);
   for (const { cx, cz } of coords) world.loadChunk(cx, cz);
   return world;
 }

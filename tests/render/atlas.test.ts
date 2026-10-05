@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { ItemType } from '../../src/core/item';
@@ -73,9 +75,9 @@ describe('方块到贴图格号的映射表', () => {
     expect(new Set([off.top, off.side, off.front, lit.front]).size).toBe(4);
   });
 
-  it('图集是 8x8，64 格里现在用了 46 格', () => {
+  it('图集是 8x16，128 格里现在用了 46 格（#73 从 8 行扩到 16 行）', () => {
     expect(ATLAS_COLS).toBe(8);
-    expect(ATLAS_ROWS).toBe(8);
+    expect(ATLAS_ROWS).toBe(16);
     expect(Object.keys(TILE)).toHaveLength(46);
     expect(new Set(Object.values(TILE)).size).toBe(46);
   });
@@ -437,5 +439,127 @@ describe('图集与生成脚本、PNG 文件保持同步', () => {
     // 一行 CRACK_STAGES 张：渲染层就是按 1 / CRACK_STAGES 的 uv 宽度横向偏移取图的
     expect(png.readUInt32BE(16)).toBe(CRACK_STAGES * TILE_PX);
     expect(png.readUInt32BE(20)).toBe(TILE_PX);
+  });
+});
+
+/**
+ * 解码已提交的图集 PNG，返回 RGBA 像素与宽高。
+ *
+ * 只认 tools/gen-atlas.mjs 写出的那一种 PNG：8 位 RGBA、不隔行、每行滤波类型 0。别的写法当场报错，
+ * 而不是解出一张错图让下面的断言莫名其妙地失败。
+ */
+function decodeAtlas(): { rgba: Uint8Array; width: number; height: number } {
+  const png = readFileSync(ATLAS_PNG);
+  const width = png.readUInt32BE(16);
+  const height = png.readUInt32BE(20);
+  expect([png[24], png[25], png[28]], '位深、颜色类型、隔行').toEqual([8, 6, 0]);
+  const idat: Buffer[] = [];
+  for (let offset = 8; offset < png.length; ) {
+    const length = png.readUInt32BE(offset);
+    if (png.toString('ascii', offset + 4, offset + 8) === 'IDAT') idat.push(png.subarray(offset + 8, offset + 8 + length));
+    offset += 12 + length;
+  }
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = width * 4;
+  const rgba = new Uint8Array(height * stride);
+  for (let y = 0; y < height; y++) {
+    expect(raw[y * (stride + 1)], `第 ${y} 行的滤波类型`).toBe(0);
+    rgba.set(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)), y * stride);
+  }
+  return { rgba, width, height };
+}
+
+/** 图集里第 tile 格的像素，按行拼成一段 RGBA。 */
+function tilePixels(atlas: { rgba: Uint8Array; width: number }, tile: number): Uint8Array {
+  const { col, row } = tileCell(tile);
+  const out = new Uint8Array(TILE_PX * TILE_PX * 4);
+  for (let y = 0; y < TILE_PX; y++) {
+    const start = ((row * TILE_PX + y) * atlas.width + col * TILE_PX) * 4;
+    out.set(atlas.rgba.subarray(start, start + TILE_PX * 4), y * TILE_PX * 4);
+  }
+  return out;
+}
+
+/**
+ * 扩图集之前（提交 8c817e1，8x8）各张贴图像素的 SHA-256 前 16 位，写死成字面量。
+ * 扩到 8x16 只加行、不挪格（#73）：这些格的像素必须原样留着。以后有意重画某张贴图时，改这里对应的那一行。
+ */
+const PIXELS_BEFORE_8X16: ReadonlyArray<readonly [tile: number, sha256Prefix: string]> = [
+  [0, '3530389234c33f05'],
+  [1, '633db4a9c10c2c98'],
+  [2, '28836254206adee9'],
+  [3, '5017214c7e9f8636'],
+  [4, 'c87c47d9da3e52d9'],
+  [5, '339063a91f5b27b6'],
+  [6, '002eacca800fca8b'],
+  [7, '18595dc4c43de09f'],
+  [8, '4fc9bb553fee5df3'],
+  [9, 'a699d0d3eea51290'],
+  [10, '747c99d26ab14e6b'],
+  [11, '32518eb0ec5a0eea'],
+  [12, 'ec112b17c74b683e'],
+  [13, 'aae4da3f30315365'],
+  [14, 'de161acc7f88988c'],
+  [15, '49e0f17e5444ea8b'],
+  [16, '319747678ddf3598'],
+  [17, '96bf63bcd8b200b2'],
+  [18, 'bde5cd1813bed2b1'],
+  [19, '976a1d0774b083d4'],
+  [20, '4c7460cd85d2e107'],
+  [21, '32a1a68338d0e768'],
+  [22, '0240b0222c851b8c'],
+  [23, '65aca38ce65496e3'],
+  [24, '911a27f92b93126d'],
+  [25, 'd0fa586b5988f53b'],
+  [26, 'c0c67753f5571824'],
+  [27, 'cf58e3cf5cb181b8'],
+  [28, 'cda48c9ed23607bf'],
+  [29, '190cd54f5c0a225a'],
+  [30, '290f61ed6e01c6d5'],
+  [31, 'b9661485571440b9'],
+  [32, 'd5830367d1d64f03'],
+  [33, '20cb6a3649b99e2f'],
+  [34, 'e773f7b9f7995e4f'],
+  [35, '75e326859605d137'],
+  [36, '26dc677021ff5a65'],
+  [37, '8e6b581040da00e9'],
+  [38, '569ea9241570735d'],
+  [39, '09e8bab1014c299d'],
+  [40, 'd975479dcc090ba1'],
+  [41, '7c103ed4abe96e62'],
+  [42, '408c408ac70fc9ce'],
+  [44, '09d6893a0f73ba96'],
+  [45, 'c7d578c018456435'],
+  [46, 'c33064251242e665'],
+];
+
+describe('图集 PNG 的像素（#73）', () => {
+  const atlas = decodeAtlas();
+
+  it('PNG 是 8 列 16 行', () => {
+    expect(atlas.width).toBe(8 * TILE_PX);
+    expect(atlas.height).toBe(16 * TILE_PX);
+  });
+
+  it.each(PIXELS_BEFORE_8X16)('第 %i 格的像素与扩图集之前相同', (tile, sha256Prefix) => {
+    expect(createHash('sha256').update(tilePixels(atlas, tile)).digest('hex').slice(0, 16)).toBe(sha256Prefix);
+  });
+
+  it('TILE 表里没有的格全透明：第 64 格以后与没用的格都是空的', () => {
+    const used = new Set<number>(Object.values(TILE));
+    const opaque: number[] = [];
+    for (let tile = 0; tile < ATLAS_COLS * ATLAS_ROWS; tile++) {
+      if (used.has(tile)) continue;
+      const pixels = tilePixels(atlas, tile);
+      for (let i = 3; i < pixels.length; i += 4) {
+        if (pixels[i] !== 0) {
+          opaque.push(tile);
+          break;
+        }
+      }
+    }
+    expect(opaque).toEqual([]);
+    // 这一条要覆盖到新加的那 8 行
+    expect(ATLAS_COLS * ATLAS_ROWS).toBe(128);
   });
 });

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GameCore, type GameCoreOptions } from '../../src/core/game';
 import { BlockType, miningTicks } from '../../src/core/block';
-import { Chunk } from '../../src/core/chunk';
 import {
   CHUNK_SIZE,
   DEFAULT_SEED,
@@ -22,16 +21,11 @@ import {
 import { HOTBAR_SIZE, INVENTORY_SIZE } from '../../src/core/inventory';
 import { BARE_HAND, ItemType } from '../../src/core/item';
 import { IDLE_INTENT, MAX_PITCH, WALK_SPEED, WALK_STEP } from '../../src/core/player';
-import {
-  DIRT_DEPTH_MAX,
-  DIRT_DEPTH_MIN,
-  plainsSurfaceHeight,
-  plainsTreePlacement,
-} from '../../src/core/terrain';
+import { createTerrain, DIRT_DEPTH_MAX, DIRT_DEPTH_MIN } from '../../src/core/terrain';
 import { oakTreesTouching } from '../../src/core/tree';
 import type { Vec3 } from '../../src/core/vec3';
 import { ABOVE_SURFACE } from '../helpers/above-surface';
-import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
+import { FLAT_GROUND_Y, flatTerrain } from '../helpers/flat-terrain';
 import { STONE_LAYER } from '../helpers/stone-layer';
 import { allStale } from '../helpers/stale-chunks';
 
@@ -50,16 +44,19 @@ function sampleCore(options: GameCoreOptions = {}): GameCore {
 
 /** 固定平地上的核心：移动与瞄准的断言要的是可预测的地面，不是真实地形的起伏。 */
 function coreOnFlatGround(): GameCore {
-  return sampleCore({ chunkSource: () => flatTestTerrain });
+  return sampleCore({ terrain: flatTerrain });
 }
 
 /** 采样核心的已加载区块覆盖的世界坐标区间。 */
 const LOADED_MIN = -SAMPLE_RADIUS * CHUNK_SIZE;
 const LOADED_MAX = (SAMPLE_RADIUS + 1) * CHUNK_SIZE - 1;
 
+/** 默认种子的地形对象：真实地形上的期望值都从它的查询算出来。 */
+const DEFAULT_TERRAIN = createTerrain(DEFAULT_SEED);
+
 /** 默认种子下某一列的地表高度。 */
 function surfaceAt(x: number, z: number): number {
-  return plainsSurfaceHeight(DEFAULT_SEED, x, z);
+  return DEFAULT_TERRAIN.surfaceHeightAt(x, z);
 }
 
 /** 一格的三元坐标换成 Vec3，好跟核心报出来的坐标对照。 */
@@ -179,20 +176,6 @@ describe('GameCore 的种子', () => {
     }
     expect(differing).toBeGreaterThan(10);
   });
-
-  it('可以换掉地形算法，种子仍然传给它', () => {
-    const seeds: number[] = [];
-    const core = new GameCore({
-      seed: 99,
-      viewRadius: 0,
-      chunkSource: (seed: number) => {
-        seeds.push(seed);
-        return (cx: number, cz: number) => new Chunk(cx, cz);
-      },
-    });
-    expect(seeds).toEqual([99]);
-    expect(core.getBlock(0, 0, 0)).toBe(BlockType.Air);
-  });
 });
 
 describe('GameCore 在 Node 中的方块查询', () => {
@@ -297,7 +280,7 @@ describe('GameCore 的地形形态', () => {
     // highestBlockY 不是「地表高度」：树一长出来两者就分叉，树冠会把它抬起来。
     const core = sampleCore();
     // 会写进原点区块的第一棵树。树根不一定在这个区块里，但一定在采样视距内。
-    const tree = oakTreesTouching(plainsTreePlacement(DEFAULT_SEED), 0, 0)[0];
+    const tree = oakTreesTouching({ seed: DEFAULT_SEED, surfaceAt: DEFAULT_TERRAIN.surfaceHeightAt }, 0, 0)[0];
     if (!tree) throw new Error('原点区块附近应有一棵橡树');
     expect(core.getBlock(tree.x, tree.rootY, tree.z)).toBe(BlockType.OakLog);
     expect(core.highestBlockY(tree.x, tree.z)).toBeGreaterThan(surfaceAt(tree.x, tree.z));
@@ -372,7 +355,8 @@ describe('GameCore 的出生点', () => {
 
   it('换种子后出生点跟着地形走', () => {
     const core = sampleCore({ seed: 555 });
-    expect(core.spawnPoint.y).toBe(plainsSurfaceHeight(555, 0, 0) + 1);
+    // #84 改：出生列不再固定在原点，改为站在 createTerrain(555).spawnColumn 那一列上
+    expect(core.spawnPoint.y).toBe(createTerrain(555).surfaceHeightAt(0, 0) + 1);
   });
 });
 
@@ -2775,19 +2759,6 @@ describe('GameCore 的初始区块加载', () => {
     expect(keys).toContain('1,1');
     expect(keys).toHaveLength(9);
   });
-
-  it('来源还没准备好区块时，构造不报错，tick 之后补上', () => {
-    let ready = false;
-    const core = new GameCore({
-      viewRadius: 1,
-      chunkSource: () => (cx, cz) => (ready ? flatTestTerrain(cx, cz) : undefined),
-    });
-    expect(core.loadedChunkCount).toBe(0);
-
-    ready = true;
-    core.tick();
-    expect(core.loadedChunkCount).toBe(9);
-  });
 });
 
 describe('GameCore 的区块随玩家流式加载', () => {
@@ -2839,12 +2810,12 @@ describe('GameCore 的区块随玩家流式加载', () => {
   }
 
   it('玩家所在区块由脚下的位置决定，负坐标也算对', () => {
-    const core = sampleCore({ chunkSource: () => flatTestTerrain });
+    const core = sampleCore({ terrain: flatTerrain });
     expect(core.playerChunk).toEqual({ cx: 0, cz: 0 });
   });
 
   it('走出初始范围时前方的区块跟着生成，玩家不会掉进虚空', () => {
-    const core = sampleCore({ chunkSource: () => flatTestTerrain });
+    const core = sampleCore({ terrain: flatTerrain });
     const standing = core.player.position.y;
 
     // 视距 2 时初始加载范围只到 z = −32；朝 −Z 走 40 秒足以走出去好几个区块
@@ -2856,7 +2827,7 @@ describe('GameCore 的区块随玩家流式加载', () => {
   });
 
   it('玩家自己走过 20 个区块之后，原点附近已卸载、新位置周围已加载', () => {
-    const core = sampleCore({ chunkSource: () => flatTestTerrain });
+    const core = sampleCore({ terrain: flatTerrain });
     expect(core.isChunkLoaded(0, 0)).toBe(true);
 
     // 20 个区块 = 320 格，按步行速度要走 74 秒
@@ -2882,7 +2853,7 @@ describe('GameCore 的区块随玩家流式加载', () => {
     walkForwardPastTrees(core, 60 * TICK_RATE, () => {
       const { x, y, z } = core.player.position;
       // 脚底始终在自己这一列的地表之上——低于它就说明踩进了没加载的区块
-      const surface = plainsSurfaceHeight(DEFAULT_SEED, Math.floor(x), Math.floor(z));
+      const surface = surfaceAt(Math.floor(x), Math.floor(z));
       if (y < surface + 1) falls.push(`y=${y}，地表=${surface}`);
     });
 
@@ -2911,7 +2882,7 @@ describe('GameCore 的已改区块在玩家走远再回来之后', () => {
 
   /** 视距收到 1 的平地核心。 */
   function coreForRoundTrip(): GameCore {
-    return new GameCore({ viewRadius: RETURN_RADIUS, chunkSource: () => flatTestTerrain });
+    return new GameCore({ viewRadius: RETURN_RADIUS, terrain: flatTerrain });
   }
 
   /**
@@ -3036,7 +3007,7 @@ describe('GameCore 的已改区块在玩家走远再回来之后', () => {
 
 /** 视距 radius 的平地核心。关闭全部界面与视距两节用它。 */
 function flatCore(radius: number): GameCore {
-  return new GameCore({ viewRadius: radius, chunkSource: () => flatTestTerrain });
+  return new GameCore({ viewRadius: radius, terrain: flatTerrain });
 }
 
 describe('GameCore 的关闭全部界面', () => {

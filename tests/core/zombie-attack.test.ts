@@ -3,7 +3,7 @@ import { BlockType } from '../../src/core/block';
 import { GameCore } from '../../src/core/game';
 import { INVULNERABLE_TICKS } from '../../src/core/health';
 import { ItemType } from '../../src/core/item';
-import { FLAT_STAND_Y, flatTestTerrain } from '../helpers/flat-terrain';
+import { FLAT_STAND_Y, flatTerrain } from '../helpers/flat-terrain';
 
 /*
  * 僵尸攻击玩家（#43）。玩家站在原点那一格中心 (0.5, 71, 0.5)，僵尸生成在它身旁。
@@ -11,7 +11,7 @@ import { FLAT_STAND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 
 /** 视距 1 的平地核心。 */
 function core(): GameCore {
-  return new GameCore({ viewRadius: 1, chunkSource: () => flatTestTerrain });
+  return new GameCore({ viewRadius: 1, terrain: flatTerrain });
 }
 
 /** 在玩家 +X 方向 distance 格处生成一只，脚底与玩家同高。 */

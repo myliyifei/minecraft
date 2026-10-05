@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CHUNK_BLOCK_COUNT } from '../../src/core/chunk';
 import { DEFAULT_SEED } from '../../src/core/constants';
-import { plainsTerrain } from '../../src/core/terrain';
+import { createTerrain } from '../../src/core/terrain';
 import { gunzipChunk, gzipChunk } from '../../src/storage/chunk-codec';
 
 describe('区块方块数组的 gzip（ADR-0018）', () => {
   it('平原区块压缩后远小于 96 KB，解压后逐字节相同', async () => {
-    const blocks = plainsTerrain(DEFAULT_SEED)(0, 0).blocks;
+    const blocks = createTerrain(DEFAULT_SEED).generateChunk(0, 0).blocks;
     const packed = await gzipChunk(blocks);
     expect(packed.byteLength).toBeLessThan(10 * 1024);
     expect(await gunzipChunk(packed)).toEqual(blocks);

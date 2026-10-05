@@ -3,7 +3,7 @@ import { BlockType } from '../../src/core/block';
 import { Difficulty } from '../../src/core/difficulty';
 import { GameCore } from '../../src/core/game';
 import { NIGHT_END, NIGHT_START } from '../../src/core/time-of-day';
-import { flatTestTerrain } from '../helpers/flat-terrain';
+import { flatTerrain } from '../helpers/flat-terrain';
 
 /*
  * 难度生效（#66）。玩家站在原点那一格中心 (0.5, 71, 0.5)。视距 3 时 24 到 48 格的整个圆环都已加载，
@@ -12,7 +12,7 @@ import { flatTestTerrain } from '../helpers/flat-terrain';
 
 /** 平地核心，难度 difficulty。 */
 function core(difficulty: Difficulty, viewRadius = 1): GameCore {
-  return new GameCore({ difficulty, viewRadius, chunkSource: () => flatTestTerrain });
+  return new GameCore({ difficulty, viewRadius, terrain: flatTerrain });
 }
 
 /** 挖空玩家脚下 24 格，推进到摔死为止：着地时摔掉 21 点。 */
@@ -133,7 +133,7 @@ describe('极限死亡', () => {
     const game = core(Difficulty.Hardcore);
     fallToDeath(game);
     const before = { ...game.snapshot(), hardcoreDead: false };
-    const restored = new GameCore({ restore: before, viewRadius: 1, chunkSource: () => flatTestTerrain });
+    const restored = new GameCore({ restore: before, viewRadius: 1, terrain: flatTerrain });
     expect(restored.health.dead).toBe(true);
 
     restored.tick(5);

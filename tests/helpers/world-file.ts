@@ -6,7 +6,7 @@ import { ItemType } from '../../src/core/item';
 import { SNAPSHOT_FORMAT_VERSION, TERRAIN_VERSION, type Snapshot } from '../../src/core/snapshot';
 import { gzipChunk } from '../../src/storage/chunk-codec';
 import type { WorldFile } from '../../src/storage/world-file';
-import { FLAT_GROUND_Y, flatTestTerrain } from './flat-terrain';
+import { FLAT_GROUND_Y, flatTerrain } from './flat-terrain';
 
 const G = FLAT_GROUND_Y;
 
@@ -15,7 +15,7 @@ const G = FLAT_GROUND_Y;
  * 掉落物与一个经验球，导出文件的校验要走到这两张表。
  */
 export function editedSnapshot(difficulty: Difficulty = Difficulty.Normal): Snapshot {
-  const game = new GameCore({ viewRadius: 3, difficulty, chunkSource: () => flatTestTerrain });
+  const game = new GameCore({ viewRadius: 3, difficulty, terrain: flatTerrain });
   game.setBlock(3, G, 3, BlockType.Air);
   game.setBlock(CHUNK_SIZE + 3, G, 3, BlockType.Air);
   game.setBlock(-5, G, 2 * CHUNK_SIZE + 5, BlockType.Furnace);

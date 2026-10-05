@@ -7,13 +7,13 @@ import { INVENTORY_SIZE } from '../../src/core/inventory';
 import { ItemType } from '../../src/core/item';
 import type { Snapshot } from '../../src/core/snapshot';
 import { aimAt } from '../helpers/aiming';
-import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTestTerrain } from '../helpers/flat-terrain';
+import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTerrain } from '../helpers/flat-terrain';
 
 const G = FLAT_GROUND_Y;
 
 /** 视距 1 的平地核心。 */
 function core(options: GameCoreOptions = {}): GameCore {
-  return new GameCore({ viewRadius: 1, chunkSource: () => flatTestTerrain, ...options });
+  return new GameCore({ viewRadius: 1, terrain: flatTerrain, ...options });
 }
 
 /** 快照里带的已改区块坐标，排好序好比较。 */
@@ -152,7 +152,7 @@ function tickBoth(a: GameCore, b: GameCore): void {
 
 /** 从 game 的快照构造另一个核心，种子与区块来源相同。 */
 function restored(game: GameCore, viewRadius: number): GameCore {
-  return new GameCore({ viewRadius, chunkSource: () => flatTestTerrain, restore: game.snapshot() });
+  return new GameCore({ viewRadius, terrain: flatTerrain, restore: game.snapshot() });
 }
 
 /** 确定性回归用的视距：僵尸在玩家 24 到 48 格外生成，候选列要落在已加载区块里。 */
@@ -304,7 +304,7 @@ describe('快照不含的东西', () => {
     const snapshot = a.snapshot();
     expect(Object.keys(snapshot)).not.toContain('zombies');
     expect(snapshot.nextZombieId).toBe(3);
-    const b = new GameCore({ viewRadius: 1, chunkSource: () => flatTestTerrain, restore: snapshot });
+    const b = new GameCore({ viewRadius: 1, terrain: flatTerrain, restore: snapshot });
     expect(b.zombies.count).toBe(0);
     expect(a.zombies.count).toBe(2);
     b.spawnZombieAt(5.5, FLAT_STAND_Y, 5.5);
@@ -330,7 +330,7 @@ describe('快照里的首次出生点', () => {
     const a = core();
     const snapshot = a.snapshot();
     const far = { ...snapshot, player: { ...snapshot.player, position: { x: 500.5, y: FLAT_STAND_Y, z: 0.5 } } };
-    const b = new GameCore({ viewRadius: 1, chunkSource: () => flatTestTerrain, restore: far });
+    const b = new GameCore({ viewRadius: 1, terrain: flatTerrain, restore: far });
     expect(b.isChunkLoaded(0, 0)).toBe(false);
     expect(b.isChunkLoaded(31, 0)).toBe(true);
     expect(b.player.position).toEqual({ x: 500.5, y: FLAT_STAND_Y, z: 0.5 });
@@ -341,7 +341,7 @@ describe('快照里的首次出生点', () => {
 describe('快照往返', () => {
   it('从快照构造之后立即再取快照，除已改区块外与原快照相同；极限已死亡标记照样带过去', () => {
     const snapshot = { ...worldBeforeSnapshot().snapshot(), hardcoreDead: true };
-    const b = new GameCore({ viewRadius: SPAWN_RADIUS, chunkSource: () => flatTestTerrain, restore: snapshot });
+    const b = new GameCore({ viewRadius: SPAWN_RADIUS, terrain: flatTerrain, restore: snapshot });
     const again = b.snapshot();
     expect(again.editedChunks).toEqual([]);
     expect({ ...again, editedChunks: [] }).toEqual({ ...snapshot, editedChunks: [] });
@@ -355,7 +355,7 @@ describe('难度', () => {
     expect(a.difficulty).toBe(Difficulty.Hard);
     const snapshot = a.snapshot();
     expect(snapshot.difficulty).toBe(Difficulty.Hard);
-    const b = new GameCore({ difficulty: Difficulty.Peaceful, viewRadius: 1, chunkSource: () => flatTestTerrain, restore: snapshot });
+    const b = new GameCore({ difficulty: Difficulty.Peaceful, viewRadius: 1, terrain: flatTerrain, restore: snapshot });
     expect(b.difficulty).toBe(Difficulty.Hard);
   });
 });

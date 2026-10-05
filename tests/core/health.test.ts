@@ -5,11 +5,11 @@ import { fallDamage, Health } from '../../src/core/health';
 import type { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE } from '../../src/core/constants';
 import { IDLE_INTENT, PLAYER_WIDTH } from '../../src/core/player';
-import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
+import { FLAT_GROUND_Y, flatTerrain, flatTestTerrain } from '../helpers/flat-terrain';
 
 /** 平地上、视距 1 的核心：生命值的断言要推进几百 tick，区块少一点跑得快。 */
 function core(): GameCore {
-  return new GameCore({ viewRadius: 1, chunkSource: () => flatTestTerrain });
+  return new GameCore({ viewRadius: 1, terrain: flatTerrain });
 }
 
 /**
@@ -112,7 +112,10 @@ describe('核心的玩家生命值', () => {
     };
     const game = new GameCore({
       viewRadius: 1,
-      chunkSource: () => (cx, cz) => (cx === 1 && !eastReady ? undefined : eastWithWall(cx, cz)),
+      terrain: (seed: number) => ({
+        ...flatTerrain(seed),
+        generateChunk: (cx: number, cz: number) => (cx === 1 && !eastReady ? undefined : eastWithWall(cx, cz)),
+      }),
     });
     game.turn(-Math.PI / 2, 0);
     game.setMoveIntent({ ...IDLE_INTENT, forward: true });

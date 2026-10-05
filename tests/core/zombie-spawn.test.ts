@@ -15,7 +15,7 @@ import {
   Zombies,
   type ZombieView,
 } from '../../src/core/zombie';
-import { FLAT_STAND_Y, flatTestTerrain, flatTestWorld } from '../helpers/flat-terrain';
+import { FLAT_STAND_Y, flatTerrain, flatTestWorld } from '../helpers/flat-terrain';
 
 /*
  * 僵尸的自然生成（#44，#55 改按光照判定）。玩家站在原点那一格中心 (0.5, 71, 0.5)。视距 3 时加载到
@@ -26,7 +26,7 @@ const SEED = 1234;
 
 /** 平地核心。 */
 function core(seed = SEED, viewRadius = 3): GameCore {
-  return new GameCore({ seed, viewRadius, chunkSource: () => flatTestTerrain });
+  return new GameCore({ seed, viewRadius, terrain: flatTerrain });
 }
 
 /** 屋顶的 y：平地之上隔 3 格空气盖一层石头，玩家与僵尸都站得进屋里。 */

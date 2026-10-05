@@ -12,7 +12,7 @@ import {
   type OreKindDef,
   type OreVein,
 } from '../../src/core/ore';
-import { plainsTerrain } from '../../src/core/terrain';
+import { createTerrain } from '../../src/core/terrain';
 import type { Vec3 } from '../../src/core/vec3';
 import { chunkOf, chunksAround, ORIGIN_CHUNK, World, type ChunkCoord } from '../../src/core/world';
 
@@ -77,7 +77,7 @@ function veinKey(vein: OreVein): string {
 
 /** 加载了这些区块的世界。加载顺序由调用方给，用来断言顺序不影响结果。 */
 function worldWith(seed: number, coords: ChunkCoord[]): World {
-  const world = new World(plainsTerrain(seed));
+  const world = new World(createTerrain(seed).generateChunk);
   for (const { cx, cz } of coords) world.loadChunk(cx, cz);
   return world;
 }

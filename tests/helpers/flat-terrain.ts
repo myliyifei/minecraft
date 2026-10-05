@@ -1,7 +1,7 @@
 import { BlockType } from '../../src/core/block';
 import { Chunk } from '../../src/core/chunk';
 import { WORLD_MIN_Y } from '../../src/core/constants';
-import type { TerrainGenerator } from '../../src/core/terrain';
+import { Biome, type Terrain, type TerrainGenerator } from '../../src/core/terrain';
 import { World } from '../../src/core/world';
 
 /** 测试用平地的地表高度。取一个海平面以上的值，与真实地形的量级一致。 */
@@ -45,4 +45,22 @@ export function flatTestWorld(radius = TEST_CHUNK_RADIUS): World {
     }
   }
   return world;
+}
+
+/**
+ * 测试用平地的地形对象（#73）：生成器是 `flatTestTerrain`，群系总是平原，地表高度总是 `FLAT_GROUND_Y`，
+ * 列顶地表方块总是草方块，出生列是原点。
+ *
+ * 核心只接地形对象（`GameCoreOptions.terrain`），核心级测试要一块平地时传它：只换生成器不换查询的话，
+ * 出生列与树会按真实地形去算。签名与 `GameCoreOptions.terrain` 相同，拿到的是本世界的种子。
+ */
+export function flatTerrain(seed: number): Terrain {
+  return {
+    seed,
+    generateChunk: flatTestTerrain,
+    biomeAt: () => Biome.Plains,
+    surfaceHeightAt: () => FLAT_GROUND_Y,
+    surfaceBlockAt: () => BlockType.Grass,
+    spawnColumn: { x: 0, z: 0 },
+  };
 }

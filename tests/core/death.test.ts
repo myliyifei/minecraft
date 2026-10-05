@@ -8,11 +8,11 @@ import { HOTBAR_SIZE, INVENTORY_SIZE } from '../../src/core/inventory';
 import { BARE_HAND, ItemType, miningToolOf, type ItemStack } from '../../src/core/item';
 import { IDLE_INTENT, MAX_PITCH, PLAYER_EYE_HEIGHT, WALK_STEP } from '../../src/core/player';
 import { SMELT_TICKS } from '../../src/core/smelting';
-import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTestTerrain } from '../helpers/flat-terrain';
+import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTerrain, flatTestTerrain } from '../helpers/flat-terrain';
 
 /** 视距 1 的平地核心：死亡与重生的断言要推进几百 tick，区块少一点跑得快。 */
 function core(): GameCore {
-  return new GameCore({ viewRadius: 1, chunkSource: () => flatTestTerrain });
+  return new GameCore({ viewRadius: 1, terrain: flatTerrain });
 }
 
 /** 落差这么多格摔 21 点，满血也扣到 0。 */
@@ -427,8 +427,11 @@ describe('GameCore 的重生', () => {
       let originReady = true;
       const game = new GameCore({
         viewRadius: 1,
-        chunkSource: () => (cx: number, cz: number): Chunk | undefined =>
-          cx === 0 && cz === 0 && !originReady ? undefined : flatTestTerrain(cx, cz),
+        terrain: (seed: number) => ({
+          ...flatTerrain(seed),
+          generateChunk: (cx: number, cz: number): Chunk | undefined =>
+            cx === 0 && cz === 0 && !originReady ? undefined : flatTestTerrain(cx, cz),
+        }),
       });
       return { game, setOriginReady: (ready) => (originReady = ready) };
     }

@@ -5,7 +5,7 @@ import { ItemType, maxDurability, stackLimit, type ItemStack } from '../../src/c
 import { MAX_PITCH, PLAYER_EYE_HEIGHT } from '../../src/core/player';
 import { ATTACK_COOLDOWN_TICKS, ATTACK_RANGE } from '../../src/core/attack';
 import { ZOMBIE_XP, type ZombieView } from '../../src/core/zombie';
-import { FLAT_STAND_Y, flatTestTerrain } from '../helpers/flat-terrain';
+import { FLAT_STAND_Y, flatTerrain } from '../helpers/flat-terrain';
 
 /*
  * 玩家攻击僵尸（#42）。玩家站在原点那一格中心，平视 −Z：眼睛在 (0.5, 72.62, 0.5)，视线沿 −Z 平着走。
@@ -21,7 +21,7 @@ const SEED = 1234;
 const EYE_LAYER = Math.floor(FLAT_STAND_Y + PLAYER_EYE_HEIGHT);
 
 function core(seed = SEED): GameCore {
-  return new GameCore({ seed, viewRadius: 1, chunkSource: () => flatTestTerrain });
+  return new GameCore({ seed, viewRadius: 1, terrain: flatTerrain });
 }
 
 /** 在视线正前方生成一只僵尸：碰撞箱中心离玩家 distance 格（沿 −Z）。 */

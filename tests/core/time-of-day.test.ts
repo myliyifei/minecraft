@@ -10,13 +10,13 @@ import {
   timeOfDayAt,
 } from '../../src/core/time-of-day';
 import { IDLE_INTENT, MAX_PITCH } from '../../src/core/player';
-import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
+import { FLAT_GROUND_Y, flatTerrain } from '../helpers/flat-terrain';
 
 /**
  * 平地上、视距 1 的核心：世界时刻的断言要推进上万 tick，区块少一点跑得快，地形与它无关。
  */
 function core(): GameCore {
-  return new GameCore({ viewRadius: 1, chunkSource: () => flatTestTerrain });
+  return new GameCore({ viewRadius: 1, terrain: flatTerrain });
 }
 
 describe('世界时刻的换算', () => {

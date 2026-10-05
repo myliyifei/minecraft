@@ -21,7 +21,7 @@ import {
   type ZombieTarget,
   type ZombieView,
 } from '../../src/core/zombie';
-import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTestTerrain, flatTestWorld } from '../helpers/flat-terrain';
+import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTerrain, flatTestWorld } from '../helpers/flat-terrain';
 
 const SEED = 1234;
 
@@ -90,7 +90,7 @@ function horizontalDistance(zombie: ZombieView, player: Vec3 = PLAYER): number {
 
 /** 视距 1 的平地核心。 */
 function core(): GameCore {
-  return new GameCore({ viewRadius: 1, chunkSource: () => flatTestTerrain });
+  return new GameCore({ viewRadius: 1, terrain: flatTerrain });
 }
 
 describe('僵尸的出现（spawnZombieAt）', () => {

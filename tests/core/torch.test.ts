@@ -9,7 +9,7 @@ import { matchRecipe, recipesFor } from '../../src/core/recipe';
 import { isFuel } from '../../src/core/smelting';
 import { isTorch, torchSupportCell } from '../../src/core/torch';
 import type { Vec3 } from '../../src/core/vec3';
-import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTestTerrain } from '../helpers/flat-terrain';
+import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTerrain } from '../helpers/flat-terrain';
 import { worldWithBlocks } from '../helpers/aiming';
 
 /*
@@ -29,7 +29,7 @@ const TORCHES = [
 
 /** 平地核心。 */
 function core(): GameCore {
-  return new GameCore({ viewRadius: 2, chunkSource: () => flatTestTerrain });
+  return new GameCore({ viewRadius: 2, terrain: flatTerrain });
 }
 
 /** 让视线正对世界里的 point（眼睛到它的方向），推进一 tick 让目标按新视线重算。 */

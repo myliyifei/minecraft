@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SEED } from '../../src/core/constants';
-import { plainsTerrain } from '../../src/core/terrain';
+import { createTerrain } from '../../src/core/terrain';
 import { gunzipChunk, gzipChunk } from '../../src/storage/chunk-codec';
 import { createGzipClient } from '../../src/worker/gzip-client';
 import type { GzipRequest, GzipResponse, GzipWorkerPort } from '../../src/worker/protocol';
@@ -37,7 +37,7 @@ function fakePort(): GzipWorkerPort & {
   return port;
 }
 
-const blocksOf = (cx: number) => plainsTerrain(DEFAULT_SEED)(cx, 0).blocks;
+const blocksOf = (cx: number) => createTerrain(DEFAULT_SEED).generateChunk(cx, 0).blocks;
 
 describe('在压缩 Worker 里 gzip 区块（ADR-0018 补记，#71）', () => {
   it('方块数组转移给 Worker，不复制；答回来的 gzip 解压后与原数组相同', async () => {

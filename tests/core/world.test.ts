@@ -3,7 +3,7 @@ import { BlockType } from '../../src/core/block';
 import { newFurnaceState } from '../../src/core/block-state';
 import { ItemType } from '../../src/core/item';
 import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
-import { plainsSurfaceHeight, plainsTerrain } from '../../src/core/terrain';
+import { createTerrain } from '../../src/core/terrain';
 import { World, type ChunkCoord, type ChunkSource } from '../../src/core/world';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 
@@ -516,11 +516,11 @@ describe('地形生成的确定性', () => {
   const SEED = 8_675_309;
 
   it('加载顺序不影响结果：先 A 后 B 与先 B 后 A 得到相同的两个区块', () => {
-    const a = new World(plainsTerrain(SEED));
+    const a = new World(createTerrain(SEED).generateChunk);
     a.loadChunk(0, 0);
     a.loadChunk(1, 0);
 
-    const b = new World(plainsTerrain(SEED));
+    const b = new World(createTerrain(SEED).generateChunk);
     b.loadChunk(1, 0);
     b.loadChunk(0, 0);
 
@@ -529,7 +529,7 @@ describe('地形生成的确定性', () => {
   });
 
   it('卸载后重新加载得到相同地形', () => {
-    const world = new World(plainsTerrain(SEED));
+    const world = new World(createTerrain(SEED).generateChunk);
     world.loadChunk(2, 3);
     const before = sampleChunk(world, 2, 3);
     world.unloadChunk(2, 3);
@@ -538,7 +538,7 @@ describe('地形生成的确定性', () => {
   });
 
   it('只加载单个区块时，区块内的地表与高度场一致', () => {
-    const world = new World(plainsTerrain(SEED));
+    const world = new World(createTerrain(SEED).generateChunk);
     world.loadChunk(-2, 7);
     for (const [lx, lz] of [
       [0, 0],
@@ -547,7 +547,7 @@ describe('地形生成的确定性', () => {
     ] as Array<[number, number]>) {
       const x = -2 * CHUNK_SIZE + lx;
       const z = 7 * CHUNK_SIZE + lz;
-      expect(world.highestBlockY(x, z)).toBe(plainsSurfaceHeight(SEED, x, z));
+      expect(world.highestBlockY(x, z)).toBe(createTerrain(SEED).surfaceHeightAt(x, z));
     }
   });
 });

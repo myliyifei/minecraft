@@ -11,7 +11,7 @@ import { SNAPSHOT_FORMAT_VERSION, TERRAIN_VERSION, type Snapshot } from '../../s
 import { gunzipChunk, gzipChunk } from '../../src/storage/chunk-codec';
 import { decodeWorldFile, encodeWorldFile, type WorldFile } from '../../src/storage/world-file';
 import { CHUNK_PUT_BATCH, openWorldStorage, type WorldStorage, type WorldStorageOptions } from '../../src/storage/world-storage';
-import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
+import { FLAT_GROUND_Y, flatTerrain } from '../helpers/flat-terrain';
 
 const G = FLAT_GROUND_Y;
 
@@ -26,7 +26,7 @@ function fixture() {
 
 /** 平地上的核心：(0,0)、(1,0) 两个区块各挖一格，(-1,2) 放一个熔炉，背包里有 5 个圆石。 */
 function editedGame(difficulty: Difficulty = Difficulty.Normal): GameCore {
-  const game = new GameCore({ viewRadius: 3, difficulty, chunkSource: () => flatTestTerrain });
+  const game = new GameCore({ viewRadius: 3, difficulty, terrain: flatTerrain });
   game.setBlock(3, G, 3, BlockType.Air);
   game.setBlock(CHUNK_SIZE + 3, G, 3, BlockType.Air);
   game.setBlock(-5, G, 2 * CHUNK_SIZE + 5, BlockType.Furnace);
@@ -107,7 +107,7 @@ describe('存档的写与读（ADR-0018）', () => {
     const game = editedGame();
     await storage.saveWorld('a', '洞', game.snapshot());
 
-    const restored = new GameCore({ viewRadius: 3, chunkSource: () => flatTestTerrain, restore: await loaded(storage, 'a') });
+    const restored = new GameCore({ viewRadius: 3, terrain: flatTerrain, restore: await loaded(storage, 'a') });
     expect(restored.getBlock(3, G, 3)).toBe(BlockType.Air);
     expect(restored.getBlock(-5, G, 2 * CHUNK_SIZE + 5)).toBe(BlockType.Furnace);
     expect(restored.inventory.slot(0)).toEqual({ item: ItemType.Cobblestone, count: 5 });
@@ -203,8 +203,8 @@ describe('存档的写与读（ADR-0018）', () => {
   it('两个世界的记录各自分开：区块、种子、名称只在自己名下', async () => {
     const { open } = fixture();
     const storage = await open();
-    const a = new GameCore({ viewRadius: 1, seed: 1, chunkSource: () => flatTestTerrain });
-    const b = new GameCore({ viewRadius: 1, seed: 2, chunkSource: () => flatTestTerrain });
+    const a = new GameCore({ viewRadius: 1, seed: 1, terrain: flatTerrain });
+    const b = new GameCore({ viewRadius: 1, seed: 2, terrain: flatTerrain });
     a.setBlock(1, G, 1, BlockType.Air);
     b.setBlock(-1, G, -1, BlockType.Air);
     await storage.saveWorld('a', '甲', a.snapshot());
@@ -403,7 +403,7 @@ describe('写盘失败整次回滚（ADR-0018）', () => {
     game.returnUnsavedChunks(result.chunks);
     expect(await storage.saveWorld('a', '洞', game.snapshot())).toEqual({ ok: true });
 
-    const restored = new GameCore({ viewRadius: 3, chunkSource: () => flatTestTerrain, restore: await loaded(storage, 'a') });
+    const restored = new GameCore({ viewRadius: 3, terrain: flatTerrain, restore: await loaded(storage, 'a') });
     expect(restored.getBlock(4, G, 4)).toBe(BlockType.Air);
     expect(restored.getBlock(CHUNK_SIZE + 4, G, 4)).toBe(BlockType.Furnace);
   });
@@ -481,7 +481,7 @@ describe('导出导入读写的原始记录（#70）', () => {
     await storage.importWorld('c', file);
     const before = sorted(await loaded(storage, 'a'));
 
-    const copy = new GameCore({ viewRadius: 3, chunkSource: () => flatTestTerrain, restore: await loaded(storage, 'b') });
+    const copy = new GameCore({ viewRadius: 3, terrain: flatTerrain, restore: await loaded(storage, 'b') });
     copy.setBlock(5, G, 5, BlockType.Air);
     copy.setBlock(-CHUNK_SIZE * 3, G, 0, BlockType.Air);
     await storage.saveWorld('b', '洞', copy.snapshot());
@@ -490,7 +490,7 @@ describe('导出导入读写的原始记录（#70）', () => {
     expect(sorted(await loaded(storage, 'c'))).toEqual(before);
     const changed = await loaded(storage, 'b');
     expect(changed.editedChunks).toHaveLength(4);
-    const restored = new GameCore({ viewRadius: 3, chunkSource: () => flatTestTerrain, restore: changed });
+    const restored = new GameCore({ viewRadius: 3, terrain: flatTerrain, restore: changed });
     expect(restored.getBlock(5, G, 5)).toBe(BlockType.Air);
     await storage.deleteWorld('c');
     expect((await storage.listWorlds()).map(({ meta }) => meta.id).sort()).toEqual(['a', 'b']);

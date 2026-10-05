@@ -1,4 +1,4 @@
-import { isSolid, type BlockView } from './block';
+import { isPlant, isSolid, type BlockView } from './block';
 import { MAX_LIGHT_LEVEL, TAU, TICK_RATE, WORLD_MAX_Y } from './constants';
 import { spawnsHostiles, zombieAttackDamage, type Difficulty } from './difficulty';
 import type { DropSink } from './drop';
@@ -252,6 +252,9 @@ export class Zombies implements ZombiesView, EntityRaycast {
    * 不看是不是夜晚：白天露天折算天光 15，不生成；黄昏减量取整到 8 时露天折算天光降到 7，从这时起
    * 生成。看的是候选列，不是玩家脚下那一列：玩家头顶盖着东西不影响生成。候选列也只看列顶：白天屋顶
    * 底下折算天光是 0，但列顶是屋顶，屋顶上面那格折算天光 15，不生成。
+   *
+   * 列顶是地表植物时跳过它看下面那一格（#80，CONTEXT.md「生成」）：僵尸生成在植物那一格里，长满矮草的平原照样生成。
+   * 只跳过植物，不跳过一切不实心方块：列顶是水时照旧放弃，不会跳过水生成在水底。
    */
   spawnNaturally(tick: number, player: Vec3, skyDarkening: number): void {
     if (!this.hostile) return;
@@ -266,7 +269,8 @@ export class Zombies implements ZombiesView, EntityRaycast {
     if (!isInLoadedChunk(this.blocks, at)) return;
     const away = Math.hypot(at.x - player.x, at.z - player.z);
     if (away < ZOMBIE_SPAWN_MIN_DISTANCE || away > ZOMBIE_SPAWN_MAX_DISTANCE) return;
-    const top = this.blocks.highestBlockY(bx, bz);
+    let top = this.blocks.highestBlockY(bx, bz);
+    if (isPlant(this.blocks.getBlock(bx, top, bz))) top--;
     if (!isSolid(this.blocks.getBlock(bx, top, bz))) return;
     if (top + 1 > WORLD_MAX_Y) return;
     if (!this.isDarkEnough(bx, top + 1, bz, skyDarkening)) return;

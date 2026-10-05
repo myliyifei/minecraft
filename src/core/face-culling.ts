@@ -2,8 +2,9 @@ import { BlockType, isOpaque } from './block';
 import { isTorch } from './torch';
 
 /**
- * 两格相邻时，它们之间的那个面画不画（见 `buildChunkMesh`）。网格构建与「方块变了，隔壁区块要不要重建」
- * （`World.markStale`）用的都是这里的同一个判定，两边不会对不上。
+ * 两格相邻时，它们之间的那个面画不画：一格贴着隔壁的那一面，隔壁不透明、或者两格在剔除上同一档时不画
+ * （见 `buildChunkMesh`）。网格构建与「方块变了，隔壁区块要不要重建」（`World.markStale`）用的都是这里的同一个分档，
+ * 两边不会对不上。
  */
 
 /** `faceCulling` 里不透明方块的那一档：比任何方块编号都小。 */
@@ -21,10 +22,4 @@ export function faceCulling(block: BlockType): number {
   if (isTorch(block)) return BlockType.Air;
   if (block === BlockType.Ice) return BlockType.Water;
   return block;
-}
-
-/** `block` 贴着 `neighbor` 的那一面不画：隔壁不透明，或者两格同一档。`block` 是要出面的那一格，不是空气也不是火把。 */
-export function faceHidden(block: BlockType, neighbor: BlockType): boolean {
-  const against = faceCulling(neighbor);
-  return against === OPAQUE_FACES || against === faceCulling(block);
 }

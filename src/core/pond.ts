@@ -18,8 +18,8 @@ import type { ColumnCoord } from './world';
  * 4. 每一列的深度从中心往外变浅（至少 1）；塘底 = min(地表高度 − 1, 水面 − 深度)，塘底铺沙子，其上到水面灌水。
  *    塘底至少比地表高度低一格，所以水塘列地表高度那一格总是水，列顶地表方块查询给出水与生成结果一致。
  * 5. 下面任何一条成立就整个不放：中心列高于水面、有一列水深超过 POND_DEPTH_MAX、跨度不到 POND_DIAMETER_MIN、
- *    最深一列不到 POND_DEEPEST_MIN、水面不高于海平面、有一列在大海或冰雪里、有一列在高山雪线以上、
- *    有一列离出生列不超过 POND_SPAWN_CLEARANCE 格。
+ *    水面不高于海平面、有一列在大海或冰雪里、有一列在高山雪线以上、有一列离出生列不超过 POND_SPAWN_CLEARANCE 格。
+ *    最深一列至少 2 格不必另判：中心列不高于水面，它的水深不小于中心深度。
  *
  * 地表高度查询不随水塘变（CONTEXT.md「地表高度」）：这里读的是挖之前的高度，挖水塘只改区块里写下的方块。
  */
@@ -77,8 +77,6 @@ const POND_CENTER_DEPTH_CHOICES = 3;
 export const POND_DIAMETER_MIN = 5;
 /** 每一列水深（水面 y − 塘底 y）的上界。 */
 export const POND_DEPTH_MAX = 4;
-/** 最深一列水深的下界。 */
-export const POND_DEEPEST_MIN = 2;
 
 /** 出生列周围多少格内不出现水塘列（切比雪夫距离，含边界），与树、植物相同（CONTEXT.md「出生点」）。 */
 export const POND_SPAWN_CLEARANCE = 7;
@@ -195,7 +193,6 @@ function pondInCell(placement: PondPlacement, cellX: number, cellZ: number): Pon
   const queued = new Set<number>([0]);
   const key = (dx: number, dz: number): number => (dz + POND_REACH) * side + (dx + POND_REACH);
   const queue: Array<readonly [number, number]> = [[0, 0]];
-  let deepest = 0;
   let minX = 0;
   let maxX = 0;
   let minZ = 0;
@@ -212,7 +209,6 @@ function pondInCell(placement: PondPlacement, cellX: number, cellZ: number): Pon
     if (!allowedAt(placement, x, z, surface)) return undefined;
     columns.push({ x, z });
     floors.push(floor);
-    deepest = Math.max(deepest, depth);
     minX = Math.min(minX, dx);
     maxX = Math.max(maxX, dx);
     minZ = Math.min(minZ, dz);
@@ -226,7 +222,6 @@ function pondInCell(placement: PondPlacement, cellX: number, cellZ: number): Pon
     }
   }
   if (Math.max(maxX - minX, maxZ - minZ) + 1 < POND_DIAMETER_MIN) return undefined;
-  if (deepest < POND_DEEPEST_MIN) return undefined;
   return { x: shape.x, z: shape.z, waterY, columns, floors };
 }
 

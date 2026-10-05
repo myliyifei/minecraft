@@ -21,7 +21,7 @@ import {
 import { HOTBAR_SIZE, INVENTORY_SIZE } from '../../src/core/inventory';
 import { BARE_HAND, ItemType } from '../../src/core/item';
 import { IDLE_INTENT, MAX_PITCH, WALK_SPEED, WALK_STEP } from '../../src/core/player';
-import { createTerrain, DIRT_DEPTH_MAX, DIRT_DEPTH_MIN } from '../../src/core/terrain';
+import { createTerrain } from '../../src/core/terrain';
 import { oakTreesTouching } from '../../src/core/tree';
 import type { Vec3 } from '../../src/core/vec3';
 import { ABOVE_SURFACE } from '../helpers/above-surface';
@@ -206,14 +206,15 @@ describe('GameCore 在 Node 中的方块查询', () => {
     }
   });
 
-  it('草方块下方是 3–4 层泥土，再下方是石头', () => {
+  it('草方块下方是 3–4 层泥土，再下方是石头（平原的铺法，#76 加上别的群系的铺法）', () => {
     const core = sampleCore();
     for (const [x, z] of columns) {
       const surface = surfaceAt(x, z);
       let dirt = 0;
       while (core.getBlock(x, surface - dirt - 1, z) === BlockType.Dirt) dirt++;
-      expect(dirt).toBeGreaterThanOrEqual(DIRT_DEPTH_MIN);
-      expect(dirt).toBeLessThanOrEqual(DIRT_DEPTH_MAX);
+      // CONTEXT.md「草方块，其下 3 到 4 层泥土」
+      expect(dirt).toBeGreaterThanOrEqual(3);
+      expect(dirt).toBeLessThanOrEqual(4);
       expect(core.getBlock(x, surface - dirt - 1, z)).toBe(BlockType.Stone);
       // 石层深处可能正好有矿脉，这里只检查地形分层
       expect(STONE_LAYER).toContain(core.getBlock(x, 0, z));

@@ -431,9 +431,30 @@ test('页面打开后是由默认种子生成的起伏平原', async ({ page }) 
   expect(seed).toBe(DEFAULT_SEED);
 
   await waitForFullViewDistance(page);
-  const heights = await readTopBlockProfile(page);
+  // 期望值在 Node 里用同一份地形对象算：页面里每一列地表高度那一格是列顶地表方块，有树的列列顶更高
+  const terrain = createTerrain(DEFAULT_SEED);
+  const columns: Array<{ x: number; z: number; surface: number }> = [];
+  for (let z = LOADED_MIN; z <= LOADED_MAX; z += PROFILE_Z_STEP) {
+    for (let x = LOADED_MIN; x <= LOADED_MAX; x++) columns.push({ x, z, surface: terrain.surfaceHeightAt(x, z) });
+  }
+  const seen = await page.evaluate(
+    (cols) =>
+      cols.map(({ x, z, surface }) => ({
+        block: window.__VOXEL__!.core.getBlock(x, surface, z),
+        top: window.__VOXEL__!.core.highestBlockY(x, z),
+      })),
+    columns,
+  );
+  const mismatched = columns.filter(({ x, z, surface }, i) => {
+    const { block, top } = seen[i]!;
+    return block !== terrain.surfaceBlockAt(x, z) || top < surface;
+  });
+  expect(mismatched).toEqual([]);
+
+  const heights = columns.map(({ surface }) => surface);
   // 出现多种高度才算「起伏」，而不是一片硬编码平地
   expect(new Set(heights).size).toBeGreaterThan(1);
+  // 下面两条只对平原成立：#75 换成三维密度与四种群系后，出生点一带可能有海、有山
   expect(Math.min(...heights)).toBeGreaterThan(SEA_LEVEL);
   expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(20);
 });
@@ -463,7 +484,7 @@ test('地形生成在 Worker 里进行，视距内的区块陆续送到', async 
     delivered: window.__VOXEL__!.chunks.deliveredCount,
   }));
   // 送回来的不少于世界里现有的：视距铺满靠的是 Worker 的产出，不是主线程边跑边生成
-  // （主线程根本没有生成器——核心拿到的来源只有 chunks.source，见 src/world-session.ts）
+  // （主线程不生成区块——核心拿到的地形对象，生成器换成了 chunks.source，见 src/world-session.ts）
   expect(state.delivered).toBeGreaterThanOrEqual(state.loaded);
   expect(errors).toEqual([]);
 });

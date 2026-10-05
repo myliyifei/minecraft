@@ -1,21 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import type { Chunk } from '../../src/core/chunk';
-import {
-  CHUNK_SIZE,
-  MIN_SURFACE_Y,
-  SEA_LEVEL,
-  WORLD_MAX_Y,
-  WORLD_MIN_Y,
-} from '../../src/core/constants';
-import {
-  DIRT_DEPTH_MAX,
-  DIRT_DEPTH_MIN,
-  PLAINS_BASE_Y,
-  PLAINS_RELIEF,
-  plainsSurfaceHeight,
-  plainsTerrain,
-} from '../../src/core/terrain';
+import { CHUNK_SIZE, SEA_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
+import { createTerrain } from '../../src/core/terrain';
 import { ABOVE_SURFACE } from '../helpers/above-surface';
 import { STONE_LAYER } from '../helpers/stone-layer';
 
@@ -23,16 +10,18 @@ import { STONE_LAYER } from '../helpers/stone-layer';
 const SEED = 314_159;
 const OTHER_SEED = 777;
 
-/** 一批含负数、跨区块的采样列。写死而不是真随机，测试本身也要确定性。 */
-const COLUMNS: Array<[number, number]> = [
-  [0, 0],
-  [1, -1],
-  [15, 15],
-  [-17, 33],
-  [31, -32],
-  [-129, -129],
-  [512, 511],
-];
+const terrain = createTerrain(SEED);
+const surfaceAt = terrain.surfaceHeightAt;
+
+/**
+ * 平原地表的上界：基准高度 69 加起伏上界 5。只对现在的平原实现成立，#75 换成三维密度与四种群系后改。
+ * 写死而不是从地形模块导入：测试只经地形对象（#73）。
+ */
+const SURFACE_UPPER_BOUND = 74;
+
+/** 草方块之下的泥土层数（CONTEXT.md「草方块，其下 3 到 4 层泥土」）。 */
+const DIRT_LAYERS_MIN = 3;
+const DIRT_LAYERS_MAX = 4;
 
 /** 数一数某一列草方块之下连着几层泥土。 */
 function dirtDepthBelow(chunk: Chunk, lx: number, surface: number, lz: number): number {
@@ -55,25 +44,14 @@ function firstDifference(a: Chunk, b: Chunk): string | null {
   return null;
 }
 
-describe('平原地表高度', () => {
-  it('同一种子、同一坐标两次得到同一高度', () => {
-    for (const [x, z] of COLUMNS) {
-      expect(plainsSurfaceHeight(SEED, x, z)).toBe(plainsSurfaceHeight(SEED, x, z));
-    }
-  });
-
-  it('高度是整数', () => {
-    for (const [x, z] of COLUMNS) {
-      expect(Number.isInteger(plainsSurfaceHeight(SEED, x, z))).toBe(true);
-    }
-  });
-
-  it('大范围采样都高于海平面，且不超过起伏上界', () => {
+// 确定性与整数两条由 tests/core/terrain-object.test.ts 覆盖。
+describe('地表高度查询（平原实现，#75 改）', () => {
+  it('大范围采样都高于海平面，且不超过平原的起伏上界（只对平原成立，#75 改）', () => {
     const outOfRange: string[] = [];
     for (let x = -300; x <= 300; x += 3) {
       for (let z = -300; z <= 300; z += 3) {
-        const h = plainsSurfaceHeight(SEED, x, z);
-        if (h <= SEA_LEVEL || h > PLAINS_BASE_Y + PLAINS_RELIEF) {
+        const h = surfaceAt(x, z);
+        if (h <= SEA_LEVEL || h > SURFACE_UPPER_BOUND) {
           outOfRange.push(`(${x}, ${z}) → ${h}`);
         }
       }
@@ -83,16 +61,16 @@ describe('平原地表高度', () => {
 
   it('地形有起伏：一条采样线上出现多种高度', () => {
     const heights = new Set<number>();
-    for (let x = -200; x <= 200; x++) heights.add(plainsSurfaceHeight(SEED, x, 7));
+    for (let x = -200; x <= 200; x++) heights.add(surfaceAt(x, 7));
     expect(heights.size).toBeGreaterThan(3);
   });
 
-  it('起伏平缓：相邻列的高度差不超过 1', () => {
+  it('起伏平缓：相邻列的高度差不超过 1（只对平原成立，#75 改）', () => {
     const steep: string[] = [];
     for (let x = -200; x < 200; x++) {
       for (const z of [-64, 0, 5, 128]) {
-        const dx = Math.abs(plainsSurfaceHeight(SEED, x + 1, z) - plainsSurfaceHeight(SEED, x, z));
-        const dz = Math.abs(plainsSurfaceHeight(SEED, x, z + 1) - plainsSurfaceHeight(SEED, x, z));
+        const dx = Math.abs(surfaceAt(x + 1, z) - surfaceAt(x, z));
+        const dz = Math.abs(surfaceAt(x, z + 1) - surfaceAt(x, z));
         if (dx > 1 || dz > 1) steep.push(`(${x}, ${z}) → dx ${dx}, dz ${dz}`);
       }
     }
@@ -102,7 +80,7 @@ describe('平原地表高度', () => {
   it('换种子得到不同的高度剖面', () => {
     let differing = 0;
     for (let x = -100; x <= 100; x++) {
-      if (plainsSurfaceHeight(SEED, x, 3) !== plainsSurfaceHeight(OTHER_SEED, x, 3)) {
+      if (surfaceAt(x, 3) !== createTerrain(OTHER_SEED).surfaceHeightAt(x, 3)) {
         differing++;
       }
     }
@@ -110,8 +88,8 @@ describe('平原地表高度', () => {
   });
 });
 
-describe('plainsTerrain 生成的区块', () => {
-  const generate = plainsTerrain(SEED);
+describe('地形对象生成的区块', () => {
+  const generate = terrain.generateChunk;
 
   it('纯函数：同一区块坐标两次生成逐格一致', () => {
     expect(firstDifference(generate(0, 0), generate(0, 0))).toBeNull();
@@ -131,16 +109,16 @@ describe('plainsTerrain 生成的区块', () => {
     expect(firstDifference(generate(0, 0), generate(1, 0))).not.toBeNull();
   });
 
-  it('每一列自上而下是 草 → 泥土（3–4 层）→ 石层', () => {
+  it('每一列自上而下是 草 → 泥土（3–4 层）→ 石层（平原的铺法，#76 加上别的群系的铺法）', () => {
     const chunk = generate(-2, 4);
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-        const surface = plainsSurfaceHeight(SEED, -2 * CHUNK_SIZE + lx, 4 * CHUNK_SIZE + lz);
+        const surface = surfaceAt(-2 * CHUNK_SIZE + lx, 4 * CHUNK_SIZE + lz);
         expect(chunk.get(lx, surface, lz)).toBe(BlockType.Grass);
 
         const dirt = dirtDepthBelow(chunk, lx, surface, lz);
-        expect(dirt).toBeGreaterThanOrEqual(DIRT_DEPTH_MIN);
-        expect(dirt).toBeLessThanOrEqual(DIRT_DEPTH_MAX);
+        expect(dirt).toBeGreaterThanOrEqual(DIRT_LAYERS_MIN);
+        expect(dirt).toBeLessThanOrEqual(DIRT_LAYERS_MAX);
         // 泥土之下就是石层：大多数是石头，煤矿脉伸到这么高时也可能是煤矿石
         expect(STONE_LAYER).toContain(chunk.get(lx, surface - dirt - 1, lz));
       }
@@ -152,10 +130,10 @@ describe('plainsTerrain 生成的区块', () => {
     const depths = new Set<number>();
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-        depths.add(dirtDepthBelow(chunk, lx, plainsSurfaceHeight(SEED, lx, lz), lz));
+        depths.add(dirtDepthBelow(chunk, lx, surfaceAt(lx, lz), lz));
       }
     }
-    expect([...depths].sort()).toEqual([DIRT_DEPTH_MIN, DIRT_DEPTH_MAX]);
+    expect([...depths].sort()).toEqual([DIRT_LAYERS_MIN, DIRT_LAYERS_MAX]);
   });
 
   it('石层一直铺到基岩之上：除石头只有矿石', () => {
@@ -185,7 +163,8 @@ describe('plainsTerrain 生成的区块', () => {
         const chunk = generate(cx, cz);
         for (let lx = 0; lx < CHUNK_SIZE; lx++) {
           for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-            for (let y = WORLD_MIN_Y; y <= MIN_SURFACE_Y; y++) {
+            const surface = surfaceAt(cx * CHUNK_SIZE + lx, cz * CHUNK_SIZE + lz);
+            for (let y = WORLD_MIN_Y; y <= surface; y++) {
               const block = chunk.get(lx, y, lz);
               if (block === BlockType.CoalOre) coalYs.push(y);
               if (block === BlockType.IronOre) ironYs.push(y);
@@ -230,7 +209,7 @@ describe('plainsTerrain 生成的区块', () => {
     const strays: string[] = [];
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-        const surface = plainsSurfaceHeight(SEED, -CHUNK_SIZE + lx, -CHUNK_SIZE + lz);
+        const surface = surfaceAt(-CHUNK_SIZE + lx, -CHUNK_SIZE + lz);
         for (let y = surface + 1; y <= WORLD_MAX_Y; y++) {
           const block = chunk.get(lx, y, lz);
           if (!ABOVE_SURFACE.has(block)) strays.push(`(${lx}, ${y}, ${lz}) 是 ${block}`);
@@ -249,7 +228,8 @@ describe('plainsTerrain 生成的区块', () => {
         const chunk = generate(cx, cz);
         for (let lx = 0; lx < CHUNK_SIZE; lx++) {
           for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-            for (let y = MIN_SURFACE_Y; y <= WORLD_MAX_Y; y++) kinds.add(chunk.get(lx, y, lz));
+            const surface = surfaceAt(cx * CHUNK_SIZE + lx, cz * CHUNK_SIZE + lz);
+            for (let y = surface + 1; y <= WORLD_MAX_Y; y++) kinds.add(chunk.get(lx, y, lz));
           }
         }
       }
@@ -259,7 +239,7 @@ describe('plainsTerrain 生成的区块', () => {
   });
 
   it('换种子得到不同的地形', () => {
-    expect(firstDifference(plainsTerrain(OTHER_SEED)(0, 0), generate(0, 0))).not.toBeNull();
+    expect(firstDifference(createTerrain(OTHER_SEED).generateChunk(0, 0), generate(0, 0))).not.toBeNull();
   });
 
   it('区块记住自己的坐标', () => {

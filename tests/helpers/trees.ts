@@ -1,64 +1,38 @@
-import { expect } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, WORLD_MIN_Y } from '../../src/core/constants';
 import { SNOW_LINE_Y } from '../../src/core/surface';
 import { Biome, createTerrain, type ColumnCoord, type Terrain } from '../../src/core/terrain';
-import * as treeModule from '../../src/core/tree';
-import type { TreePlacement } from '../../src/core/tree';
+import { plantTree, plantTrees, TreeSpecies, treesTouching, trunkTopY, type Tree, type TreePlacement } from '../../src/core/tree';
 import { chunkOf, type ChunkCoord } from '../../src/core/world';
 import { FLAT_GROUND_Y } from './flat-terrain';
 import { BIRCH, OAK, SPRUCE, type WoodSpecies } from './wood-species';
 
 /**
- * 三种树（#79）的公共接口与几个测试共用的工具：树的形状（`footprint`）、群系固定的平地（`flatForest`）、
- * 真实地形的大范围树木采样（`surveyTrees`）。接缝与判定方法见 .scratch/seams-79.md。
- *
- * 按名称取 `tree.ts` 的导出而不是直接 import：接口未实现时类型检查与 `npm run build` 仍然通过，
- * 测试按断言失败（与 `surface-rules.ts` 同一个做法）。实现之后可以改回直接 import。
+ * 三种树（#79）几个测试共用的工具：树的形状（`footprint`）、群系固定的平地（`flatForest`）、
+ * 真实地形的大范围树木采样（`surveyTrees`）。
  */
 
-/** 树种的值。`tree.ts` 里是 `TreeSpecies` 的值的联合，这里只当字符串比较。 */
-export type TreeSpeciesValue = string;
-
-/** 一棵树：`OakTree` 的四个字段加树种。实现可以再加形状参数，测试构造树时总是展开一棵真实的树。 */
-export interface Tree {
-  readonly x: number;
-  readonly z: number;
-  readonly rootY: number;
-  readonly trunkHeight: number;
-  readonly species: TreeSpeciesValue;
-}
+export type { Tree };
 
 /** 测试要用的 `tree.ts` 导出。 */
 export interface TreeApi {
-  readonly TreeSpecies: { readonly Oak: TreeSpeciesValue; readonly Birch: TreeSpeciesValue; readonly Spruce: TreeSpeciesValue };
-  treesTouching(placement: TreePlacement, cx: number, cz: number): Tree[];
-  plantTrees(placement: TreePlacement, chunk: Chunk): void;
-  plantTree(chunk: Chunk, tree: Tree): void;
-  trunkTopY(tree: Tree): number;
+  readonly TreeSpecies: typeof TreeSpecies;
+  readonly treesTouching: typeof treesTouching;
+  readonly plantTrees: typeof plantTrees;
+  readonly plantTree: typeof plantTree;
+  readonly trunkTopY: typeof trunkTopY;
 }
 
-const API_KEYS = ['TreeSpecies', 'treesTouching', 'plantTrees', 'plantTree', 'trunkTopY'] as const;
+const API: TreeApi = { TreeSpecies, treesTouching, plantTrees, plantTree, trunkTopY };
 
-let checkedApi: TreeApi | undefined;
-
-/** `tree.ts` 的三种树接口。每个用到它的测试先调这个：哪个导出缺了，按断言报出来。 */
+/** `tree.ts` 的三种树接口。测试先于实现写成时，这里按名称取导出、缺了按断言报出来；现在直接 import。 */
 export function treeApi(): TreeApi {
-  if (checkedApi) return checkedApi;
-  const exported = treeModule as unknown as Partial<Record<(typeof API_KEYS)[number], unknown>>;
-  for (const key of API_KEYS) expect(exported[key], `src/core/tree.ts 未导出 ${key}`).toBeDefined();
-  const species = (exported.TreeSpecies ?? {}) as Partial<TreeApi['TreeSpecies']>;
-  for (const key of ['Oak', 'Birch', 'Spruce'] as const) {
-    expect(species[key], `TreeSpecies.${key} 未定义`).toBeDefined();
-  }
-  checkedApi = exported as unknown as TreeApi;
-  return checkedApi;
+  return API;
 }
 
 /** 树种对应的原木、树叶等方块（`wood-species.ts` 的表）。 */
-export function woodOf(species: TreeSpeciesValue): WoodSpecies {
-  const { TreeSpecies } = treeApi();
+export function woodOf(species: TreeSpecies): WoodSpecies {
   if (species === TreeSpecies.Oak) return OAK;
   if (species === TreeSpecies.Birch) return BIRCH;
   if (species === TreeSpecies.Spruce) return SPRUCE;

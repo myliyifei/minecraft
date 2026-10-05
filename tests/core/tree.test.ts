@@ -32,7 +32,7 @@ import {
 } from '../helpers/trees';
 
 /**
- * 树的放置与形状（ADR-0005，#79 起三种树）。三种树的接口经 `tests/helpers/trees.ts` 取，接缝见 .scratch/seams-79.md。
+ * 树的放置与形状（ADR-0005，#79 起三种树）。测试共用的工具在 `tests/helpers/trees.ts`。
  * 树种按群系的分布、云杉的形状、白桦与橡树同形在 tests/core/tree-species.test.ts。
  */
 

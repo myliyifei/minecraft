@@ -4,6 +4,7 @@ import type { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, DEFAULT_SEED, SEA_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { Biome, createTerrain, type ColumnCoord, type Terrain } from '../../src/core/terrain';
 import { oreVeinsTouching } from '../../src/core/ore';
+import { isColdAt, MOUNTAIN_RELIEF, reliefAt } from '../../src/core/terrain-density';
 import type { ChunkCoord } from '../../src/core/world';
 import {
   boundariesOn,
@@ -41,9 +42,13 @@ import {
  * - 陡坡：与东南西北四个相邻列的地表高度差最大的那个 ≥ 3，顶层石头，紧挨着的下一格不是泥土。只看最高的那一段。
  * - 雪线：高山顶面 y ≥ 150 铺雪草方块，以下铺草方块；冰雪任何高度都是雪草方块。悬垂下方的段按那一段顶面的 y 判断。
  * - 被水盖住（上方是水或冰）：顶面 y ≥ 56 铺沙子，y ≤ 55 铺沙砾，不论群系。
- * - 沙滩：平原或冰雪与大海交界、地表在 y 63 到 67 的列，顶层与其下至少 2 层沙子；交界两侧 6 格内有，宽度的中位数
- *   在 3 到 6；离大海 12 格以外没有露天的沙子。高山临海处同样位置是石头。
- * - 优先次序：被水盖住 → 陡坡 → 沙滩（高山为石头岸）→ 雪线以上与冰雪 → 草方块。
+ * - 沙滩（#76 修订）：从陆地一侧约 4 格一直铺到水边，地表在 y 63 到 67。陆地一侧是平原或冰雪 4 格内有大海的列；
+ *   大海一侧是大海群系里露出水面、地表不高于 y 67 的列，按这一列自身的起伏与温度判断：起伏高于高山阈值
+ *   （与群系判断同一个 MOUNTAIN_RELIEF）是石头，否则寒冷处（与结冰同一个温度阈值）是雪草方块，其余是沙子。
+ *   顶层与其下至少 2 层沙子；交界两侧 6 格内有，宽度随岸坡变化，中位数在 4 到 20、九成不超过 30；九成以上的
+ *   交界从陆地一侧到水边之间没有草方块；离大海 12 格以外没有露天的沙子。高山群系的列不铺沙子，高山临海是石头岸。
+ * - 优先次序：被水盖住 → 陡坡 → 海岸（陆地一侧沙滩或高山石头岸；大海一侧起伏大的石头、寒冷处雪草方块、其余沙子）
+ *   → 雪线以上与冰雪 → 草方块。
  *
  * 采样：每个种子在 ±2560 格、步长 64 的网格上找各群系内部的列（东南西北 32 格外同群系），取平原、冰雪、最深的大海
  * 各 1 个区块，高山 6 个区块加地表 ≥ 165 的高山 3 个区块；沿 `surveyLines(8)` 找平原、冰雪、高山与大海的交界各取
@@ -73,14 +78,22 @@ const FAR_FROM_OCEAN = 24;
 const BEACH_SEARCH = 6;
 /** 交界处有沙子的比例下限。 */
 const BEACH_PRESENT_SHARE = 0.9;
-/** 沙滩宽度的中位数范围与九成分位的上限。 */
-const BEACH_WIDTH_MEDIAN_MIN = 3;
-const BEACH_WIDTH_MEDIAN_MAX = 6;
-const BEACH_WIDTH_P90_MAX = 8;
+/**
+ * 沙滩宽度的中位数范围与九成分位的上限（#76 修订，用户定「约 4 到 20 格」）。三个种子的原型实测：平原临海中位数
+ * 12 到 14、九成分位 19 到 27（岸坡缓的地方长），冰雪临海大海一侧是雪草方块，宽度总是陆地一侧的 4 格。
+ */
+const BEACH_WIDTH_MEDIAN_MIN = 4;
+const BEACH_WIDTH_MEDIAN_MAX = 20;
+const BEACH_WIDTH_P90_MAX = 30;
 /** 量宽度时沿一个方向最多数几格。 */
 const BEACH_RUN_LIMIT = 40;
 /** 露天的沙子离大海最远几格（切比雪夫距离）。 */
 const BEACH_MAX_REACH = 12;
+
+/** 从交界往海里最多走几格找水边（第一列地表低于海平面的列）：三个种子的水边九成在大海群系里 26 格以内。 */
+const WATER_EDGE_SEARCH = 60;
+/** 陆地一侧到水边之间没有草方块的交界、水边那一列是规定方块的交界，各自的比例下限。 */
+const SHORE_TO_WATER_SHARE = 0.9;
 
 /** 高山临海：交界两侧几格内看；交界周围这么远内没有平原与冰雪才算「高山直接临海」。 */
 const ROCKY_COAST_WINDOW = 8;
@@ -145,6 +158,38 @@ function alongBoundary(boundary: BiomeBoundary, d: number): ColumnCoord {
 /** 交界那一对里陆地一侧朝陆地方向走 d（≥ 0）格的列。 */
 function landSide(boundary: BiomeBoundary, d: number): ColumnCoord {
   return boundary.biomes[1] === Biome.Ocean ? alongBoundary(boundary, -1 - d) : alongBoundary(boundary, d);
+}
+
+/** 交界那一对里大海一侧朝海里走 d（≥ 0）格的列。 */
+function oceanSide(boundary: BiomeBoundary, d: number): ColumnCoord {
+  return boundary.biomes[1] === Biome.Ocean ? alongBoundary(boundary, d) : alongBoundary(boundary, -1 - d);
+}
+
+/**
+ * 交界往海里第一列地表低于海平面的列离交界几格（`oceanSide` 的 d），WATER_EDGE_SEARCH 格内没有时返回 undefined。
+ * 水边那一列是 d − 1（d = 0 时水边就在交界上，大海一侧没有露出水面的列）。
+ */
+function waterEdgeOf(terrain: Terrain, boundary: BiomeBoundary): number | undefined {
+  for (let d = 0; d < WATER_EDGE_SEARCH; d++) {
+    const { x, z } = oceanSide(boundary, d);
+    if (terrain.surfaceHeightAt(x, z) < SEA_LEVEL) return d;
+  }
+  return undefined;
+}
+
+/**
+ * 大海群系里露出水面、地表不高于 y 67、不是陡坡的列按新规则应铺的方块（#76 修订）：起伏高于高山阈值是石头，
+ * 否则寒冷处是雪草方块，其余是沙子。起伏与温度直接取群系参数，地形对象的查询里看不到。
+ */
+function oceanShoreTop(seed: number, { x, z }: ColumnCoord): BlockType {
+  if (reliefAt(seed, x, z) > MOUNTAIN_RELIEF) return BlockType.Stone;
+  return isColdAt(seed, x, z) ? SNOWY_GRASS : SAND;
+}
+
+/** 这一列是大海群系里露出水面、地表在 y 63 到 67 的列。 */
+function isLowExposedOcean(terrain: Terrain, { x, z }: ColumnCoord): boolean {
+  const surface = terrain.surfaceHeightAt(x, z);
+  return terrain.biomeAt(x, z) === Biome.Ocean && surface >= SEA_LEVEL && surface <= SEA_LEVEL + BEACH_MAX_ABOVE_SEA;
 }
 
 const sitesBySeed = new Map<number, Sites>();
@@ -605,7 +650,7 @@ describe('沙滩（#76）', () => {
     );
 
     it.each(SURVEY_SEEDS)(
-      `种子 %i：沙滩宽约 3 到 6 格（各交界宽度的中位数在 ${BEACH_WIDTH_MEDIAN_MIN} 到 ${BEACH_WIDTH_MEDIAN_MAX}，九成不超过 ${BEACH_WIDTH_P90_MAX}）`,
+      `种子 %i：沙滩宽约 4 到 20 格（各交界宽度的中位数在 ${BEACH_WIDTH_MEDIAN_MIN} 到 ${BEACH_WIDTH_MEDIAN_MAX}，九成不超过 ${BEACH_WIDTH_P90_MAX}）`,
       (seed) => {
         expectSurfaceBlocksDefined();
         const terrain = terrainOf(seed);
@@ -648,7 +693,111 @@ describe('沙滩（#76）', () => {
         expect(wrong).toEqual([]);
       },
     );
+
+    it.each(SURVEY_SEEDS)(
+      `种子 %i：沙滩铺到水边：${SHORE_TO_WATER_SHARE * 100}% 以上的交界，从陆地一侧 4 格到水边之间露出水面的列没有草方块（#76 修订）`,
+      (seed) => {
+        expectSurfaceBlocksDefined();
+        const terrain = terrainOf(seed);
+        let reached = 0;
+        const grassy: string[] = [];
+        for (const boundary of sitesOf(seed).coasts.get(land) ?? []) {
+          const edge = waterEdgeOf(terrain, boundary);
+          if (edge === undefined) continue;
+          reached++;
+          const span = [
+            ...Array.from({ length: 4 }, (_, d) => landSide(boundary, d)),
+            ...Array.from({ length: edge }, (_, d) => oceanSide(boundary, d)),
+          ];
+          const grass = span.find(
+            ({ x, z }) => terrain.surfaceHeightAt(x, z) >= SEA_LEVEL && terrain.surfaceBlockAt(x, z) === BlockType.Grass,
+          );
+          if (grass) grassy.push(`(${grass.x}, ${grass.z})`);
+        }
+        expect(reached, '往海里走到了水边的交界数').toBeGreaterThanOrEqual(20);
+        expect(1 - grassy.length / reached, `陆地一侧到水边之间有草方块的交界：${grassy.slice(0, 10).join('、')}`).toBeGreaterThanOrEqual(
+          SHORE_TO_WATER_SHARE,
+        );
+      },
+    );
   });
+
+  it.each(SURVEY_SEEDS)(
+    `种子 %i：平原临海处，非寒冷处的水边（往海里最后一列露出水面的列）${SHORE_TO_WATER_SHARE * 100}% 以上是沙子或石头（#76 修订）`,
+    (seed) => {
+      expectSurfaceBlocksDefined();
+      const terrain = terrainOf(seed);
+      const edges: string[] = [];
+      let warm = 0;
+      for (const boundary of sitesOf(seed).coasts.get(Biome.Plains) ?? []) {
+        const edge = waterEdgeOf(terrain, boundary);
+        if (edge === undefined || edge === 0) continue;
+        const column = oceanSide(boundary, edge - 1);
+        if (isColdAt(seed, column.x, column.z)) continue;
+        warm++;
+        const block = terrain.surfaceBlockAt(column.x, column.z);
+        if (block !== SAND && block !== BlockType.Stone) edges.push(`(${column.x}, ${column.z}) ${blockName(block)}`);
+      }
+      expect(warm, '非寒冷处的水边').toBeGreaterThanOrEqual(20);
+      expect(1 - edges.length / warm, `水边不是沙子或石头：${edges.slice(0, 10).join('、')}`).toBeGreaterThanOrEqual(
+        SHORE_TO_WATER_SHARE,
+      );
+    },
+  );
+
+  it.each(SURVEY_SEEDS)(
+    `种子 %i：冰雪临海处，寒冷处的水边 ${SHORE_TO_WATER_SHARE * 100}% 以上是雪草方块（#76 复审，修订后保留）`,
+    (seed) => {
+      expectSurfaceBlocksDefined();
+      const terrain = terrainOf(seed);
+      const edges: string[] = [];
+      let cold = 0;
+      for (const boundary of sitesOf(seed).coasts.get(Biome.Snowy) ?? []) {
+        const edge = waterEdgeOf(terrain, boundary);
+        if (edge === undefined || edge === 0) continue;
+        const column = oceanSide(boundary, edge - 1);
+        if (!isColdAt(seed, column.x, column.z)) continue;
+        cold++;
+        const block = terrain.surfaceBlockAt(column.x, column.z);
+        if (block !== SNOWY_GRASS) edges.push(`(${column.x}, ${column.z}) ${blockName(block)}`);
+      }
+      expect(cold, '寒冷处的水边').toBeGreaterThanOrEqual(20);
+      expect(1 - edges.length / cold, `水边不是雪草方块：${edges.slice(0, 10).join('、')}`).toBeGreaterThanOrEqual(
+        SHORE_TO_WATER_SHARE,
+      );
+    },
+  );
+
+  it.each(SURVEY_SEEDS)(
+    `种子 %i：大海群系里露出水面、地表在 y ${SEA_LEVEL} 到 ${SEA_LEVEL + BEACH_MAX_ABOVE_SEA}、不是陡坡的列，起伏高于高山阈值是石头，否则寒冷处是雪草方块、其余是沙子（#76 修订）`,
+    (seed) => {
+      expectSurfaceBlocksDefined();
+      const terrain = terrainOf(seed);
+      const wrong: string[] = [];
+      const counts = new Map<BlockType, number>();
+      const seen = new Set<string>();
+      const coasts = [...sitesOf(seed).coasts.values()].flat();
+      for (const boundary of coasts) {
+        for (let d = 0; d < WATER_EDGE_SEARCH; d++) {
+          const column = oceanSide(boundary, d);
+          const key = `${column.x},${column.z}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          if (!isLowExposedOcean(terrain, column) || isSteep(terrain, column.x, column.z)) continue;
+          const expected = oceanShoreTop(seed, column);
+          counts.set(expected, (counts.get(expected) ?? 0) + 1);
+          const actual = terrain.surfaceBlockAt(column.x, column.z);
+          if (actual !== expected) {
+            wrong.push(`(${column.x}, ${terrain.surfaceHeightAt(column.x, column.z)}, ${column.z})：应为 ${blockName(expected)}，查询 ${blockName(actual)}`);
+          }
+        }
+      }
+      for (const block of [SAND, SNOWY_GRASS, BlockType.Stone]) {
+        expect(counts.get(block) ?? 0, `应为 ${blockName(block)} 的列`).toBeGreaterThan(0);
+      }
+      expect(wrong.slice(0, 20)).toEqual([]);
+    },
+  );
 
   it.each(SURVEY_SEEDS)(
     `种子 %i：露出水面的沙子只在离大海 ${BEACH_MAX_REACH} 格以内、地表在 y ${SEA_LEVEL} 到 ${SEA_LEVEL + BEACH_MAX_ABOVE_SEA} 的平原、冰雪或大海列上`,
@@ -680,7 +829,7 @@ describe('沙滩（#76）', () => {
   );
 
   it.each(SURVEY_SEEDS)(
-    `种子 %i：高山直接临海处是石头岸：交界两侧 ${ROCKY_COAST_WINDOW} 格内露出水面的列没有沙子，八成以上的交界在高山一侧有石头`,
+    `种子 %i：高山直接临海处是石头岸：交界两侧 ${ROCKY_COAST_WINDOW} 格内高山群系的列没有沙子，大海一侧起伏高于高山阈值的低处列是石头，八成以上的交界在高山一侧有石头`,
     (seed) => {
       expectSurfaceBlocksDefined();
       const terrain = terrainOf(seed);
@@ -695,13 +844,23 @@ describe('沙滩（#76）', () => {
       });
       expect(clear.length, '高山直接临海的交界数').toBeGreaterThanOrEqual(5);
       const sandy: string[] = [];
+      const notStone: string[] = [];
       let rocky = 0;
+      let seaward = 0;
       for (const boundary of clear) {
         for (let d = -ROCKY_COAST_WINDOW - 1; d <= ROCKY_COAST_WINDOW; d++) {
           const { x, z } = alongBoundary(boundary, d);
+          if (terrain.biomeAt(x, z) !== Biome.Mountains) continue;
           if (terrain.surfaceHeightAt(x, z) >= SEA_LEVEL && terrain.surfaceBlockAt(x, z) === SAND) {
             sandy.push(`(${x}, ${z})`);
           }
+        }
+        for (let d = 0; d <= ROCKY_COAST_WINDOW; d++) {
+          const column = oceanSide(boundary, d);
+          if (!isLowExposedOcean(terrain, column) || reliefAt(seed, column.x, column.z) <= MOUNTAIN_RELIEF) continue;
+          seaward++;
+          const block = terrain.surfaceBlockAt(column.x, column.z);
+          if (block !== BlockType.Stone) notStone.push(`(${column.x}, ${column.z}) ${blockName(block)}`);
         }
         for (let d = 0; d <= ROCKY_COAST_WINDOW; d++) {
           const { x, z } = landSide(boundary, d);
@@ -712,6 +871,8 @@ describe('沙滩（#76）', () => {
         }
       }
       expect(sandy.slice(0, 20)).toEqual([]);
+      expect(seaward, '大海一侧起伏高于高山阈值的低处列').toBeGreaterThan(0);
+      expect(notStone.slice(0, 20)).toEqual([]);
       expect(rocky / clear.length, '高山一侧有石头的交界占比').toBeGreaterThanOrEqual(ROCKY_COAST_STONE_SHARE);
     },
   );
@@ -745,10 +906,6 @@ describe('树只长在列顶地表方块是草方块或雪草方块的列上（#
 });
 
 describe('冰雪临海的大海一侧（#76 按审查补）', () => {
-  /** 交界那一对里大海一侧朝海里走 d（≥ 0）格的列。 */
-  function oceanSide(boundary: BiomeBoundary, d: number): ColumnCoord {
-    return boundary.biomes[1] === Biome.Ocean ? alongBoundary(boundary, d) : alongBoundary(boundary, -1 - d);
-  }
   /** 往海里看多远：水边多在大海群系里 10 格左右。 */
   const OCEAN_SIDE_REACH = 16;
 

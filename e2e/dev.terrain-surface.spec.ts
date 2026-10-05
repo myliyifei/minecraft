@@ -9,7 +9,7 @@ import { createWorld, ignorePause, waitForWorldList } from './world-list';
  * #76 地表铺法的端到端核对：在 Node 里用同一份地形对象、固定种子算出一处沙滩与一处雪线以上的列，
  * 经调试句柄确认页面里那几格的方块。
  *
- * 调试句柄只读得到已加载区块里的方块，也没有把玩家挪到远处的指令，所以选一个两处都在默认视距以内的种子：
+ * 调试句柄只读得到已加载区块里的方块，也没有把玩家移到远处的指令，所以选一个两处都在默认视距以内的种子：
  * 种子 940 的原点是平原草方块，切比雪夫距离约 42 格处有沙滩、约 82 格处有雪线以上的高山。找列以页面里玩家所在的
  * 区块与视距为准（留 1 个区块的边），出生列改为螺旋搜索（#84）之后仍然成立。
  * Windows 浏览器实机截图不在这里，留给实机验收。
@@ -24,7 +24,7 @@ const SNOWY_GRASS = (BlockType as Readonly<Record<string, number>>)['SnowyGrass'
 const SEED = 940;
 const TERRAIN = createTerrain(SEED);
 
-/** 雪线（QA 定，见 tests/helpers/surface-rules.ts）。 */
+/** 雪线（测试设定，见 tests/helpers/surface-rules.ts）。 */
 const SNOW_LINE_Y = 150;
 /** 沙滩的地表最高在海平面之上几格。 */
 const BEACH_MAX_ABOVE_SEA = 4;

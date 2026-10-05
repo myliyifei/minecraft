@@ -37,7 +37,7 @@ import {
 /**
  * 地表铺法（#76）：上方是空气或水的每一段实心方块按群系与坡度铺地表，列顶地表方块查询用同一套规则。
  *
- * 阈值（QA 定，常量在 tests/helpers/surface-rules.ts）：
+ * 阈值（测试设定，常量在 tests/helpers/surface-rules.ts）：
  * - 陡坡：与东南西北四个相邻列的地表高度差最大的那个 ≥ 3，顶层石头，紧挨着的下一格不是泥土。只看最高的那一段。
  * - 雪线：高山顶面 y ≥ 150 铺雪草方块，以下铺草方块；冰雪任何高度都是雪草方块。悬垂下方的段按那一段顶面的 y 判断。
  * - 被水盖住（上方是水或冰）：顶面 y ≥ 56 铺沙子，y ≤ 55 铺沙砾，不论群系。
@@ -357,7 +357,7 @@ describe('列顶地表方块查询与生成一致（#76）', () => {
 describe('露天、不是陡坡的顶面按群系铺（#76）', () => {
   /**
    * 远离大海的区块里，最高那一段露出水面、不是陡坡的列：顶层按群系与高度，其下 3 到 4 层泥土。
-   * 返回各种群系与顶层的计数，好断言要测的情形确实出现了。
+   * 返回各种群系与顶层的计数，以便断言要测的情形确实出现了。
    */
   function checkInland(seed: number, coords: readonly ChunkCoord[]): { wrong: string[]; counts: Map<string, number> } {
     const terrain = terrainOf(seed);
@@ -717,7 +717,7 @@ describe('沙滩（#76）', () => {
   );
 });
 
-describe('树只长在草方块与雪草方块上（tree.ts「#76 起改看列顶地表方块」）', () => {
+describe('树只长在列顶地表方块是草方块或雪草方块的列上（#76）', () => {
   const LOGS: ReadonlySet<BlockType> = new Set([BlockType.OakLog, BlockType.BirchLog, BlockType.SpruceLog]);
 
   it.each(SURVEY_SEEDS)('种子 %i：每根树干最下面那格原木的正下方是草方块或雪草方块，那一列的列顶地表方块也是', (seed) => {
@@ -744,6 +744,32 @@ describe('树只长在草方块与雪草方块上（tree.ts「#76 起改看列�
   });
 });
 
+describe('冰雪临海的大海一侧（#76 按审查补）', () => {
+  /** 交界那一对里大海一侧朝海里走 d（≥ 0）格的列。 */
+  function oceanSide(boundary: BiomeBoundary, d: number): ColumnCoord {
+    return boundary.biomes[1] === Biome.Ocean ? alongBoundary(boundary, d) : alongBoundary(boundary, -1 - d);
+  }
+  /** 往海里看多远：水边多在大海群系里 10 格左右。 */
+  const OCEAN_SIDE_REACH = 16;
+
+  it.each(SURVEY_SEEDS)('种子 %i：冰雪与大海交界处，大海一侧露出水面的列不是草方块', (seed) => {
+    expectSurfaceBlocksDefined();
+    const terrain = terrainOf(seed);
+    const wrong: string[] = [];
+    let exposed = 0;
+    for (const boundary of sitesOf(seed).coasts.get(Biome.Snowy) ?? []) {
+      for (let d = 0; d < OCEAN_SIDE_REACH; d++) {
+        const { x, z } = oceanSide(boundary, d);
+        if (terrain.biomeAt(x, z) !== Biome.Ocean || terrain.surfaceHeightAt(x, z) < SEA_LEVEL) continue;
+        exposed++;
+        if (terrain.surfaceBlockAt(x, z) === BlockType.Grass) wrong.push(`(${x}, ${z})`);
+      }
+    }
+    expect(exposed, '大海一侧露出水面的列').toBeGreaterThan(0);
+    expect(wrong.slice(0, 20)).toEqual([]);
+  });
+});
+
 describe('矿脉不替换列顶的石头（#76 按变异测试补）', () => {
   /** 高山临海交界附近这么多个区块里找矿脉格落在列顶石头上的列。 */
   const COAST_CHUNK_REACH = 2;
@@ -753,7 +779,7 @@ describe('矿脉不替换列顶的石头（#76 按变异测试补）', () => {
     const checked = new Set<string>();
     const wrong: string[] = [];
     let hits = 0;
-    // 石头岸与靠近海平面的陡坡在 y 63 到 67，煤矿脉最高到 y 64，只有高山临海处碰得到
+    // 石头岸与靠近海平面的陡坡在 y 63 到 67，煤矿脉最高到 y 64，只有高山临海处会经过列顶的石头
     for (const boundary of sitesOf(seed).coasts.get(Biome.Mountains) ?? []) {
       const center = chunkOfColumn(boundary.b);
       for (let dcx = -COAST_CHUNK_REACH; dcx <= COAST_CHUNK_REACH; dcx++) {

@@ -14,16 +14,6 @@ import { fbm2, fbm3 } from './noise';
  * 逐格一致。
  */
 
-/** 群系参数：一列的大陆度、起伏、温度，都在 [−1, 1]。 */
-export interface Climate {
-  /** 大陆度：低于 OCEAN_CONTINENTALNESS 是大海，越高离海越远。 */
-  readonly continentalness: number;
-  /** 起伏：陆地上高于 MOUNTAIN_RELIEF 是高山。 */
-  readonly relief: number;
-  /** 温度：低于 COLD_TEMPERATURE 是寒冷处。 */
-  readonly temperature: number;
-}
-
 /**
  * 群系参数噪声的特征跨度（格）：噪声输入是「世界坐标 / 跨度」。
  *
@@ -54,16 +44,11 @@ export const MOUNTAIN_RELIEF = 0.18;
  */
 export const COLD_TEMPERATURE = -0.1;
 
-/** 一列的群系参数。 */
-export function climateAt(seed: number, x: number, z: number): Climate {
-  return {
-    continentalness: continentalnessAt(seed, x, z),
-    relief: reliefAt(seed, x, z),
-    temperature: temperatureAt(seed, x, z),
-  };
-}
-
-/** 三层群系参数各自单独求：群系按大陆度、起伏、温度依次判断，判出来就不必再求后面的层（`terrain.ts`）。 */
+/**
+ * 三层群系参数（都在 [−1, 1]）各自单独求：群系按大陆度、起伏、温度依次判断，判出来就不必再求后面的层（`terrain.ts`）。
+ * 大陆度低于 OCEAN_CONTINENTALNESS 是大海，越高离海越远；起伏高于 MOUNTAIN_RELIEF 的陆地是高山；温度低于
+ * COLD_TEMPERATURE 是寒冷处。
+ */
 export function continentalnessAt(seed: number, x: number, z: number): number {
   return fbm2(seed ^ CONTINENTALNESS_SALT, x / CONTINENTALNESS_SCALE, z / CONTINENTALNESS_SCALE, CLIMATE_OCTAVES);
 }
@@ -379,8 +364,8 @@ export interface DensityExtent {
 /**
  * 按密度把区块里的地形方块写成石头，其余保持空气；最底层不动（调用方写基岩）。
  *
- * 顺带求出区块四周那一圈 64 列的地表高度：格点多取一圈（区块本身的 5×5 根之外再加四条边上各 5 根），
- * 与区块共用边上那一排格点的缓存，比逐列调 `densitySurfaceHeight`（每列新建 4 根格点竖列）省得多。
+ * 同时求出区块四周那一圈 64 列的地表高度：格点多取一圈（区块本身的 5×5 根之外再加四条边上各 5 根），
+ * 与区块共用边上那一排格点的缓存，比逐列调 `densitySurfaceHeight`（每列新建 4 根格点竖列）计算量少得多。
  */
 export function fillDensity(seed: number, chunk: Chunk): DensityExtent {
   const gx0 = (chunk.cx * CHUNK_SIZE) >> GRID_XZ_SHIFT;

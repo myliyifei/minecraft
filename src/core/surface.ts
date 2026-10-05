@@ -16,8 +16,8 @@ import { OCEAN_CONTINENTALNESS } from './terrain-density';
  * 1. 被水盖住（地表低于海平面）：顶面 y ≥ SHALLOW_FLOOR_MIN_Y 是沙子，更低是沙砾，不论群系。
  * 2. 陡坡：与东南西北四个相邻列的地表高度差最大的那个 ≥ STEEP_RISE，石头，不铺泥土。
  * 3. 海岸：地表不高于 BEACH_MAX_Y 的列，平原与冰雪在 BEACH_REACH 格内有大海时是沙滩（沙子），高山是石头岸；
- *    大海群系里露出水面的列在 BEACH_SEAWARD_REACH 格内有平原或冰雪时也是沙子，沙滩接着往海里铺两格。
- * 4. 雪线以上的高山、任意高度的冰雪：雪草方块。
+ *    大海群系里露出水面的列在 BEACH_SEAWARD_REACH 格内与平原或冰雪相邻时也是沙子，沙滩向海一侧延伸两格。
+ * 4. 雪线以上的高山、任意高度的冰雪、寒冷处大海群系里露出水面的列：雪草方块。
  * 5. 其余：草方块。
  *
  * 悬垂下方的段只按 1、4、5 铺（陡坡与海岸只看最高那一段），雪线按那一段顶面的 y 判断。
@@ -37,26 +37,27 @@ export const BEACH_MAX_Y = SEA_LEVEL + 4;
 
 /**
  * 海岸的判定距离（格）：平原、冰雪与高山的列沿 x、沿 z 四个方向各看 1 到 BEACH_REACH 格，有大海的列就是临海；
- * 大海群系里露出水面的列各看 1 到 BEACH_SEAWARD_REACH 格，有平原或冰雪的列就接着沙滩铺沙子。
+ * 大海群系里露出水面的列各看 1 到 BEACH_SEAWARD_REACH 格，与平原或冰雪相邻就铺沙子，沙滩向海一侧延伸。
  * 沙滩因此最宽 BEACH_REACH + BEACH_SEAWARD_REACH 格。
  *
- * 大海一侧只铺两格：三维密度地形的岸边是缓坡，水边多在大海群系里约 10 格处（四个种子的中位数 9 到 11 格），
- * 一直铺到水边沙滩就有十几格宽，所以沙滩与水边之间仍会留一条大海群系的草方块。
+ * 大海一侧只铺两格：三维密度地形的岸边是缓坡，水边多在大海群系里约 10 格处（三个种子的中位数 9 到 11 格），
+ * 一直铺到水边沙滩就有十几格宽，所以沙滩与水边之间仍会留一条大海群系的草方块（寒冷处是雪草方块）。
  */
 export const BEACH_REACH = 4;
 export const BEACH_SEAWARD_REACH = 2;
 
 /**
  * 大陆度离大海阈值不超过这么多的列才去找附近的大海。大陆度每格最多变 0.0035（四个种子的大范围采样），
- * 0.02 至少相当于 5.7 格，比 BEACH_REACH 宽，所以不会截掉该找的列；内陆的列因此一次邻列也不看。
+ * 0.02 至少相当于 5.7 格，比 BEACH_REACH 宽，所以不会漏掉该找的列；内陆的列因此一次邻列也不看。
  */
 export const COAST_CONTINENTALNESS_BAND = 0.02;
 
-/** 规则读的样本：任意一列的地表高度、群系、大陆度。 */
+/** 规则读的样本：任意一列的地表高度、群系、大陆度，与是不是寒冷处（与海平面那层结冰同一个阈值）。 */
 export interface SurfaceSamples {
   readonly heightAt: (x: number, z: number) => number;
   readonly biomeAt: (x: number, z: number) => Biome;
   readonly continentalnessAt: (x: number, z: number) => number;
+  readonly isColdAt: (x: number, z: number) => boolean;
 }
 
 /** 沿 x、沿 z 四个方向各 1 到 reach 格的偏移，近的在前，找到就停。 */
@@ -80,10 +81,19 @@ export function underwaterFloorAt(y: number): BlockType {
   return y >= SHALLOW_FLOOR_MIN_Y ? BlockType.Sand : BlockType.Gravel;
 }
 
-/** 露出水面、不是陡坡也不在海岸的顶面：冰雪与雪线以上的高山是雪草方块，其余是草方块。 */
-export function exposedTopAt(biome: Biome, y: number): BlockType {
+/**
+ * 露出水面、不是陡坡也不在海岸的顶面：冰雪、雪线以上的高山与寒冷处的大海群系是雪草方块，其余是草方块。
+ * cold 只对大海群系起作用：陆地上的寒冷处已经分成了冰雪群系，海面结冰的地方露出水面的列也该是雪。
+ */
+export function exposedTopAt(biome: Biome, y: number, cold: boolean): BlockType {
   if (biome === Biome.Snowy || (biome === Biome.Mountains && y >= SNOW_LINE_Y)) return BlockType.SnowyGrass;
+  if (biome === Biome.Ocean && cold) return BlockType.SnowyGrass;
   return BlockType.Grass;
+}
+
+/** 这一列是不是寒冷处的大海群系：只有大海群系才问温度。 */
+function isColdOcean(samples: SurfaceSamples, x: number, z: number, biome: Biome): boolean {
+  return biome === Biome.Ocean && samples.isColdAt(x, z);
 }
 
 /** 与东南西北四个相邻列的地表高度差的绝对值里最大的那个。 */
@@ -112,7 +122,7 @@ function coastTop(samples: SurfaceSamples, x: number, z: number, biome: Biome): 
   const c = samples.continentalnessAt(x, z);
   const ocean = OCEAN_CONTINENTALNESS;
   if (biome === Biome.Ocean) {
-    // 大海一侧露出水面的列：挨着平原或冰雪时接着沙滩铺沙子。
+    // 大海一侧露出水面的列：与平原或冰雪相邻时铺沙子，沙滩向海一侧延伸两格。
     if (c < ocean - COAST_CONTINENTALNESS_BAND) return undefined;
     const beachLand = (bx: number, bz: number): boolean => {
       const b = samples.biomeAt(bx, bz);
@@ -137,7 +147,7 @@ export function highestTopBlock(samples: SurfaceSamples, x: number, z: number): 
     const coast = coastTop(samples, x, z, biome);
     if (coast !== undefined) return coast;
   }
-  return exposedTopAt(biome, h);
+  return exposedTopAt(biome, h, isColdOcean(samples, x, z, biome));
 }
 
 /** 顶层之下铺几层什么：草方块与雪草方块下是泥土，沙子、沙砾下是同一种，石头下不铺。 */
@@ -166,6 +176,8 @@ export interface ColumnCover {
   readonly highest: BlockType;
   /** 这一列的群系：悬垂下方的段按它铺。 */
   readonly biome: Biome;
+  /** 这一列是不是寒冷处的大海群系（`exposedTopAt` 的 cold）。 */
+  readonly coldOcean: boolean;
 }
 
 /**
@@ -174,7 +186,7 @@ export interface ColumnCover {
  * 或沙砾，否则按群系与那一段顶面的 y 铺。
  */
 export function coverColumn(chunk: Chunk, lx: number, lz: number, cover: ColumnCover): void {
-  const { top, solidTop, depth, highest, biome } = cover;
+  const { top, solidTop, depth, highest, biome, coldOcean: cold } = cover;
   let aboveSolid = false;
   let first = true;
   let filler: BlockType | undefined;
@@ -188,7 +200,7 @@ export function coverColumn(chunk: Chunk, lx: number, lz: number, cover: ColumnC
         first = false;
       } else {
         const above = chunk.get(lx, y + 1, lz);
-        block = above === BlockType.Water || above === BlockType.Ice ? underwaterFloorAt(y) : exposedTopAt(biome, y);
+        block = above === BlockType.Water || above === BlockType.Ice ? underwaterFloorAt(y) : exposedTopAt(biome, y, cold);
       }
       chunk.set(lx, y, lz, block);
       filler = fillerBelow(block);

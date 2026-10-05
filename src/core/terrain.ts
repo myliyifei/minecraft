@@ -16,7 +16,13 @@ import {
   temperatureAt,
 } from './terrain-density';
 import { Biome } from './biome';
-import { BEACH_REACH, BEACH_SEAWARD_REACH, coverColumn, highestTopBlock, type SurfaceSamples } from './surface';
+import {
+  BEACH_REACH,
+  BEACH_SEAWARD_REACH,
+  coverColumn,
+  highestTopBlock,
+  type SurfaceSamples,
+} from './surface';
 import { plantOakTrees, type SurfaceHeightAt, type TreePlacement } from './tree';
 
 import type { ColumnCoord } from './world';
@@ -116,6 +122,7 @@ export function createTerrain(seed: number): Terrain {
     heightAt: (x, z) => densitySurfaceHeight(seed, x, z),
     biomeAt: (x, z) => biomeAt(seed, x, z, continentalnessAt(seed, x, z)),
     continentalnessAt: (x, z) => continentalnessAt(seed, x, z),
+    isColdAt: (x, z) => isColdAt(seed, x, z),
   };
   const queries: Omit<Terrain, 'generateChunk' | 'spawnColumn'> = {
     seed,
@@ -164,7 +171,7 @@ const CLIMATE_WINDOW = CHUNK_SIZE + 2 * CLIMATE_MARGIN;
 
 /**
  * 区块生成用的样本：区块连同四周一圈的地表高度来自 `fillDensity` 已求出的数，区块连同四周 CLIMATE_MARGIN 列的
- * 群系与大陆度按列算一次存下；更远的列落回地形对象的查询。每个数都与查询逐列相同，所以生成时铺地表与
+ * 群系与大陆度按列算一次存下；更远的列改调地形对象的查询。每个数都与查询逐列相同，所以生成时铺地表与
  * 列顶地表方块查询得到同一个结果，只是不重复计算。
  */
 function chunkSamples(
@@ -196,7 +203,7 @@ function chunkSamples(
       const wx = x - originX + 1;
       const wz = z - originZ + 1;
       const inWindow = wx >= 0 && wx < HEIGHT_WINDOW && wz >= 0 && wz < HEIGHT_WINDOW;
-      // 窗口四个角上的列没有求，落回查询。
+      // 窗口四个角上的列没有求，改调查询。
       const corner = (wx === 0 || wx === HEIGHT_WINDOW - 1) && (wz === 0 || wz === HEIGHT_WINDOW - 1);
       return inWindow && !corner ? heights[wz * HEIGHT_WINDOW + wx]! : queries.surfaceHeightAt(x, z);
     },
@@ -211,6 +218,8 @@ function chunkSamples(
       return biome;
     },
     continentalnessAt: continentalnessOf,
+    // 只有大海群系露出水面的列才问，次数少，不缓存。
+    isColdAt: (x, z) => isColdAt(seed, x, z),
   };
 }
 
@@ -243,17 +252,22 @@ function densityGenerator(queries: Omit<Terrain, 'generateChunk'>): TerrainGener
         const column = lz * CHUNK_SIZE + lx;
         const solidTop = solidTops[column]!;
         floodBelowSeaLevel(chunk, lx, lz, solidTop);
-        if (chunk.get(lx, SEA_LEVEL, lz) === BlockType.Water && isColdAt(seed, x, z)) {
+        // 温度每列最多求一次：结冰与寒冷处大海的雪草方块共用。
+        let cold: boolean | undefined;
+        const coldHere = (): boolean => (cold ??= isColdAt(seed, x, z));
+        if (chunk.get(lx, SEA_LEVEL, lz) === BlockType.Water && coldHere()) {
           chunk.set(lx, SEA_LEVEL, lz, BlockType.Ice);
         }
         const top = highestTopBlock(samples, x, z);
+        const biome = samples.biomeAt(x, z);
         highest[column] = top;
         coverColumn(chunk, lx, lz, {
           top: tops[column]!,
           solidTop,
           depth: dirtDepthAt(seed, x, z),
           highest: top,
-          biome: samples.biomeAt(x, z),
+          biome,
+          coldOcean: biome === Biome.Ocean && coldHere(),
         });
       }
     }

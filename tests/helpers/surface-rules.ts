@@ -8,7 +8,7 @@ import type { Terrain } from '../../src/core/terrain';
  *
  * 只按名称取编号，不写编号的值：方块与物品编号都是追加的，别的切片也在追加，谁先合并编号就不同。
  * 按字符串键取而不是写 `BlockType.Sand`：新编号未定义时类型检查仍然通过，`npm run build`（端到端的生产预览要它）
- * 不被测试文件挡住，测试按断言失败。编号定义好之后可以改回直接取属性。
+ * 不因测试文件加载失败，测试按断言失败。编号定义好之后可以改回直接取属性。
  */
 function blockNamed(name: string): BlockType {
   return (BlockType as Readonly<Record<string, BlockType>>)[name]!;
@@ -44,7 +44,7 @@ export function expectSurfaceBlocksDefined(): void {
 }
 
 /*
- * 铺法的阈值（QA 定）。
+ * 铺法的阈值（测试设定）。
  */
 
 /** 陡坡：与东南西北四个相邻列的地表高度差，最大的那个不小于它。 */

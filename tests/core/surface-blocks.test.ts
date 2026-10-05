@@ -39,7 +39,7 @@ import {
 /**
  * 沙子、沙砾、雪草方块（#76）：挖掘、掉落、经验、放置、连锁挖掘，以及沙子与沙砾这一切片不下落。
  *
- * 数值按父 spec #72 的方块表写死字面值：沙子硬度 0.5、铲、掉自己、经验 30；沙砾硬度 0.6、铲、掉自己、经验 30；
+ * 数值按父 spec #72 的方块表直接写字面值：沙子硬度 0.5、铲、掉自己、经验 30；沙砾硬度 0.6、铲、掉自己、经验 30；
  * 雪草方块硬度 0.6、铲、掉泥土、经验 30、没有物品。耗时按公式向上取整（硬度 × 30 ÷ 倍率）换算：
  * 硬度 0.5 空手 15 tick、木铲（倍率 2）8 tick、石铲（倍率 4）4 tick；硬度 0.6 空手 18 tick、木铲 9 tick、石铲 5 tick。
  */
@@ -160,7 +160,7 @@ describe('连锁挖掘：雪草方块与草方块不算同一类型（父 spec #
     return [[cell.x, cell.y, cell.z], block];
   }
 
-  it('一排两格草方块、两格雪草方块：从哪一段开始都只连上同种的那两格', () => {
+  it('一排两格草方块、两格雪草方块：从哪一段开始都只连上同一种的那两格', () => {
     expectSurfaceBlocksDefined();
     const blocks = [BlockType.Grass, BlockType.Grass, SNOWY_GRASS, SNOWY_GRASS];
     const world = worldWithBlocks(...blocks.map((block, i) => at(row(i), block)));
@@ -168,7 +168,7 @@ describe('连锁挖掘：雪草方块与草方块不算同一类型（父 spec #
     expect(chainConnectedBlocks(world, row(2))).toEqual([row(2), row(3)]);
   });
 
-  it('沙子与沙砾之间、沙子与泥土之间也不连；同种的沙子照常连成一片', () => {
+  it('沙子与沙砾之间、沙子与泥土之间也不连；同一种的沙子照常彼此相连', () => {
     expectSurfaceBlocksDefined();
     const world = worldWithBlocks(at(row(0), SAND), at(row(1), SAND), at(row(2), GRAVEL), at(row(3), BlockType.Dirt));
     expect(chainConnectedBlocks(world, row(0))).toEqual([row(0), row(1)]);

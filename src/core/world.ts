@@ -1,4 +1,13 @@
-import { BlockType, blockDrop, blockStateKind, isOpaque, type BlockEdit } from './block';
+import {
+  BlockType,
+  SUPPORT_ATTACH_OFFSETS,
+  blockDrop,
+  blockStateKind,
+  mayDetachNeighbors,
+  supportCell,
+  supportHolds,
+  type BlockEdit,
+} from './block';
 import {
   blockStateFromRecord,
   blockStateRecord,
@@ -14,7 +23,6 @@ import type { DropSink } from './drop';
 import { BARE_HAND } from './item';
 import { Lighting } from './light';
 import type { BlockStateRecord, ChunkRecord } from './snapshot';
-import { TORCH_ATTACH_OFFSETS, torchSupportCell } from './torch';
 
 export interface ChunkCoord {
   readonly cx: number;
@@ -114,7 +122,7 @@ export class World implements BlockEdit, BlockStateView {
   private readonly blockStates = new Map<string, BlockStateEntry>();
   private readonly source: ChunkSource;
   /**
-   * 支撑没了的火把变成的掉落物交给谁（见 `dropDetachedTorches`）。核心里是 `Drops`；只测方块与光照的
+   * 支撑没了的火把与花变成的掉落物交给谁（见 `dropDetached`）。核心里是 `Drops`；只测方块与光照的
    * 世界不接，那时火把照样改成空气，只是没有掉落物。
    */
   private readonly drops: DropSink;
@@ -219,8 +227,8 @@ export class World implements BlockEdit, BlockStateView {
    * 写入方块。返回值表示这次写入是否落到了世界里：
    * 坐标所在区块未加载、或 y 超出世界高度时不做任何事并返回 false。
    *
-   * 一格从不透明方块换成非不透明方块（挖掉、换成树叶）之后，贴着它的火把在原位变成掉落物（`dropDetachedTorches`）。
-   * 连锁挖掘逐块写入，自然覆盖。
+   * 一格换掉之后，贴着它而撑不住了的方块（支撑表 `supportCell`）在原位碎掉（`dropDetached`）：不再是不透明方块时贴着它的火把、
+   * 不再是实心方块时长在它上面的地表植物。连锁挖掘逐块写入，自然覆盖。
    */
   setBlock(x: number, y: number, z: number, block: BlockType): boolean {
     const bx = Math.floor(x);
@@ -243,26 +251,27 @@ export class World implements BlockEdit, BlockStateView {
     this.markStale(bx, bz, previous, block);
     // 同步更新光照，不等下一 tick：同一 tick 之后的步骤读到的就是新值（ADR-0017）。
     this.lighting.blockChanged(chunk, lx, by, lz, previous, block);
-    if (isOpaque(previous) && !isOpaque(block)) this.dropDetachedTorches(bx, by, bz);
+    if (mayDetachNeighbors(previous, block)) this.dropDetached(bx, by, bz, block);
     return true;
   }
 
   /**
-   * (x, y, z) 那一格刚不再是不透明方块：上方与四侧贴着它的火把（见 CONTEXT.md 的「火把」）各改成空气，
-   * 在原位掉出一支火把。改成空气走 `setBlock`，光照随之更新。要求整数输入。
+   * (x, y, z) 那一格刚换成 block：上方与四侧贴着它（支撑表）而 block 撑不住的方块各改成空气，按掉落表在原位掉出东西——
+   * 火把掉一支火把，花掉它自己，矮草与蕨什么都不掉。改成空气走 `setBlock`，光照随之更新。要求整数输入。
    *
-   * 只在「不透明 → 非不透明」时查：火把只放得上不透明方块，原本就不是不透明的那一格上不会贴着火把。
+   * 只在 `mayDetachNeighbors` 成立时查：贴着的那一格原本就撑不住它们时，它们不会立在那里。
    */
-  private dropDetachedTorches(x: number, y: number, z: number): void {
-    for (const offset of TORCH_ATTACH_OFFSETS) {
+  private dropDetached(x: number, y: number, z: number, block: BlockType): void {
+    for (const offset of SUPPORT_ATTACH_OFFSETS) {
       const tx = x + offset.x;
       const ty = y + offset.y;
       const tz = z + offset.z;
-      const torch = this.getBlock(tx, ty, tz);
-      const support = torchSupportCell(torch, tx, ty, tz);
+      const attached = this.getBlock(tx, ty, tz);
+      const support = supportCell(attached, tx, ty, tz);
       if (!support || support.x !== x || support.y !== y || support.z !== z) continue;
+      if (supportHolds(attached, block)) continue;
       if (!this.setBlock(tx, ty, tz, BlockType.Air)) continue;
-      const drop = blockDrop(torch, BARE_HAND);
+      const drop = blockDrop(attached, BARE_HAND);
       if (drop) this.drops.spawnInBlock(drop, tx, ty, tz);
     }
   }

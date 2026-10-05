@@ -6,6 +6,7 @@ import {
   type ItemStack,
   type MiningTool,
 } from './item';
+import type { Vec3 } from './vec3';
 
 /**
  * 方块种类。数值直接存进区块的 Uint8Array，因此已发布的编号不可改动，新方块追加即可。
@@ -35,7 +36,7 @@ export const BlockType = {
   /**
    * 火把（见 CONTEXT.md 的「火把」，#56）：每个朝向一个编号（ADR-0012 补记），五个是同一种方块，
    * `baseBlock` 都归到 `Torch`。`Torch` 立在下面那块的顶面上；`WallTorchNegX` 贴在它 −X 那一侧的
-   * 墙上（墙在 x − 1），其余三个同理。贴着哪一格见 `torch.ts` 的「支撑」。
+   * 墙上（墙在 x − 1），其余三个同理。贴着哪一格见支撑表 `supportCell`。
    */
   Torch: 14,
   WallTorchNegX: 15,
@@ -588,6 +589,65 @@ const PLANT_SOIL: ReadonlySet<BlockType> = new Set([BlockType.Grass, BlockType.S
 /** 花能不能种在这种方块上面。 */
 export function isPlantSoil(block: BlockType): boolean {
   return PLANT_SOIL.has(block);
+}
+
+/**
+ * 支撑表（见 CONTEXT.md「火把」「地表植物」、ADR-0012 补记）：贴着别的方块才立得住的方块，它贴着的那一格相对它的偏移，
+ * 以及那一格要是什么才撑得住它。与几何无关：火把的朝向、细杆与命中盒在 `torch.ts`，植物的命中盒在 `plant.ts`，
+ * 这里只回答「贴着哪一格、那一格换成什么之后撑不住」。
+ *
+ * - 地面火把贴下方，墙上火把贴编号上写的那一侧（`WallTorchNegX` 的墙在 x − 1），那一格要是不透明方块。
+ * - 四种地表植物贴下方，那一格要是实心方块：下面那格变成空气或水时随之碎掉。
+ */
+interface Support {
+  readonly offset: Vec3;
+  /** 贴着的那一格换成这种方块之后还撑不撑得住。 */
+  readonly holds: (support: BlockType) => boolean;
+}
+
+const BELOW: Vec3 = { x: 0, y: -1, z: 0 };
+const TORCH_HOLDS = (support: BlockType) => isOpaque(support);
+const PLANT_HOLDS = (support: BlockType) => isSolid(support);
+
+const SUPPORTS: Readonly<Partial<Record<BlockType, Support>>> = {
+  [BlockType.Torch]: { offset: BELOW, holds: TORCH_HOLDS },
+  [BlockType.WallTorchNegX]: { offset: { x: -1, y: 0, z: 0 }, holds: TORCH_HOLDS },
+  [BlockType.WallTorchPosX]: { offset: { x: 1, y: 0, z: 0 }, holds: TORCH_HOLDS },
+  [BlockType.WallTorchNegZ]: { offset: { x: 0, y: 0, z: -1 }, holds: TORCH_HOLDS },
+  [BlockType.WallTorchPosZ]: { offset: { x: 0, y: 0, z: 1 }, holds: TORCH_HOLDS },
+  [BlockType.ShortGrass]: { offset: BELOW, holds: PLANT_HOLDS },
+  [BlockType.Fern]: { offset: BELOW, holds: PLANT_HOLDS },
+  [BlockType.Dandelion]: { offset: BELOW, holds: PLANT_HOLDS },
+  [BlockType.Poppy]: { offset: BELOW, holds: PLANT_HOLDS },
+};
+
+/** (x, y, z) 那一格的 block 贴着哪一格，不贴着任何一格的方块（绝大多数）是 undefined。 */
+export function supportCell(block: BlockType, x: number, y: number, z: number): Vec3 | undefined {
+  const offset = SUPPORTS[block]?.offset;
+  return offset && { x: x + offset.x, y: y + offset.y, z: z + offset.z };
+}
+
+/** block 贴着的那一格换成 support 之后还撑不撑得住它。不贴着任何一格的方块永远撑得住。 */
+export function supportHolds(block: BlockType, support: BlockType): boolean {
+  return SUPPORTS[block]?.holds(support) ?? true;
+}
+
+/**
+ * 一格方块周围可能贴着它的方块在哪：支撑表里出现过的偏移反过来，即上方与四侧，相对那一格。下方不算——
+ * 没有倒挂的火把与植物。世界把一格换掉之后按它查邻格（`World.setBlock`）。
+ */
+export const SUPPORT_ATTACH_OFFSETS: readonly Vec3[] = Object.freeze(
+  [...new Map(Object.values(SUPPORTS).map(({ offset }) => [`${offset.x},${offset.y},${offset.z}`, offset])).values()].map(
+    ({ x, y, z }) => ({ x: -x, y: -y, z: -z }),
+  ),
+);
+
+/**
+ * 一格从 previous 换成 block 之后，有没有可能让贴着它的方块撑不住：从不透明变成非不透明（火把），或从实心变成不实心
+ * （植物）。都不是时贴着它的方块都还撑得住，世界不必查邻格。
+ */
+export function mayDetachNeighbors(previous: BlockType, block: BlockType): boolean {
+  return (isOpaque(previous) && !isOpaque(block)) || (isSolid(previous) && !isSolid(block));
 }
 
 /**

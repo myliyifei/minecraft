@@ -166,7 +166,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.worldHardcoreDead = restore?.hardcoreDead ?? false;
     this.radius = options.viewRadius ?? DEFAULT_VIEW_RADIUS;
     this.autoJumpEnabled = options.autoJump ?? true;
-    // 支撑没了的火把交给掉落物（`World.dropDetachedTorches`）。掉落物要拿世界算碰撞，比世界晚建，
+    // 支撑没了的火把与花交给掉落物（`World.dropDetached`）。掉落物要拿世界算碰撞，比世界晚建，
     // 所以这里传一个转发给掉落物的函数。世界在这个构造函数里只加载区块、不写方块，调用到它时掉落物已经建好。
     const terrain = (options.terrain ?? createTerrain)(this.worldSeed);
     this.spawnColumn = terrain.spawnColumn;

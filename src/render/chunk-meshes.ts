@@ -48,15 +48,11 @@ export class ChunkMeshes {
 
   /** 拆掉这个区块的网格：两份几何都从场景移除并释放。没建过时什么都不做。 */
   drop(cx: number, cz: number): void {
-    const key = chunkKey(cx, cz);
-    const entry = this.entries.get(key);
-    if (!entry) return;
-    for (const mesh of [entry.opaque, entry.translucent]) {
-      if (!mesh) continue;
+    for (const mesh of this.partsOf(cx, cz)) {
       this.parent.remove(mesh);
       mesh.geometry.dispose();
     }
-    this.entries.delete(key);
+    this.entries.delete(chunkKey(cx, cz));
   }
 
   /** 这个区块的网格建过没有（含一个面都没有的那些）。 */

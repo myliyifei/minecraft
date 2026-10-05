@@ -187,7 +187,7 @@ function lightMaterial(
   if (source === 'particle') defines.PARTICLE = '';
   if (translucent) defines.TRANSLUCENT = '';
   const blended = translucent || source === 'particle';
-  // 半透明的变体不做透明裁剪：水与冰贴图的 alpha 都高于阈值，留着裁剪也丢不掉像素，但以后更淡的半透明贴图会被整片丢掉。
+  // 半透明的变体不做透明裁剪：水与冰贴图的 alpha 都高于阈值，留着裁剪也丢不掉像素，但以后更淡的半透明贴图会全部被透明裁剪丢弃。
   const alphaTest = translucent ? 0 : ALPHA_TEST;
   return new THREE.ShaderMaterial({
     vertexShader: source === 'particle' ? PARTICLE_VERTEX_SHADER : VERTEX_SHADER,
@@ -223,7 +223,7 @@ export function terrainMaterial(texture: THREE.Texture, frame: FrameLighting): T
 /**
  * 网格半透明部分（水与冰）的材质（#83，ADR-0016 补记）：与 `terrainMaterial` 同一套着色器的变体，输出贴图的 alpha、
  * 不做透明裁剪、开启混合（`NormalBlending`）、不写深度。`transparent` 为真，three 因此把用它的网格放进透明列表，
- * 在所有不透明的网格之后画，并按到相机的距离由远到近排序，区块之间的前后就是这样排的。单面：水顶面从下面看的那一面
+ * 在所有不透明的网格之后画，并按到相机的距离由远到近排序，区块之间的前后就是这样排的。单面：水与冰的顶面从下面看的那一面
  * 由网格多出的一份反向的面画（`buildChunkMesh`），不靠双面材质，否则水的侧面也会从里面透出来。所有区块共用一份。
  */
 export function translucentTerrainMaterial(texture: THREE.Texture, frame: FrameLighting): THREE.ShaderMaterial {

@@ -1081,10 +1081,6 @@ export class WorldRenderer {
   }
 }
 
-/**
- * 一个已经建过网格的区块。
- * `mesh` 缺省表示这个区块一个面都没有（整块空气），场景里没有对应的对象。
- */
 function lerp(from: number, to: number, alpha: number): number {
   return from + (to - from) * alpha;
 }
@@ -1116,7 +1112,7 @@ function entityCenter(
 
 /**
  * 选框、裂纹与粒子的绘制顺序：在半透明的区块网格（水与冰，#83）之后画。它们与水、冰都在 three 的透明列表里，
- * 列表先按 `renderOrder` 排，再按到相机的远近。只按远近排的话，挖冰时裂纹可能先画、再被冰盖上一层颜色；
+ * 列表先按 `renderOrder` 排，再按到相机的远近。只按远近排的话，挖冰时裂纹可能先画、再叠上冰的颜色；
  * 粒子的几何是原点上的一张四边形，按它排出来的先后与粒子实际的位置无关。
  */
 const OVERLAY_RENDER_ORDER = 1;

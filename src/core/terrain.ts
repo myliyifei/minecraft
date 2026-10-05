@@ -51,14 +51,66 @@ export interface Terrain {
   readonly spawnColumn: ColumnCoord;
 }
 
-/** 世界原点那一列。 */
+/** 世界原点那一列。出生列搜索什么都找不到时就是它。 */
 const ORIGIN_COLUMN: ColumnCoord = Object.freeze({ x: 0, z: 0 });
+
+/** 出生列搜索的步长（方块）：只查 x、z 都是它的倍数的列。 */
+const SPAWN_SEARCH_STEP = 16;
+
+/** 出生列搜索的范围（方块，与原点的切比雪夫距离），含边界。 */
+const SPAWN_SEARCH_RADIUS = 1024;
+
+/** 出生列搜索要的三个查询。 */
+export type SpawnColumnQueries = Pick<Terrain, 'biomeAt' | 'surfaceHeightAt' | 'surfaceBlockAt'>;
+
+/**
+ * 出生列（CONTEXT.md「出生点」）：从原点那一列起，以 16 格为步长按螺旋顺序查，取第一列群系是平原、列顶地表方块是
+ * 草方块的；1024 格以内找不到就取第一列列顶不是水、地表高于海平面的陆地，再找不到就是原点。
+ *
+ * 只调三个查询，不生成区块：生成器放树要避开出生列，得先有出生列才造得出生成器。陆地顺带在同一遍里记下第一列，
+ * 与「先查完平原、再从头查陆地」结果相同。群系最便宜，先问；地表高度最贵，只在还没找到陆地时才问。
+ */
+export function findSpawnColumn(queries: SpawnColumnQueries): ColumnCoord {
+  let firstLand: ColumnCoord | undefined;
+  for (const column of spawnSearchOrder()) {
+    const { x, z } = column;
+    const plains = queries.biomeAt(x, z) === Biome.Plains;
+    if (!plains && firstLand) continue;
+    const block = queries.surfaceBlockAt(x, z);
+    if (plains && block === BlockType.Grass) return column;
+    if (!firstLand && block !== BlockType.Water && queries.surfaceHeightAt(x, z) > SEA_LEVEL) firstLand = column;
+  }
+  return firstLand ?? ORIGIN_COLUMN;
+}
+
+/**
+ * 出生列搜索查的列，按螺旋顺序：先原点，再由内向外一圈一圈走，第 k 圈是与原点切比雪夫距离 16k 的那 8k 列。
+ * 每一圈从上一圈终点 (16(k−1), −16(k−1)) 往 +X 迈一步起，沿 +Z、−X、−Z、+X 四条边走一周，终点 (16k, −16k)。
+ */
+function* spawnSearchOrder(): Generator<ColumnCoord> {
+  yield ORIGIN_COLUMN;
+  const rings = SPAWN_SEARCH_RADIUS / SPAWN_SEARCH_STEP;
+  for (let k = 1; k <= rings; k++) {
+    for (let j = -k + 1; j <= k; j++) yield searchColumn(k, j);
+    for (let i = k - 1; i >= -k; i--) yield searchColumn(i, k);
+    for (let j = k - 1; j >= -k; j--) yield searchColumn(-k, j);
+    for (let i = -k + 1; i <= k; i++) yield searchColumn(i, -k);
+  }
+}
+
+/** 以步长为单位的格点 (i, j) 对应的列。 */
+function searchColumn(i: number, j: number): ColumnCoord {
+  return { x: i * SPAWN_SEARCH_STEP, z: j * SPAWN_SEARCH_STEP };
+}
 
 /**
  * 由种子构造地形对象。
  *
  * 地形由三维密度决定（ADR-0021，密度场见 `terrain-density.ts`）：群系按大陆度、起伏、温度三层参数分，
- * 地表高度按那一列的密度求出。列顶地表方块这一版仍总是草方块（#76 按铺地表的规则给出），出生列仍是原点（#84）。
+ * 地表高度按那一列的密度求出。列顶地表方块这一版仍总是草方块（#76 按铺地表的规则给出）。
+ *
+ * 出生列构造时按三个查询搜一次（`findSpawnColumn`），存在地形对象上，之后读的都是这一个结果：生成器放树
+ * 要避开它，核心与加载画面也读它。
  */
 export function createTerrain(seed: number): Terrain {
   const queries = {
@@ -66,9 +118,9 @@ export function createTerrain(seed: number): Terrain {
     biomeAt: (x: number, z: number): Biome => biomeOf(climateAt(seed, x, z)),
     surfaceHeightAt: (x: number, z: number) => densitySurfaceHeight(seed, x, z),
     surfaceBlockAt: () => BlockType.Grass,
-    spawnColumn: ORIGIN_COLUMN,
   };
-  return { ...queries, generateChunk: densityGenerator(queries) };
+  const placement = { ...queries, spawnColumn: findSpawnColumn(queries) };
+  return { ...placement, generateChunk: densityGenerator(placement) };
 }
 
 /**

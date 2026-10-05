@@ -68,6 +68,15 @@ export const BlockType = {
   Sand: 27,
   Gravel: 28,
   SnowyGrass: 29,
+  /**
+   * 地表植物（见 CONTEXT.md「地表植物」，#80）：矮草、蕨、蒲公英、虞美人。不实心、不挡光、按下即碎、给 5 点经验，
+   * 下面那一格没了随之碎掉（`supportCell`）。矮草与蕨什么都不掉、没有物品，放方块时可以直接替换它们（`canPlaceInto`）；
+   * 两种花掉它自己，可以种回草方块、雪草方块与泥土上。四种是不同的方块，连锁挖掘里互不算同一类型。
+   */
+  ShortGrass: 30,
+  Fern: 31,
+  Dandelion: 32,
+  Poppy: 33,
 } as const;
 
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
@@ -371,6 +380,33 @@ const ICE: BlockDef = {
 };
 
 /**
+ * 地表植物给的经验值：经验表里「地表植物」那一档（docs/design-decisions.md），比普通方块少得多，清理矮草不会成为
+ * 大量获取经验的途径。
+ */
+const PLANT_EXPERIENCE = 5;
+
+/**
+ * 一种地表植物（四种共用这一份，#80）：不实心、不是不透明、与火把同一种透光方式、不发光；硬度 0，按下那一 tick 就碎，
+ * 不损耗工具；没有合格工具也不需要工具。`drop` 是 null 时什么都不掉（矮草与蕨）。
+ */
+function plant(drop: ItemType | null): BlockDef {
+  return {
+    opaque: false,
+    solid: false,
+    hardness: 0,
+    qualifiedToolClass: ToolClass.None,
+    minimumMaterial: ToolMaterial.Wood,
+    requiresTool: false,
+    drop: drop === null ? null : one(drop),
+    experience: PLANT_EXPERIENCE,
+    use: BlockUse.None,
+    state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Clear,
+  };
+}
+
+/**
  * 用铲挖更快、不需要工具、经验照普通方块给的一种土类方块（草方块、泥土、沙子、沙砾、雪草方块的属性结构相同）：
  * 只差硬度与掉什么。
  */
@@ -503,6 +539,11 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
   [BlockType.Gravel]: soil(0.6, ItemType.Gravel),
   // 雪草方块（#76）：数值与草方块相同，掉泥土。
   [BlockType.SnowyGrass]: soil(0.6, ItemType.Dirt),
+  // 地表植物（#80）：矮草与蕨什么都不掉，两种花掉它自己。
+  [BlockType.ShortGrass]: plant(null),
+  [BlockType.Fern]: plant(null),
+  [BlockType.Dandelion]: plant(ItemType.Dandelion),
+  [BlockType.Poppy]: plant(ItemType.Poppy),
 };
 
 export function isAir(block: BlockType): boolean {
@@ -528,6 +569,27 @@ export function isWater(block: BlockType): boolean {
   return block === BlockType.Water;
 }
 
+/** 是不是地表植物（四种之一，#80）。 */
+export function isPlant(block: BlockType): boolean {
+  return block === BlockType.ShortGrass || block === BlockType.Fern || isFlower(block);
+}
+
+/** 是不是花（蒲公英或虞美人）：有物品、掉它自己、种得回去，放方块时不被替换。 */
+export function isFlower(block: BlockType): boolean {
+  return block === BlockType.Dandelion || block === BlockType.Poppy;
+}
+
+/**
+ * 花种得上去的方块（见 CONTEXT.md「放置」）：花的落点下面那一格必须是其中之一。生成只在草方块与雪草方块上放植物，
+ * 是这一集合的子集。
+ */
+const PLANT_SOIL: ReadonlySet<BlockType> = new Set([BlockType.Grass, BlockType.SnowyGrass, BlockType.Dirt]);
+
+/** 花能不能种在这种方块上面。 */
+export function isPlantSoil(block: BlockType): boolean {
+  return PLANT_SOIL.has(block);
+}
+
 /**
  * 选目标方块的视线穿不穿过这种方块（见 CONTEXT.md 的「目标方块」）：空气与水穿过，其余方块都能成为目标，
  * 树叶与冰也算。火把那一格另按细杆的盒子求交（`raycastBlocks`），不走这一条。
@@ -537,11 +599,11 @@ export function sightPassesThrough(block: BlockType): boolean {
 }
 
 /**
- * 放置的落点能不能是这一格（见 CONTEXT.md 的「放置」）：空气与水可以，放下的方块替换原来那一格。
- * 火把不能放进水里，那一条在 `placeBlock`。
+ * 放置的落点能不能是这一格（见 CONTEXT.md 的「放置」）：空气、水、矮草与蕨可以，放下的方块替换原来那一格。
+ * 两种花不行：花有物品，放方块时不替换它。火把与花不能放进水里，那一条在 `placeBlock`。
  */
 export function canPlaceInto(block: BlockType): boolean {
-  return isAir(block) || isWater(block);
+  return isAir(block) || isWater(block) || block === BlockType.ShortGrass || block === BlockType.Fern;
 }
 
 /**
@@ -737,6 +799,9 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   // 沙子与沙砾（#76）放下去是对应的方块。雪草方块与草方块一样没有物品。
   [ItemType.Sand]: BlockType.Sand,
   [ItemType.Gravel]: BlockType.Gravel,
+  // 两种花（#80）放下去是对应的方块。矮草与蕨没有物品。
+  [ItemType.Dandelion]: BlockType.Dandelion,
+  [ItemType.Poppy]: BlockType.Poppy,
 };
 
 /**

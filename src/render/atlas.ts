@@ -1,4 +1,4 @@
-import { BlockType, placedBlock } from '../core/block';
+import { BlockType, isPlant, placedBlock } from '../core/block';
 import { isTorch } from '../core/torch';
 import { ItemType } from '../core/item';
 
@@ -90,6 +90,11 @@ export const TILE = {
   gravel: 58,
   snowyGrassTop: 59,
   snowyGrassSide: 60,
+  // 四种地表植物（#80）：透明底上的图案，交叉面片与手持图标都贴这一格。
+  shortGrass: 61,
+  fern: 62,
+  dandelion: 63,
+  poppy: 64,
 } as const;
 
 /**
@@ -194,6 +199,11 @@ export const BLOCK_TILES: Readonly<Record<BlockType, FaceTiles | null>> = {
   [BlockType.Sand]: flat(TILE.sand),
   [BlockType.Gravel]: flat(TILE.gravel),
   [BlockType.SnowyGrass]: { top: TILE.snowyGrassTop, bottom: TILE.dirt, side: TILE.snowyGrassSide },
+  // 地表植物（#80）画成交叉面片，只用得上侧面那一格；六面同图，掉落物的小方块（花）也就六面都贴它。
+  [BlockType.ShortGrass]: flat(TILE.shortGrass),
+  [BlockType.Fern]: flat(TILE.fern),
+  [BlockType.Dandelion]: flat(TILE.dandelion),
+  [BlockType.Poppy]: flat(TILE.poppy),
 };
 
 /**
@@ -244,6 +254,9 @@ export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
   // 沙子与沙砾（#76）：小方块与方块本身六面相同。
   [ItemType.Sand]: flat(TILE.sand),
   [ItemType.Gravel]: flat(TILE.gravel),
+  // 两种花（#80）：与花方块同图。
+  [ItemType.Dandelion]: flat(TILE.dandelion),
+  [ItemType.Poppy]: flat(TILE.poppy),
 };
 
 /**
@@ -264,11 +277,11 @@ export type HeldItemShape = (typeof HeldItemShape)[keyof typeof HeldItemShape];
  *
  * 看的是放置表：放得下去的物品就是方块，画立方体；放不下去的（木棍、工具、将来的食物）
  * 没有「六个面」可画，画图标。不另开一张表——「是不是方块物品」这件事放置表已经记了。
- * 火把放得下去，但它的方块是一根细杆，同样没有六个面，画图标（#57）。
+ * 火把放得下去，但它的方块是一根细杆，同样没有六个面，画图标（#57）。花（#80）的方块是两片交叉面片，也画图标。
  */
 export function heldItemShape(item: ItemType): HeldItemShape {
   const block = placedBlock(item);
-  return block === null || isTorch(block) ? HeldItemShape.Flat : HeldItemShape.Cube;
+  return block === null || isTorch(block) || isPlant(block) ? HeldItemShape.Flat : HeldItemShape.Cube;
 }
 
 export interface UvRect {

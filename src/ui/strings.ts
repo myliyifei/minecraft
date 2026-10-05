@@ -222,4 +222,6 @@ export const ITEM_NAMES: Readonly<Record<ItemType, string>> = {
   [ItemType.SprucePlanks]: '云杉木板',
   [ItemType.Sand]: '沙子',
   [ItemType.Gravel]: '沙砾',
+  [ItemType.Dandelion]: '蒲公英',
+  [ItemType.Poppy]: '虞美人',
 };

@@ -347,6 +347,53 @@ function onBirchMark(x, y) {
   return (x - start + TILE_PX) % TILE_PX < length;
 }
 
+/**
+ * 地表植物（#80）四格的颜色与形状。四格都是透明底，alpha 只有 0 与 255，网格靠透明裁剪抠出轮廓（与树叶相同）。
+ */
+const PLANT_GREEN = [78, 138, 48];
+const PLANT_TIP = [118, 160, 60];
+const FERN_GREEN = [58, 112, 66];
+const FERN_STEM = [46, 92, 52];
+const STEM_GREEN = [62, 120, 40];
+const DANDELION_PETAL = [236, 206, 40];
+const DANDELION_CENTER = [214, 160, 24];
+const POPPY_PETAL = [204, 32, 30];
+const POPPY_CENTER = [40, 24, 20];
+
+/** 矮草每一列草叶的叶尖在第几行（第 0 行在上），undefined 是这一列没有草叶。 */
+const SHORT_GRASS_BLADES = [undefined, 6, 9, undefined, 3, 7, undefined, 5, 2, undefined, 8, 4, undefined, 6, 10, undefined];
+
+/** 蕨的这一像素有没有叶子：叶轴在第 7、8 列第 2 行以下；每隔两行一对小叶，从叶轴往两边斜向上伸，越往上越短。 */
+function onFern(x, y) {
+  if ((x === 7 || x === 8) && y >= 2) return true;
+  const side = x < 7 ? 7 - x : x - 8;
+  if (side <= 0) return false;
+  // 小叶从叶轴第 r 行长出，每往外一格抬高半行
+  for (let r = 4; r <= 14; r += 3) {
+    const reach = Math.min(7, Math.floor((r + 4) / 2.5));
+    if (side <= reach && y === r - Math.floor(side / 2)) return true;
+  }
+  return false;
+}
+
+/**
+ * 一朵花：第 7、8 列从第 7 行到格底是茎，第 10、12 行各伸出一片叶子；花头以 (7.5, 4.5) 为中心，
+ * 半径 3 以内是花瓣（四角缺掉，像四瓣），中间 2×2 是花心。
+ */
+function flower(petal, center) {
+  return (x, y, rand) => {
+    const noise = Math.floor(rand() * 14) - 7;
+    const dx = x - 7.5;
+    const dy = y - 4.5;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return shade(center, noise);
+    if (Math.hypot(dx, dy) <= 3 && !(Math.abs(dx) > 2 && Math.abs(dy) > 2)) return shade(petal, noise);
+    if ((x === 7 || x === 8) && y >= 7) return shade(STEM_GREEN, noise);
+    if ((y === 10 && x >= 4 && x <= 6) || (y === 9 && x === 4)) return shade(STEM_GREEN, noise);
+    if ((y === 12 && x >= 9 && x <= 11) || (y === 11 && x === 11)) return shade(STEM_GREEN, noise);
+    return [0, 0, 0, 0];
+  };
+}
+
 /** 每个格号对应的画法：painter(x, y, rand) → [r, g, b, a]。 */
 const TILES = {
   // grass_top
@@ -602,6 +649,21 @@ const TILES = {
     if (y === edge) return shade(SNOW_SHADOW, Math.floor(rand() * 10) - 5);
     return shade(DIRT, Math.floor(rand() * 28) - 14);
   },
+  // short_grass：透明底上从格底长出的一丛草叶，高矮不一，叶尖偏黄绿
+  61: (x, y, rand) => {
+    const top = SHORT_GRASS_BLADES[x];
+    if (top === undefined || y < top) return [0, 0, 0, 0];
+    return shade(y - top < 2 ? PLANT_TIP : PLANT_GREEN, Math.floor(rand() * 18) - 9);
+  },
+  // fern：中间一根叶轴，两边一对对往上斜的小叶，越往上越短，整体比矮草偏蓝的暗绿
+  62: (x, y, rand) => {
+    if (!onFern(x, y)) return [0, 0, 0, 0];
+    return shade(x === 7 || x === 8 ? FERN_STEM : FERN_GREEN, Math.floor(rand() * 16) - 8);
+  },
+  // dandelion：绿茎两片叶，顶上一团黄花
+  63: flower(DANDELION_PETAL, DANDELION_CENTER),
+  // poppy：绿茎两片叶，顶上四瓣红花，花心发黑
+  64: flower(POPPY_PETAL, POPPY_CENTER),
 };
 
 /** 太阳与月亮那块方片的范围：居中 12×12，四周各留 2 像素透明边。 */

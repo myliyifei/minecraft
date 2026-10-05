@@ -15,6 +15,8 @@ export const SURVEY_SEEDS: readonly number[] = [314_159, 777, -42];
 
 /**
  * 不是地形方块的方块：空气、水、冰、树（见 CONTEXT.md「地表高度」：水、冰、树与地表植物不算）。
+ * 这也就是地表之上允许出现的方块：土石只在地表之下，树长在它之上，低于海平面的列地表之上是水，
+ * 寒冷处海平面那一层是冰——几处测试都要断言这条分界，所以只放这一份。
  * #80 加地表植物时要把矮草、蕨、两种花加进来；沙子、沙砾、雪草方块是地形方块，不用加。
  */
 export const NON_TERRAIN: ReadonlySet<BlockType> = new Set([
@@ -140,7 +142,7 @@ export function* gridColumns(half: number, step: number): Generator<ColumnCoord>
   }
 }
 
-/** 这一列与它东南西北各 reach 格外的列群系都相同：这一列在那片群系里头，不在边上。 */
+/** 这一列与它东南西北各 reach 格外的列群系都相同：这一列在那片群系内部，不在边上。 */
 export function isInterior(terrain: Terrain, { x, z }: ColumnCoord, reach: number): boolean {
   const biome = terrain.biomeAt(x, z);
   return (

@@ -24,7 +24,7 @@ import { IDLE_INTENT, MAX_PITCH, WALK_SPEED, WALK_STEP } from '../../src/core/pl
 import { createTerrain } from '../../src/core/terrain';
 import { oakTreesTouching } from '../../src/core/tree';
 import type { Vec3 } from '../../src/core/vec3';
-import { ABOVE_SURFACE } from '../helpers/above-surface';
+import { NON_TERRAIN } from '../helpers/terrain-survey';
 import { FLAT_GROUND_Y, flatTerrain } from '../helpers/flat-terrain';
 import { STONE_LAYER } from '../helpers/stone-layer';
 import { allStale } from '../helpers/stale-chunks';
@@ -192,7 +192,7 @@ describe('GameCore 在 Node 中的方块查询', () => {
     const core = sampleCore();
     for (const [x, z] of columns) {
       const surface = surfaceAt(x, z);
-      expect(ABOVE_SURFACE.has(core.getBlock(x, surface + 1, z))).toBe(true);
+      expect(NON_TERRAIN.has(core.getBlock(x, surface + 1, z))).toBe(true);
       // 最高的树也就地表往上十来格，40 格之外一定出了树冠
       expect(core.getBlock(x, surface + 40, z)).toBe(BlockType.Air);
       expect(core.getBlock(x, WORLD_MAX_Y, z)).toBe(BlockType.Air);

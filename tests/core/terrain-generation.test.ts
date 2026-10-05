@@ -25,7 +25,7 @@ import {
 /**
  * 三维密度地形生成出的区块（#75）：按群系各找几个区块，断言方块与三个查询一致。
  *
- * 区块怎么找：只调 `biomeAt` 与 `surfaceHeightAt`。每个种子在 ±2560 格、步长 64 的网格上找各群系里头的列
+ * 区块怎么找：只调 `biomeAt` 与 `surfaceHeightAt`。每个种子在 ±2560 格、步长 64 的网格上找各群系内部的列
  * （东南西北 32 格外也是同一群系），沿采样线找冰雪与大海、平原与大海的交界，再在陆地一侧找低于海平面的列。
  * 每个种子约生成 30 个区块，按 (种子, cx, cz) 缓存，只有确定性那几条另建地形对象重算。
  *
@@ -40,7 +40,7 @@ const INTERIOR_REACH = 32;
 /** 每个种子取几个高山区块找悬垂。 */
 const MOUNTAIN_CHUNKS = 6;
 
-/** 挑大海区块时比较几列大海里头的列的海底。 */
+/** 挑大海区块时比较几列大海内部的列的海底。 */
 const OCEAN_CANDIDATES = 40;
 
 /** 冰雪临海、内陆低于海平面，每个种子各取几处。 */
@@ -52,7 +52,7 @@ const INLAND_WALK = 48;
 /** issue 给的地表高度上界。 */
 const MAX_SURFACE_Y = 210;
 
-/** 草方块之下的泥土层数（本票的铺法沿用平原的 3 到 4 层）。 */
+/** 草方块之下的泥土层数（本 issue的铺法沿用平原的 3 到 4 层）。 */
 const DIRT_LAYERS_MIN = 3;
 const DIRT_LAYERS_MAX = 4;
 
@@ -167,9 +167,9 @@ function allChunks(seed: number): ChunkCoord[] {
 /** 要检查的区块都找到了：没有某个群系时，后面的断言读不到东西，先在这里报清楚。 */
 function expectAllBiomesFound(seed: number): void {
   const s = sitesOf(seed);
-  expect(s.ocean, `种子 ${seed} 找不到大海里头的列`).toBeDefined();
-  expect(s.plains, `种子 ${seed} 找不到平原里头的列`).toBeDefined();
-  expect(s.snowy, `种子 ${seed} 找不到冰雪里头的列`).toBeDefined();
+  expect(s.ocean, `种子 ${seed} 找不到大海内部的列`).toBeDefined();
+  expect(s.plains, `种子 ${seed} 找不到平原内部的列`).toBeDefined();
+  expect(s.snowy, `种子 ${seed} 找不到冰雪内部的列`).toBeDefined();
   expect(s.mountains.length, `种子 ${seed} 的高山区块数`).toBeGreaterThan(0);
 }
 
@@ -227,7 +227,7 @@ describe('地表高度查询与生成结果一致', () => {
     expect(wrong).toEqual([]);
   });
 
-  it.each(SURVEY_SEEDS)('种子 %i：列顶地表方块查询等于地表高度那一格，本票仍总是草方块（#76 改）', (seed) => {
+  it.each(SURVEY_SEEDS)('种子 %i：列顶地表方块查询等于地表高度那一格，本 issue仍总是草方块（#76 改）', (seed) => {
     expectAllBiomesFound(seed);
     const terrain = createTerrain(seed);
     const wrong: string[] = [];
@@ -381,7 +381,7 @@ describe('水与冰', () => {
 describe('寒冷处结冰与冰雪群系用同一个温度阈值', () => {
   /** 从交界往大海一侧最多走几格找水面。 */
   const OFFSHORE_WALK = 8;
-  /** 交界两侧的温度几乎相同，只有交界恰好挨着冷暖分界时才会对不上，所以留 5% 的余地。 */
+  /** 交界两侧的温度几乎相同，只有交界恰好挨着冷暖分界时才会不一致，所以留 5% 的余地。 */
   const TOLERANCE = 0.05;
 
   /** 某种陆地群系与大海交界处，大海一侧离岸最近的水面列（地表低于海平面）。 */
@@ -447,7 +447,7 @@ describe('悬垂', () => {
   });
 });
 
-describe('地表铺法（本票最简单的一种，#76 改）', () => {
+describe('地表铺法（本 issue最简单的一种，#76 改）', () => {
   it.each(SURVEY_SEEDS)('种子 %i：上方是空气、水或冰的地形方块都是草方块，其下 3 到 4 层泥土（那一段不够厚时到段底为止）', (seed) => {
     expectAllBiomesFound(seed);
     const exposedAbove: ReadonlySet<BlockType> = new Set([BlockType.Air, BlockType.Water, BlockType.Ice]);
@@ -474,6 +474,35 @@ describe('地表铺法（本票最简单的一种，#76 改）', () => {
 });
 
 describe('树', () => {
+  it('大海群系的列即使地表高于海平面也没有原木', () => {
+    // 岸边的大海列基准高度贴着海平面，叠上起伏会露出水面；按父 spec，大海里不长树
+    const MIN_EXPOSED = 24;
+    const wrong: string[] = [];
+    let exposed = 0;
+    for (const seed of SURVEY_SEEDS) {
+      const terrain = createTerrain(seed);
+      const coasts = surveyLines(8)
+        .flatMap((line) => boundariesOn(terrain, line))
+        .filter((boundary) => boundary.biomes.includes(Biome.Ocean));
+      const chunks = distinct(coasts.map((boundary) => chunkOfColumn(sideOf(boundary, Biome.Ocean, 0))));
+      for (const coord of chunks) {
+        const chunk = chunkAt(seed, coord);
+        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+          for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+            const { x, z } = columnIn(coord, lx, lz);
+            if (terrain.biomeAt(x, z) !== Biome.Ocean || terrain.surfaceHeightAt(x, z) <= SEA_LEVEL) continue;
+            exposed++;
+            for (let y = SEA_LEVEL + 1; y <= WORLD_MAX_Y; y++) {
+              if (LOGS.has(chunk.get(lx, y, lz))) wrong.push(`种子 ${seed} (${x}, ${y}, ${z}) 大海里有原木`);
+            }
+          }
+        }
+      }
+    }
+    expect(exposed, '露出海面的大海列').toBeGreaterThanOrEqual(MIN_EXPOSED);
+    expect(wrong).toEqual([]);
+  });
+
   it.each(SURVEY_SEEDS)('种子 %i：海平面以下没有原木，原木所在列的地表高于海平面', (seed) => {
     expectAllBiomesFound(seed);
     const terrain = createTerrain(seed);
@@ -504,7 +533,7 @@ describe('树', () => {
     let crossing = 0;
     for (const seed of SURVEY_SEEDS) {
       const center = sitesOf(seed).plains;
-      expect(center, `种子 ${seed} 找不到平原里头的列`).toBeDefined();
+      expect(center, `种子 ${seed} 找不到平原内部的列`).toBeDefined();
       const terrain = createTerrain(seed);
       // 3×3 区块里树冠整个落在这片之内的树：树根离外沿至少一个树冠半径
       const minX = (center!.cx - 1) * CHUNK_SIZE + OAK_CANOPY_RADIUS;

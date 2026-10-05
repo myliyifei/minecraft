@@ -273,7 +273,7 @@ test('版本不兼容的世界：列表标「版本不兼容」，进入禁用�
   const metas: WorldMeta[] = [
     base,
     { ...base, id: 'old-terrain', name: '旧地形', formatVersion: SNAPSHOT_FORMAT_VERSION, terrainVersion: TERRAIN_VERSION + 1, lastPlayedAt: 1 },
-    // 第六切片建的世界：地形版本写死为 1（#75 把地形版本改为 2）
+    // 第六切片建的世界：地形版本为 1（#75 把地形版本改为 2）
     { ...base, id: 'terrain-v1', name: '第六切片的世界', formatVersion: SNAPSHOT_FORMAT_VERSION, terrainVersion: 1, createdAt: 0, lastPlayedAt: 0 },
   ];
   await worldsTable(page, metas);

@@ -13,7 +13,10 @@ import {
   OCEAN_CONTINENTALNESS,
   type Climate,
 } from './terrain-density';
+import { Biome } from './biome';
 import { plantOakTrees, type SurfaceHeightAt, type TreePlacement } from './tree';
+
+export { Biome } from './biome';
 
 /**
  * 地形生成是纯函数：区块坐标决定区块内容，不依赖相邻区块的加载顺序。
@@ -21,17 +24,6 @@ import { plantOakTrees, type SurfaceHeightAt, type TreePlacement } from './tree'
  */
 export type TerrainGenerator = (cx: number, cz: number) => Chunk;
 
-/**
- * 群系（见 CONTEXT.md「群系」）。值是字符串，不进存档：存档里只有方块，群系随时由种子与列坐标查得。
- * 由大陆度、起伏、温度三层群系参数分出（见 `biomeOf`），一种群系连成的一片约 300 到 600 格宽。
- */
-export const Biome = {
-  Plains: 'plains',
-  Mountains: 'mountains',
-  Snowy: 'snowy',
-  Ocean: 'ocean',
-} as const;
-export type Biome = (typeof Biome)[keyof typeof Biome];
 
 /** 一列的水平坐标。 */
 export interface ColumnCoord {
@@ -44,7 +36,7 @@ export interface ColumnCoord {
  *
  * 核心、Worker 与测试都只经这个对象使用地形，换地形算法不必改调用方。成员都是不依赖 `this` 的
  * 函数属性：可以单独取出来传，也可以展开成新对象再换掉生成器（浏览器把生成器换成 Worker 那一侧的区块来源）。
- * 地形对象本身就是一份 `TreePlacement`（种子与地表高度），放树时直接传它。
+ * 地形对象本身就是一份 `TreePlacement`（种子、群系与地表高度），放树时直接传它。
  */
 export interface Terrain {
   readonly seed: number;

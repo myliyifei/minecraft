@@ -118,7 +118,7 @@ export function fbm2(seed: number, x: number, z: number, octaves = 4): number {
   return clampUnit(sum / totalAmplitude);
 }
 
-/** 三维格点哈希用的竖直种子偏移量：先把 x、z 搅在一起，再把结果当种子与 y 搅一次。 */
+/** 三维格点哈希用的竖直种子偏移量：先对 x、z 求哈希，再用结果作种子与 y 求哈希。 */
 const CELL_Y_SALT = 0x632b_e5ab;
 
 /**

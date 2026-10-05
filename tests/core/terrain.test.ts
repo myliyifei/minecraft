@@ -3,7 +3,7 @@ import { BlockType } from '../../src/core/block';
 import type { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { createTerrain } from '../../src/core/terrain';
-import { ABOVE_SURFACE } from '../helpers/above-surface';
+import { NON_TERRAIN } from '../helpers/terrain-survey';
 import { STONE_LAYER } from '../helpers/stone-layer';
 
 // 两个与 DEFAULT_SEED 无关的种子：地形的性质不该只在默认种子下成立。
@@ -182,7 +182,7 @@ describe('地形对象生成的区块', () => {
         const surface = surfaceAt(-CHUNK_SIZE + lx, -CHUNK_SIZE + lz);
         for (let y = surface + 1; y <= WORLD_MAX_Y; y++) {
           const block = chunk.get(lx, y, lz);
-          if (!ABOVE_SURFACE.has(block)) strays.push(`(${lx}, ${y}, ${lz}) 是 ${block}`);
+          if (!NON_TERRAIN.has(block)) strays.push(`(${lx}, ${y}, ${lz}) 是 ${block}`);
         }
       }
     }

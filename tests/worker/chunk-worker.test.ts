@@ -69,7 +69,7 @@ describe('区块 Worker 与同步调用生成的区块相同', () => {
   it.each(SURVEY_SEEDS)('种子 %i：大海与高山里各一个区块', (seed) => {
     for (const biome of [Biome.Ocean, Biome.Mountains]) {
       const coord = interiorChunk(seed, biome);
-      expect(coord, `种子 ${seed} 找不到 ${biome} 里头的列`).toBeDefined();
+      expect(coord, `种子 ${seed} 找不到 ${biome} 内部的列`).toBeDefined();
       expect(sameAsSync(seed, coord!), `${biome} 区块 (${coord!.cx}, ${coord!.cz})`).toBe(true);
     }
   });

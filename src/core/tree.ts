@@ -1,6 +1,7 @@
 import { BlockType } from './block';
 import type { Chunk } from './chunk';
 import { CHUNK_SIZE, SEA_LEVEL } from './constants';
+import { Biome } from './biome';
 import { hashCoords } from './noise';
 
 /**
@@ -12,8 +13,8 @@ import { hashCoords } from './noise';
 export type SurfaceHeightAt = (x: number, z: number) => number;
 
 /**
- * 放树要的两样输入：世界种子（决定哪里长树、树长多高），与任意一列的地表高度
- * （决定树根落在哪）。
+ * 放树要的三样输入：世界种子（决定哪里长树、树长多高）、任意一列的群系（大海里不长树），
+ * 与任意一列的地表高度（决定树根落在哪）。
  *
  * 地表高度当参数传进来而不是直接调地形模块：树的规则与地形算法因此互不依赖，
  * 换了地形算法照样复用，两个模块之间也不必绕一个循环 import。成员名与地形对象
@@ -21,6 +22,7 @@ export type SurfaceHeightAt = (x: number, z: number) => number;
  */
 export interface TreePlacement {
   readonly seed: number;
+  readonly biomeAt: (x: number, z: number) => Biome;
   readonly surfaceHeightAt: SurfaceHeightAt;
 }
 
@@ -168,7 +170,7 @@ function oakSiteInCell(
   };
 }
 
-/** 某个树格里的树，这一格不长树、树给邻格让了位、或者落点的地表不高于海平面则 undefined。 */
+/** 某个树格里的树，这一格不长树、树给邻格让了位、落点是大海或者落点的地表不高于海平面则 undefined。 */
 function oakTreeInCell(
   placement: TreePlacement,
   cellX: number,
@@ -184,6 +186,8 @@ function oakTreeInCell(
     if (distance < OAK_MIN_SPACING) return undefined;
   }
 
+  // 大海里不长树（父 spec #72）：岸边的大海列叠上起伏会露出海面，单看地表高度挡不住。群系查询比地表高度便宜，先问它。
+  if (placement.biomeAt(site.x, site.z) === Biome.Ocean) return undefined;
   const surface = placement.surfaceHeightAt(site.x, site.z);
   // 海底、洼地湖底不长树：地表不高于海平面的列上面是水（#76 起改看列顶地表方块）。
   if (surface <= SEA_LEVEL) return undefined;
@@ -251,8 +255,8 @@ function plantCanopy(chunk: Chunk, tree: OakTree, lx: number, lz: number): void 
     for (let dz = -radius; dz <= radius; dz++) {
       for (let dx = -radius; dx <= radius; dx++) {
         if (!corners && Math.abs(dx) === radius && Math.abs(dz) === radius) continue;
-        // 只往空气里长，不顶掉已经在那儿的方块。树冠底面只比自己那一列的地表高两格，三维密度
-        // 地形（#75）的平原有起伏、山坡更陡，两格外的地面常常高过它，顶掉就是地上一个洞。
+        // 只往空气里长，不替换掉已经在那儿的方块。树冠底面只比自己那一列的地表高两格，三维密度
+        // 地形（#75）的平原有起伏、山坡更陡，两格外的地面常常高过它，替换掉就是地上一个洞。
         if (chunk.get(lx + dx, y, lz + dz) !== BlockType.Air) continue;
         chunk.set(lx + dx, y, lz + dz, BlockType.OakLeaves);
       }

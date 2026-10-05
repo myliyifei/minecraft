@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, DEFAULT_SEED, WORLD_MIN_Y } from '../../src/core/constants';
-import { createTerrain } from '../../src/core/terrain';
+import { Biome, createTerrain } from '../../src/core/terrain';
 import {
   OAK_CANOPY_RADIUS,
   OAK_MIN_SPACING,
@@ -317,7 +317,7 @@ describe('树叶只往空气里长', () => {
       z > tree.z ? LEDGE_BASE_Y + LEDGE_STEP : LEDGE_BASE_Y;
 
     const chunk = groundOnly(cx, cz, surfaceAt);
-    plantOakTrees({ seed: SEED, surfaceHeightAt: surfaceAt }, chunk);
+    plantOakTrees({ seed: SEED, biomeAt: () => Biome.Plains, surfaceHeightAt: surfaceAt }, chunk);
 
     const eaten: string[] = [];
     let planted = 0;

@@ -52,7 +52,7 @@ const OCEAN_FLOOR_MAX_Y = 55;
 /** 「高山列的平均地表比平原高出若干格」里的若干格。 */
 const MOUNTAIN_ABOVE_PLAINS = 20;
 
-/** 判「大海里头」：东南西北各这么远的列也是大海。 */
+/** 判「大海内部」：东南西北各这么远的列也是大海。 */
 const INTERIOR_REACH = 64;
 
 /** 每条采样线最多取几个交界。8 条线一共约 60 个。 */
@@ -140,7 +140,7 @@ describe('连续一片同一群系的宽度大多在 300 到 600 格', () => {
   const TYPICAL_MIN = 150;
   const TYPICAL_MAX = 1200;
   const TYPICAL_SHARE = 0.6;
-  /** 每个种子 8 条线、每条 16384 格，一片 300 到 600 格的话少说有几十段。 */
+  /** 每个种子 8 条线、每条 16384 格，一片 300 到 600 格的话至少有几十段。 */
   const MIN_RUNS = 40;
 
   function runsOf(seed: number): BiomeRun[] {
@@ -196,7 +196,7 @@ describe('各群系的高度', () => {
   });
 
   it.each(SURVEY_SEEDS)('种子 %i：大海与陆地按海平面分开，平原与冰雪的列地表低于海平面的不到 5%', (seed) => {
-    // 先按大陆度分海与陆，地形的海陆也由大陆度决定：两者对不上时，陆地群系里会有成片的海底
+    // 先按大陆度分海与陆，地形的海陆也由大陆度决定：两者不一致时，陆地群系里会有成片的海底
     const land = heightSurvey(seed).grid.filter(({ biome }) => biome === Biome.Plains || biome === Biome.Snowy);
     expect(land.length, '平原与冰雪的采样列数').toBeGreaterThanOrEqual(30);
     const below = land.filter(({ surface }) => surface < SEA_LEVEL);
@@ -209,7 +209,7 @@ describe('各群系的高度', () => {
     expect(highest(Biome.Mountains) - highest(Biome.Snowy)).toBeGreaterThanOrEqual(50);
   });
 
-  it(`大海里头的列，海底至少 95% 在 y ${OCEAN_FLOOR_MIN_Y} 到 ${OCEAN_FLOOR_MAX_Y}`, () => {
+  it(`大海内部的列，海底至少 95% 在 y ${OCEAN_FLOOR_MIN_Y} 到 ${OCEAN_FLOOR_MAX_Y}`, () => {
     // 靠岸的大海列海底往上抬（群系之间平滑过渡），所以只看四周 64 格外也是大海的列
     const floors: number[] = [];
     for (const seed of SURVEY_SEEDS) {
@@ -218,7 +218,7 @@ describe('各群系的高度', () => {
         if (sample.biome === Biome.Ocean && isInterior(terrain, sample, INTERIOR_REACH)) floors.push(sample.surface);
       }
     }
-    expect(floors.length, '大海里头的采样列数').toBeGreaterThanOrEqual(30);
+    expect(floors.length, '大海内部的采样列数').toBeGreaterThanOrEqual(30);
     const inRange = floors.filter((y) => y >= OCEAN_FLOOR_MIN_Y && y <= OCEAN_FLOOR_MAX_Y);
     expect(inRange.length / floors.length).toBeGreaterThanOrEqual(0.95);
   });

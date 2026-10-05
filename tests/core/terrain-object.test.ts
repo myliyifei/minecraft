@@ -3,7 +3,7 @@ import { BlockType } from '../../src/core/block';
 import type { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { Biome, createTerrain } from '../../src/core/terrain';
-import { ABOVE_SURFACE } from '../helpers/above-surface';
+import { NON_TERRAIN } from '../helpers/terrain-survey';
 
 /**
  * 地形对象（#73）：由种子构造，含区块生成器、三个纯函数查询（群系、地表高度、列顶地表方块）与出生列。
@@ -48,7 +48,7 @@ function* sampleColumns(): Generator<readonly [number, number]> {
 /** 某一列从上往下第一格不在「地表之上」的方块（树与空气之下的那一格）的 y。 */
 function highestTerrainY(chunk: Chunk, lx: number, lz: number): number {
   let y = WORLD_MAX_Y;
-  while (y > WORLD_MIN_Y && ABOVE_SURFACE.has(chunk.get(lx, y, lz))) y--;
+  while (y > WORLD_MIN_Y && NON_TERRAIN.has(chunk.get(lx, y, lz))) y--;
   return y;
 }
 

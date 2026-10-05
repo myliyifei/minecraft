@@ -330,7 +330,7 @@ describe('版本不兼容', () => {
     expect(TERRAIN_VERSION).toBe(2);
   });
 
-  it('地形版本写死为 1 的世界（第六切片建的）读档返回不兼容、不读区块，列表里标为不兼容', async () => {
+  it('地形版本为 1 的世界（第六切片建的）读档返回不兼容、不读区块，列表里标为不兼容', async () => {
     const { open } = fixture();
     await (await open({ versions: { format: SNAPSHOT_FORMAT_VERSION, terrain: 1 } })).saveWorld('a', '旧地形', editedGame().snapshot());
 

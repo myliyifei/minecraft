@@ -42,12 +42,14 @@ import {
  * - 陡坡：与东南西北四个相邻列的地表高度差最大的那个 ≥ 3，顶层石头，紧挨着的下一格不是泥土。只看最高的那一段。
  * - 雪线：高山顶面 y ≥ 150 铺雪草方块，以下铺草方块；冰雪任何高度都是雪草方块。悬垂下方的段按那一段顶面的 y 判断。
  * - 被水盖住（上方是水或冰）：顶面 y ≥ 56 铺沙子，y ≤ 55 铺沙砾，不论群系。
- * - 沙滩（#76 修订）：从陆地一侧约 4 格一直铺到水边，地表在 y 63 到 67。陆地一侧是平原或冰雪 4 格内有大海的列；
- *   大海一侧是大海群系里露出水面、地表不高于 y 67 的列，按这一列自身的起伏与温度判断：起伏高于高山阈值
+ * - 沙滩（#76 修订）：只在平原与大海之间，从陆地一侧约 4 格一直铺到水边，地表在 y 63 到 67。陆地一侧是平原 4 格内
+ *   有大海的列；大海一侧是大海群系里露出水面、地表不高于 y 67 的列，按这一列自身的起伏与温度判断：起伏高于高山阈值
  *   （与群系判断同一个 MOUNTAIN_RELIEF）是石头，否则寒冷处（与结冰同一个温度阈值）是雪草方块，其余是沙子。
  *   顶层与其下至少 2 层沙子；交界两侧 6 格内有，宽度随岸坡变化，中位数在 4 到 20、九成不超过 30；九成以上的
  *   交界从陆地一侧到水边之间没有草方块；离大海 12 格以外没有露天的沙子。高山群系的列不铺沙子，高山临海是石头岸。
- * - 优先次序：被水盖住 → 陡坡 → 海岸（陆地一侧沙滩或高山石头岸；大海一侧起伏高于高山阈值的列是石头，否则寒冷处
+ * - 冰雪临海（#76 第二次修订，用户决定）：冰雪群系的列不铺沙子，临海也按冰雪的常规铺法（雪草方块，其下 3 到 4 层
+ *   泥土）；寒冷处从冰雪陆地一侧到水边都是雪草方块（陡坡与起伏高的列是石头）。
+ * - 优先次序：被水盖住 → 陡坡 → 海岸（平原一侧沙滩或高山石头岸；大海一侧起伏高于高山阈值的列是石头，否则寒冷处
  *   雪草方块、其余沙子）→ 雪线以上与冰雪 → 草方块。
  *
  * 采样：每个种子在 ±2560 格、步长 64 的网格上找各群系内部的列（东南西北 32 格外同群系），取平原、冰雪、最深的大海
@@ -80,7 +82,7 @@ const BEACH_SEARCH = 6;
 const BEACH_PRESENT_SHARE = 0.9;
 /**
  * 沙滩宽度的中位数范围与九成分位的上限（#76 修订，用户定「约 4 到 20 格」）。三个种子的原型实测：平原临海中位数
- * 12 到 14、九成分位 19 到 27（岸坡缓的地方更宽），冰雪临海大海一侧是雪草方块，宽度总是陆地一侧的 4 格。
+ * 12 到 14、九成分位 19 到 27（岸坡缓的地方更宽）。冰雪临海没有沙滩（#76 第二次修订），不量宽度。
  */
 const BEACH_WIDTH_MEDIAN_MIN = 4;
 const BEACH_WIDTH_MEDIAN_MAX = 20;
@@ -94,6 +96,10 @@ const BEACH_MAX_REACH = 12;
 const WATER_EDGE_SEARCH = 60;
 /** 陆地一侧到水边之间没有草方块的交界、水边那一列是规定方块的交界，各自的比例下限。 */
 const SHORE_TO_WATER_SHARE = 0.9;
+/** 冰雪临海：从陆地一侧这么多格到水边之间都是雪草方块或石头的交界，比例下限。 */
+const SNOWY_SHORE_SHARE = 0.9;
+/** 冰雪临海：陆地一侧看多远内冰雪群系的列没有沙子（比陆地一侧的沙滩判定距离 4 格宽）。 */
+const SNOWY_COAST_WINDOW = 8;
 
 /** 高山临海：交界两侧几格内看；交界周围这么远内没有平原与冰雪才算「高山直接临海」。 */
 const ROCKY_COAST_WINDOW = 8;
@@ -630,10 +636,9 @@ describe('沙滩（#76）', () => {
     return false;
   }
 
-  describe.each([
-    ['平原', Biome.Plains],
-    ['冰雪', Biome.Snowy],
-  ] as const)('%s与大海交界', (_name, land) => {
+  describe('平原与大海交界', () => {
+    const land = Biome.Plains;
+
     it.each(SURVEY_SEEDS)(
       `种子 %i：九成以上的交界，两侧 ${BEACH_SEARCH} 格内有露出水面的沙子`,
       (seed) => {
@@ -693,9 +698,14 @@ describe('沙滩（#76）', () => {
         expect(wrong).toEqual([]);
       },
     );
+  });
 
+  describe.each([
+    ['平原', Biome.Plains],
+    ['冰雪', Biome.Snowy],
+  ] as const)('%s与大海交界', (_name, land) => {
     it.each(SURVEY_SEEDS)(
-      `种子 %i：沙滩铺到水边：${SHORE_TO_WATER_SHARE * 100}% 以上的交界，从陆地一侧 4 格到水边之间露出水面的列没有草方块（#76 修订）`,
+      `种子 %i：${SHORE_TO_WATER_SHARE * 100}% 以上的交界，从陆地一侧 4 格到水边之间露出水面的列没有草方块（#76 修订）`,
       (seed) => {
         expectSurfaceBlocksDefined();
         const terrain = terrainOf(seed);
@@ -800,7 +810,7 @@ describe('沙滩（#76）', () => {
   );
 
   it.each(SURVEY_SEEDS)(
-    `种子 %i：露出水面的沙子只在离大海 ${BEACH_MAX_REACH} 格以内、地表在 y ${SEA_LEVEL} 到 ${SEA_LEVEL + BEACH_MAX_ABOVE_SEA} 的平原、冰雪或大海列上`,
+    `种子 %i：露出水面的沙子只在离大海 ${BEACH_MAX_REACH} 格以内、地表在 y ${SEA_LEVEL} 到 ${SEA_LEVEL + BEACH_MAX_ABOVE_SEA} 的平原或大海列上（#76 第二次修订：冰雪群系的列没有沙子）`,
     (seed) => {
       expectSurfaceBlocksDefined();
       const s = expectSitesFound(seed);
@@ -813,6 +823,7 @@ describe('沙滩（#76）', () => {
         const surface = terrain.surfaceHeightAt(x, z);
         const biome = terrain.biomeAt(x, z);
         if (biome === Biome.Mountains) wrong.push(`(${x}, ${z}) 高山列是沙子`);
+        if (biome === Biome.Snowy) wrong.push(`(${x}, ${z}) 冰雪列是沙子`);
         if (surface > SEA_LEVEL + BEACH_MAX_ABOVE_SEA) wrong.push(`(${x}, ${z}) 地表 ${surface} 是沙子`);
         if (!oceanWithin(terrain, { x, z }, BEACH_MAX_REACH)) wrong.push(`(${x}, ${z}) 离大海超过 ${BEACH_MAX_REACH} 格`);
       }
@@ -925,6 +936,105 @@ describe('冰雪临海的大海一侧（#76 按审查补）', () => {
     expect(exposed, '大海一侧露出水面的列').toBeGreaterThan(0);
     expect(wrong.slice(0, 20)).toEqual([]);
   });
+});
+
+describe('冰雪临海不铺沙子（#76 第二次修订，用户决定）', () => {
+  /** 冰雪与大海交界那一对里陆地一侧 SNOWY_COAST_WINDOW 格内、群系是冰雪、露出水面的列。 */
+  function snowyLandColumns(terrain: Terrain, boundary: BiomeBoundary): ColumnCoord[] {
+    return Array.from({ length: SNOWY_COAST_WINDOW }, (_, d) => landSide(boundary, d)).filter(
+      ({ x, z }) => terrain.biomeAt(x, z) === Biome.Snowy && terrain.surfaceHeightAt(x, z) >= SEA_LEVEL,
+    );
+  }
+
+  it.each(SURVEY_SEEDS)(
+    `种子 %i：冰雪与大海交界处，陆地一侧 ${SNOWY_COAST_WINDOW} 格内冰雪群系露出水面的列没有沙子，不是陡坡的列顶是雪草方块`,
+    (seed) => {
+      expectSurfaceBlocksDefined();
+      const terrain = terrainOf(seed);
+      const coasts = sitesOf(seed).coasts.get(Biome.Snowy) ?? [];
+      expect(coasts.length, '采样线上冰雪与大海的交界数').toBeGreaterThanOrEqual(20);
+      const wrong: string[] = [];
+      let checked = 0;
+      let lowShore = 0;
+      for (const boundary of coasts) {
+        for (const { x, z } of snowyLandColumns(terrain, boundary)) {
+          checked++;
+          const surface = terrain.surfaceHeightAt(x, z);
+          if (surface <= SEA_LEVEL + BEACH_MAX_ABOVE_SEA) lowShore++;
+          const block = terrain.surfaceBlockAt(x, z);
+          const expected = isSteep(terrain, x, z) ? BlockType.Stone : SNOWY_GRASS;
+          if (block !== expected) wrong.push(`(${x}, ${surface}, ${z})：应为 ${blockName(expected)}，查询 ${blockName(block)}`);
+        }
+      }
+      expect(checked, '查过的冰雪陆地列').toBeGreaterThan(0);
+      // 地表不高于 y 67 的列是原来铺沙子的那些，要确实查到
+      expect(lowShore, `查过的地表在 y ${SEA_LEVEL} 到 ${SEA_LEVEL + BEACH_MAX_ABOVE_SEA} 的冰雪陆地列`).toBeGreaterThan(0);
+      expect(wrong.slice(0, 20)).toEqual([]);
+    },
+  );
+
+  it.each(SURVEY_SEEDS)(
+    '种子 %i：冰雪临海的区块里，冰雪群系露出水面、不是陡坡的列，生成结果顶层是雪草方块，其下 3 到 4 层泥土',
+    (seed) => {
+      expectSurfaceBlocksDefined();
+      const terrain = terrainOf(seed);
+      const coords = distinct(
+        (sitesOf(seed).coasts.get(Biome.Snowy) ?? []).slice(0, COAST_CHUNKS).map((b) => chunkOfColumn(b.b)),
+      );
+      expect(coords.length, '冰雪临海的区块').toBeGreaterThan(0);
+      const wrong: string[] = [];
+      let checked = 0;
+      let lowShore = 0;
+      for (const { chunk, lx, lz, x, z } of columnsOf(seed, coords)) {
+        if (terrain.biomeAt(x, z) !== Biome.Snowy) continue;
+        const surface = terrain.surfaceHeightAt(x, z);
+        if (surface < SEA_LEVEL || isSteep(terrain, x, z)) continue;
+        checked++;
+        if (surface <= SEA_LEVEL + BEACH_MAX_ABOVE_SEA) lowShore++;
+        const actual = chunk.get(lx, surface, lz);
+        if (actual !== SNOWY_GRASS) {
+          wrong.push(`(${x}, ${surface}, ${z})：应为雪草方块，生成 ${blockName(actual)}`);
+          continue;
+        }
+        const dirt = dirtProblem(chunk, lx, surface, lz);
+        if (dirt) wrong.push(`(${x}, ${surface}, ${z}) 雪草方块：${dirt}`);
+      }
+      expect(checked, '查过的冰雪列').toBeGreaterThan(0);
+      expect(lowShore, `查过的地表在 y ${SEA_LEVEL} 到 ${SEA_LEVEL + BEACH_MAX_ABOVE_SEA} 的冰雪列`).toBeGreaterThan(0);
+      expect(wrong.slice(0, 20)).toEqual([]);
+    },
+  );
+
+  it.each(SURVEY_SEEDS)(
+    `种子 %i：寒冷处的冰雪海岸，${SNOWY_SHORE_SHARE * 100}% 以上的交界从陆地一侧 4 格到水边之间露出水面的列全是雪草方块或石头`,
+    (seed) => {
+      expectSurfaceBlocksDefined();
+      const terrain = terrainOf(seed);
+      let reached = 0;
+      const mixed: string[] = [];
+      for (const boundary of sitesOf(seed).coasts.get(Biome.Snowy) ?? []) {
+        const edge = waterEdgeOf(terrain, boundary);
+        if (edge === undefined || edge === 0) continue;
+        const shore = oceanSide(boundary, edge - 1);
+        if (!isColdAt(seed, shore.x, shore.z)) continue;
+        reached++;
+        const span = [
+          ...Array.from({ length: 4 }, (_, d) => landSide(boundary, d)),
+          ...Array.from({ length: edge }, (_, d) => oceanSide(boundary, d)),
+        ];
+        const other = span.find(({ x, z }) => {
+          if (terrain.surfaceHeightAt(x, z) < SEA_LEVEL) return false;
+          const block = terrain.surfaceBlockAt(x, z);
+          return block !== SNOWY_GRASS && block !== BlockType.Stone;
+        });
+        if (other) mixed.push(`(${other.x}, ${other.z}) ${blockName(terrain.surfaceBlockAt(other.x, other.z))}`);
+      }
+      expect(reached, '水边在寒冷处的冰雪交界数').toBeGreaterThanOrEqual(20);
+      expect(1 - mixed.length / reached, `陆地一侧到水边之间有别的方块的交界：${mixed.slice(0, 10).join('、')}`).toBeGreaterThanOrEqual(
+        SNOWY_SHORE_SHARE,
+      );
+    },
+  );
 });
 
 describe('矿脉不替换列顶的石头（#76 按变异测试补）', () => {

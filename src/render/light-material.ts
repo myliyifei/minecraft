@@ -16,6 +16,8 @@ import { FLICKER_AMPLITUDE, SELF_LIT_FLICKER_DIM } from './torch-light';
  *
  * 地形与实体只差一个宏，着色器源码相同，three 会复用编译好的程序；每个实体一份材质的代价只是 uniform 上传。
  * 粒子另有一份顶点着色器（面朝相机），片元着色器与它们相同，只多乘一个不透明度。
+ *
+ * 片元着色器的最后一步是雾（#77）：开启时按这一处到相机的距离混入雾色，四种材质因此同一帧一起蒙上雾。
  */
 
 /**
@@ -29,10 +31,29 @@ export interface FrameLighting {
   readonly flicker: { value: number };
   /** 手持光等级（`heldLightLevel`）：选中格是火把时 14，否则 0。每一处再按离眼睛的距离减。 */
   readonly heldLight: { value: number };
+  /**
+   * 雾开没开（`fogAt`，#77）：眼睛在水下时开启。开启时每一处按到相机的距离混入 `fogColor`：`fogNear` 以内不混，
+   * 到 `fogFar` 全是雾色，中间按 smoothstep 过渡。地形、实体与粒子都吃，半透明的水与冰也一样。
+   */
+  readonly fogEnabled: { value: boolean };
+  /** 雾色。three 的工作色彩空间（线性），与着色器里混合的颜色是同一个空间；读回时 `getHex` 给 sRGB。 */
+  readonly fogColor: { value: THREE.Color };
+  /** 雾从这个距离（方块）开始混入。 */
+  readonly fogNear: { value: number };
+  /** 到这个距离（方块）全是雾色。 */
+  readonly fogFar: { value: number };
 }
 
 export function frameLighting(): FrameLighting {
-  return { skyDarkening: { value: 0 }, flicker: { value: 0 }, heldLight: { value: 0 } };
+  return {
+    skyDarkening: { value: 0 },
+    flicker: { value: 0 },
+    heldLight: { value: 0 },
+    fogEnabled: { value: false },
+    fogColor: { value: new THREE.Color() },
+    fogNear: { value: 0 },
+    fogFar: { value: 1 },
+  };
 }
 
 /** 一个数写成 GLSL 的浮点字面量：整数也要带小数点。 */
@@ -109,6 +130,10 @@ uniform float flicker;
 uniform float heldLight;
 uniform float brightnessCurve[LIGHT_LEVELS];
 uniform vec3 tint;
+uniform bool fogEnabled;
+uniform vec3 fogColor;
+uniform float fogNear;
+uniform float fogFar;
 
 varying vec2 vUv;
 varying vec2 vLight;
@@ -152,7 +177,12 @@ void main() {
 #else
   float alpha = 1.0;
 #endif
-  gl_FragColor = vec4(sRGBTransferEOTF(vec4(display, 1.0)).rgb * tint, alpha);
+  vec3 color = sRGBTransferEOTF(vec4(display, 1.0)).rgb * tint;
+  // 雾（#77）：在线性空间里按到相机的距离混入雾色。粒子的 vWorldPosition 是它的中心，整片方片同一个雾量。
+  if (fogEnabled) {
+    color = mix(color, fogColor, smoothstep(fogNear, fogFar, distance(vWorldPosition, cameraPosition)));
+  }
+  gl_FragColor = vec4(color, alpha);
   #include <colorspace_fragment>
 }
 `;
@@ -200,6 +230,10 @@ function lightMaterial(
       skyDarkening: frame.skyDarkening,
       flicker: frame.flicker,
       heldLight: frame.heldLight,
+      fogEnabled: frame.fogEnabled,
+      fogColor: frame.fogColor,
+      fogNear: frame.fogNear,
+      fogFar: frame.fogFar,
       brightnessCurve: { value: BRIGHTNESS_CURVE },
       tint: { value: new THREE.Color(0xffffff) },
       entityLight: { value: new THREE.Vector2(MAX_LIGHT_LEVEL, 0) },

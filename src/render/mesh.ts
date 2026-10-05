@@ -122,7 +122,7 @@ const FLAT_SAMPLES = CUBE_FACES.map((spec) => Int8Array.from({ length: 4 * 4 * 3
 const TRANSLUCENT_BLOCKS: readonly BlockType[] = [BlockType.Water, BlockType.Ice];
 
 /**
- * 方块编号 → 不透明、发光、是不是火把、剔除的那一档（`faceCulling`）、进不进半透明部分，
+ * 方块编号 → 不透明、发光、是不是火把、剔除的那一档（`faceCulling`）、进不进半透明部分、顶面画不画背面，
  * 摊成按编号索引的表：内层循环每格都要问（同 `light.ts` 的做法）。剔除的档是 −1 到 255，用 Int16Array。
  */
 const OPAQUE = new Uint8Array(256);
@@ -130,6 +130,7 @@ const GLOWS = new Uint8Array(256);
 const TORCHES = new Uint8Array(256);
 const CULLING = new Int16Array(256);
 const TRANSLUCENT = new Uint8Array(256);
+const BACK_OF_TOP = new Uint8Array(256);
 for (const [id, def] of Object.entries(BLOCKS)) {
   const block = Number(id) as BlockType;
   OPAQUE[block] = def.opaque ? 1 : 0;
@@ -137,6 +138,8 @@ for (const [id, def] of Object.entries(BLOCKS)) {
   TORCHES[block] = torchModel(block) ? 1 : 0;
   CULLING[block] = faceCulling(block);
   TRANSLUCENT[block] = TRANSLUCENT_BLOCKS.includes(block) ? 1 : 0;
+  // 水的顶面从水下也要看得到：半透明材质是单面的，背面另出一份反向的面
+  BACK_OF_TOP[block] = block === BlockType.Water ? 1 : 0;
 }
 
 const LAST = CHUNK_SIZE - 1;
@@ -166,6 +169,7 @@ export function meshTiles(uvs: ArrayLike<number>): Set<number> {
 /**
  * 为一个区块生成网格：只有暴露面进网格，被不透明方块挡住的面直接跳过，与隔壁同一档的面（`faceCulling`：同一种
  * 树叶之间，水与水、冰与冰、水与冰之间）也不画。水与冰的面写进半透明部分，其余的写进不透明部分（#83）。
+ * 水的顶面画出来时正反两面都画，背面法线朝下、绕序反过来，光照与正面相同：从水下往上看得到水面。
  *
  * 每个顶点带天光与方块光（ADR-0016），按**平滑光照**取：这一面外侧那一层里挨着这个角的 4 格，
  * 两个等级各自平均，不透明的格子按 0 计入，墙脚与凹处因此偏暗。`smoothLighting` 为假时（设置里关掉了平滑光照）
@@ -280,6 +284,7 @@ function scanChunk(chunk: ChunkView, view: MeshView, cornerSamples: readonly Int
             // 乘 0.25 而不是除以 4，理由见 warmUpChunkMeshes。
             out.light(sky * 0.25, blockLight * 0.25);
           }
+          if (dy > 0 && BACK_OF_TOP[block]) out.backOfLast();
         }
       }
     }
@@ -425,6 +430,35 @@ class MeshBuffers {
     this.lights[this.lit * 2] = sky;
     this.lights[this.lit * 2 + 1] = block;
     this.lit++;
+  }
+
+  /**
+   * 刚写完的那个面（光照也已补齐）再写一份背面：位置、uv、光照相同，法线取反，两个三角形的绕序倒过来，
+   * 单面材质从另一侧看就画得出来。水的顶面用它（`BACK_OF_TOP`）。
+   */
+  backOfLast(): void {
+    if ((this.vertices + 4) * 3 > this.positions.length) this.grow();
+    const from = this.vertices - 4;
+    const base = this.vertices;
+    for (let k = 0; k < 12; k++) {
+      this.positions[base * 3 + k] = this.positions[from * 3 + k]!;
+      // 0 − n 而不是 −n：分量是 0 时得到 +0 而不是 −0
+      this.normals[base * 3 + k] = 0 - this.normals[from * 3 + k]!;
+    }
+    for (let k = 0; k < 8; k++) {
+      this.uvs[base * 2 + k] = this.uvs[from * 2 + k]!;
+      this.lights[base * 2 + k] = this.lights[from * 2 + k]!;
+    }
+    const n = this.indexCount;
+    this.indices[n] = base;
+    this.indices[n + 1] = base + 2;
+    this.indices[n + 2] = base + 1;
+    this.indices[n + 3] = base;
+    this.indices[n + 4] = base + 3;
+    this.indices[n + 5] = base + 2;
+    this.indexCount = n + 6;
+    this.vertices = base + 4;
+    this.lit = base + 4;
   }
 
   take(): MeshData {

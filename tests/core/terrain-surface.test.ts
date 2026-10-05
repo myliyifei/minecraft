@@ -3,6 +3,7 @@ import { BlockType } from '../../src/core/block';
 import type { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, DEFAULT_SEED, SEA_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { Biome, createTerrain, type ColumnCoord, type Terrain } from '../../src/core/terrain';
+import { oreVeinsTouching } from '../../src/core/ore';
 import type { ChunkCoord } from '../../src/core/world';
 import {
   boundariesOn,
@@ -740,6 +741,62 @@ describe('树只长在草方块与雪草方块上（tree.ts「#76 起改看列�
     }
     expect(trunks, '查过的树干').toBeGreaterThan(0);
     expect(wrong.slice(0, 20)).toEqual([]);
+  });
+});
+
+describe('矿脉不替换列顶的石头（#76 按变异测试补）', () => {
+  /** 高山临海交界附近这么多个区块里找矿脉格落在列顶石头上的列。 */
+  const COAST_CHUNK_REACH = 2;
+
+  it.each(SURVEY_SEEDS)('种子 %i：矿脉经过列顶是石头的那一格时，生成结果里那一格仍是石头，与列顶地表方块查询一致', (seed) => {
+    const terrain = terrainOf(seed);
+    const checked = new Set<string>();
+    const wrong: string[] = [];
+    let hits = 0;
+    // 石头岸与靠近海平面的陡坡在 y 63 到 67，煤矿脉最高到 y 64，只有高山临海处碰得到
+    for (const boundary of sitesOf(seed).coasts.get(Biome.Mountains) ?? []) {
+      const center = chunkOfColumn(boundary.b);
+      for (let dcx = -COAST_CHUNK_REACH; dcx <= COAST_CHUNK_REACH; dcx++) {
+        for (let dcz = -COAST_CHUNK_REACH; dcz <= COAST_CHUNK_REACH; dcz++) {
+          const coord = { cx: center.cx + dcx, cz: center.cz + dcz };
+          const key = `${coord.cx},${coord.cz}`;
+          if (checked.has(key)) continue;
+          checked.add(key);
+          const cells = new Set(oreVeinsTouching(seed, coord.cx, coord.cz).flatMap((vein) => vein.cells.map(({ x, y, z }) => `${x},${y},${z}`)));
+          for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+            for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+              const { x, z } = columnIn(coord, lx, lz);
+              const surface = terrain.surfaceHeightAt(x, z);
+              if (!cells.has(`${x},${surface},${z}`) || terrain.surfaceBlockAt(x, z) !== BlockType.Stone) continue;
+              hits++;
+              const generated = chunkAt(seed, coord).get(lx, surface, lz);
+              if (generated !== BlockType.Stone) wrong.push(`(${x}, ${surface}, ${z})：生成 ${blockName(generated)}`);
+            }
+          }
+        }
+      }
+      if (hits >= 3) break;
+    }
+    expect(hits, '矿脉格落在列顶石头上的列').toBeGreaterThan(0);
+    expect(wrong).toEqual([]);
+  });
+});
+
+describe('冰雪的树长在雪草方块上（#76 按变异测试补）', () => {
+  it.each(SURVEY_SEEDS)('种子 %i：冰雪内部的区块与周围 8 个区块里有树干立在雪草方块上', (seed) => {
+    expectSurfaceBlocksDefined();
+    const s = expectSitesFound(seed);
+    const LOGS: ReadonlySet<BlockType> = new Set([BlockType.OakLog, BlockType.BirchLog, BlockType.SpruceLog]);
+    const around: ChunkCoord[] = [];
+    for (let dcx = -1; dcx <= 1; dcx++) {
+      for (let dcz = -1; dcz <= 1; dcz++) around.push({ cx: s.snowy!.cx + dcx, cz: s.snowy!.cz + dcz });
+    }
+    let onSnowyGrass = 0;
+    for (const { chunk, lx, lz, x, z } of columnsOf(seed, around)) {
+      const surface = terrainOf(seed).surfaceHeightAt(x, z);
+      if (LOGS.has(chunk.get(lx, surface + 1, lz)) && chunk.get(lx, surface, lz) === SNOWY_GRASS) onSnowyGrass++;
+    }
+    expect(onSnowyGrass, '立在雪草方块上的树干').toBeGreaterThan(0);
   });
 });
 

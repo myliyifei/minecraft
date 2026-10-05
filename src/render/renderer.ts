@@ -303,6 +303,12 @@ export class WorldRenderer {
   private readonly frame: FrameLighting = frameLighting();
   /** 上一帧画的时候眼睛在不在水下（`updateSky`）。 */
   private underwater = false;
+  /**
+   * 给不走光照材质的东西用的雾（经验球、选框、裂纹）：three 自带材质认 `scene.fog`，颜色与两个距离每帧从
+   * `frame` 抄过来，只在水下时挂到场景上。three 的雾按到相机平面的深度算，光照材质按到相机的距离算，
+   * 视野边缘差一点，这几样东西都在近处，看不出来。光照材质（`ShaderMaterial`）不认 `scene.fog`，不会混两遍。
+   */
+  private readonly sceneFog = new THREE.Fog(0x000000);
   private readonly core: GameCore;
   /** 场景里的区块网格，每个区块不透明与半透明两份几何（#83）。 */
   private readonly meshes: ChunkMeshes;
@@ -748,8 +754,8 @@ export class WorldRenderer {
    * 黄昏也是连续变暗的——减量不取整，着色器拿到的是浮点值。算法都在 `daylight.ts` 与 `fog.ts` 里，这里只把结果
    * 写进场景对象。太阳月亮那一层的位置取相机的位置，所以排在 `updateCamera` 之后。
    *
-   * 眼睛在水下时（#77）背景色换成雾色、太阳与月亮不画：它们远在雾的 `far` 之外，又不走光照材质，不藏起来就会
-   * 透过雾露出来。眼睛在不在水下读核心按 tick 算的值，不按插值后的相机位置另算，出入水面时最多差一个 tick。
+   * 眼睛在水下时（#77）背景色换成雾色、太阳与月亮不画：它们远在雾的 `far` 之外，不藏起来就会透过雾露出来。
+   * 经验球、选框与裂纹不走光照材质，改由场景上的雾（`sceneFog`）蒙住。眼睛在不在水下读核心按 tick 算的值，不按插值后的相机位置另算，出入水面时最多差一个 tick。
    */
   private updateSky(alpha: number): void {
     const time = frameTimeOfDay(this.core.timeOfDay, alpha);
@@ -764,6 +770,10 @@ export class WorldRenderer {
     this.frame.fogFar.value = fog.far;
     if (fog.enabled) this.skyColor.copy(this.frame.fogColor.value);
     else this.skyColor.setRGB(...sky);
+    this.sceneFog.color.copy(this.frame.fogColor.value);
+    this.sceneFog.near = fog.near;
+    this.sceneFog.far = fog.far;
+    this.scene.fog = fog.enabled ? this.sceneFog : null;
 
     this.celestialPivot.position.copy(this.camera.position);
     this.celestialPivot.rotation.z = celestialAngle(time);

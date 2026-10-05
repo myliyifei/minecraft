@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { DEBUG_BUILD } from '../build-flags';
 import type { GameCore } from '../core/game';
 import type { Hitbox } from '../core/physics';
-import { CHUNK_SIZE } from '../core/constants';
 import { DROP_SIZE } from '../core/drop';
 import type { ItemType } from '../core/item';
 import { PLAYER_EYE_HEIGHT } from '../core/player';
@@ -39,15 +38,11 @@ import {
   particleMaterial,
   setEntityLight,
   terrainMaterial,
+  translucentTerrainMaterial,
   type FrameLighting,
 } from './light-material';
-import {
-  buildChunkMesh,
-  meshTiles,
-  warmUpChunkMeshes,
-  type GlowingBlock,
-  type MeshData,
-} from './mesh';
+import { ChunkMeshes } from './chunk-meshes';
+import { buildChunkMesh, warmUpChunkMeshes } from './mesh';
 import { MESH_BUDGET_PER_FRAME, planChunkMeshes } from './mesh-plan';
 import { ParticleSystem, type ParticleCounts } from './particles';
 import { selectionBounds } from './selection';
@@ -62,7 +57,7 @@ import {
   zombieTint,
   type ZombieGeometries,
 } from './zombie-model';
-import { chunkKey, type ChunkCoord } from '../core/world';
+import type { ChunkCoord } from '../core/world';
 import type { DisplayToggle } from '../settings';
 
 /** 竖直视场角（度）。 */
@@ -295,11 +290,9 @@ export class WorldRenderer {
   private readonly texture: THREE.Texture;
   /** 每帧送进所有光照材质的输入：天光减量、闪烁、手持光（ADR-0016）。 */
   private readonly frame: FrameLighting = frameLighting();
-  /** 区块网格的材质：所有区块共用，两个光照等级从顶点来。 */
-  private readonly chunkMaterial: THREE.ShaderMaterial;
   private readonly core: GameCore;
-  // 值里带上区块坐标：排网格计划要遍历已有网格是哪些区块，键是打包过的数字，反解麻烦。
-  private readonly meshes = new Map<number, ChunkMesh>();
+  /** 场景里的区块网格，每个区块不透明与半透明两份几何（#83）。 */
+  private readonly meshes: ChunkMeshes;
   /** 只有光照变了、上一帧没轮到重建的区块（`MeshPlan.deferred`），下一帧交回给 `planChunkMeshes`。 */
   private deferredRelights: readonly ChunkCoord[] = [];
   /** 套在目标方块外的线框。 */
@@ -407,7 +400,11 @@ export class WorldRenderer {
     this.scene.background = this.skyColor;
     // 场景里没有灯：明暗全由光照材质按每一处的光照等级算（ADR-0016）。
     this.texture = texture;
-    this.chunkMaterial = terrainMaterial(texture, this.frame);
+    // 区块网格的两种材质，所有区块共用，两个光照等级从顶点来：水与冰的面用半透明的那一份（#83）。
+    this.meshes = new ChunkMeshes(this.scene, {
+      opaque: terrainMaterial(texture, this.frame),
+      translucent: translucentTerrainMaterial(texture, this.frame),
+    });
     this.heldBlockMaterial = entityMaterial(texture, this.frame);
     this.heldIconMaterial = entityMaterial(texture, this.frame, THREE.DoubleSide);
 
@@ -505,7 +502,7 @@ export class WorldRenderer {
 
   /** 这个区块的网格建过没有。 */
   hasChunkMesh(cx: number, cz: number): boolean {
-    return this.meshes.has(chunkKey(cx, cz));
+    return this.meshes.has(cx, cz);
   }
 
   /** 相机当前的位置。端到端测试用它确认相机真的跟在玩家眼睛上。 */
@@ -620,20 +617,17 @@ export class WorldRenderer {
     return { item, shape: heldItemShape(item), screen: { x, y }, swing: this.heldSwing };
   }
 
-  /** 这个区块的网格有多少个顶点。没建过网格、或者一个面都没有时是 0。 */
+  /** 这个区块的网格有多少个顶点，不透明与半透明两部分合计。没建过网格、或者一个面都没有时是 0。 */
   chunkMeshVertexCount(cx: number, cz: number): number {
-    const mesh = this.meshes.get(chunkKey(cx, cz))?.mesh;
-    return mesh ? mesh.geometry.getAttribute('position').count : 0;
+    return this.meshes.vertexCount(cx, cz);
   }
 
   /**
-   * 这个区块的网格用到了哪些贴图格号，按格号排序。没建过网格、或者一个面都没有时是空数组。
+   * 这个区块的网格用到了哪些贴图格号，两部分合计，按格号排序。没建过网格、或者一个面都没有时是空数组。
    * 端到端测试用它确认一块熔炉画的是熄火还是燃烧的正面。
    */
   chunkMeshTiles(cx: number, cz: number): number[] {
-    const mesh = this.meshes.get(chunkKey(cx, cz))?.mesh;
-    if (!mesh) return [];
-    return [...meshTiles(mesh.geometry.getAttribute('uv').array)].sort((a, b) => a - b);
+    return this.meshes.tiles(cx, cz);
   }
 
   /**
@@ -648,14 +642,14 @@ export class WorldRenderer {
     // 菜单上，暂停时照样每帧画，所以关掉设置之前就能看到墙角的变化。
     if (this.settings.smoothLighting !== this.meshedSmooth) {
       this.meshedSmooth = this.settings.smoothLighting;
-      this.deferredRelights = [...this.meshes.values()].map(({ cx, cz }) => ({ cx, cz }));
+      this.deferredRelights = [...this.meshes.coords()].map(({ cx, cz }) => ({ cx, cz }));
     }
     // 方块变了的网格当帧重建，只有光照变了的与新区块一起按预算由近到远排，没轮到的留到下一帧；缺邻居的丢掉
     // 等邻居回来。都由 planChunkMeshes 定，首次建与重建因此走同一条「8 个邻居都在」的规则。
     const stale = this.core.takeStaleChunks();
     const plan = planChunkMeshes({
       world: this.core,
-      meshed: this.meshes.values(),
+      meshed: this.meshes.coords(),
       staleBlocks: stale.blocks,
       staleLight: [...this.deferredRelights, ...stale.light],
       center: this.core.playerChunk,
@@ -663,7 +657,7 @@ export class WorldRenderer {
       budget,
     });
     this.deferredRelights = plan.deferred;
-    for (const { cx, cz } of plan.drop) this.dropChunkMesh(cx, cz);
+    for (const { cx, cz } of plan.drop) this.meshes.drop(cx, cz);
     for (const { cx, cz } of plan.rebuild) this.rebuildChunk(cx, cz);
     for (const { cx, cz } of plan.build) this.buildChunk(cx, cz);
   }
@@ -677,42 +671,17 @@ export class WorldRenderer {
 
   /** 重建一个区块的网格。方块被挖掉或放下之后由 `syncChunkMeshes` 调。 */
   rebuildChunk(cx: number, cz: number): void {
-    this.dropChunkMesh(cx, cz);
+    this.meshes.drop(cx, cz);
     this.buildChunk(cx, cz);
   }
 
   /**
-   * 建一个区块的网格。
-   *
-   * 一个面都没有的区块（整块空气）仍然要记进已建网格的表里，只是不往场景里放东西：不记的话
-   * `planChunkMeshes` 每帧都会重新提议它，这一帧的建网格预算就一直被它占着。
+   * 建一个区块的网格，两部分进出场景由 `ChunkMeshes` 管：一个面都没有的区块（整块空气）也记为建过，只是不往场景里放东西。
    */
   private buildChunk(cx: number, cz: number): void {
     const chunk = this.core.chunkAt(cx, cz);
     if (!chunk) return;
-
-    const data = buildChunkMesh(chunk, this.core, this.meshedSmooth);
-    const { glowingBlocks } = data;
-    if (data.indices.length === 0) {
-      this.meshes.set(chunkKey(cx, cz), { cx, cz, glowingBlocks });
-      return;
-    }
-
-    const mesh = new THREE.Mesh(toGeometry(data), this.chunkMaterial);
-    mesh.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
-    this.scene.add(mesh);
-    this.meshes.set(chunkKey(cx, cz), { cx, cz, mesh, glowingBlocks });
-  }
-
-  private dropChunkMesh(cx: number, cz: number): void {
-    const key = chunkKey(cx, cz);
-    const existing = this.meshes.get(key);
-    if (!existing) return;
-    if (existing.mesh) {
-      this.scene.remove(existing.mesh);
-      existing.mesh.geometry.dispose();
-    }
-    this.meshes.delete(key);
+    this.meshes.set(cx, cz, buildChunkMesh(chunk, this.core, this.meshedSmooth));
   }
 
   /**
@@ -793,7 +762,7 @@ export class WorldRenderer {
     this.lastFrameMs = now;
     // 粒子开关每帧照设置写一次。设置只在暂停时改，那时不推进 tick，`afterTick` 里的碎掉爆一团也就读得到这一次写的。
     this.particleSystem.emitting = this.settings.particles;
-    this.particleSystem.update(seconds, this.camera.position, this.glowingBlocks(), this.core, this.core.mining);
+    this.particleSystem.update(seconds, this.camera.position, this.meshes.glowingBlocks(), this.core, this.core.mining);
 
     const { count } = this.particleSystem.pool;
     const geometry = this.particleGeometry;
@@ -807,11 +776,6 @@ export class WorldRenderer {
       attribute.addUpdateRange(0, count * attribute.itemSize);
       attribute.needsUpdate = true;
     }
-  }
-
-  /** 所有已建网格的区块里的发光方块。 */
-  private *glowingBlocks(): Generator<GlowingBlock> {
-    for (const { glowingBlocks } of this.meshes.values()) yield* glowingBlocks;
   }
 
   /**
@@ -1118,12 +1082,6 @@ export class WorldRenderer {
  * 一个已经建过网格的区块。
  * `mesh` 缺省表示这个区块一个面都没有（整块空气），场景里没有对应的对象。
  */
-interface ChunkMesh extends ChunkCoord {
-  readonly mesh?: THREE.Mesh;
-  /** 网格构建时顺带记下的发光方块，粒子从这里冒（`MeshData.glowingBlocks`）。 */
-  readonly glowingBlocks: readonly GlowingBlock[];
-}
-
 function lerp(from: number, to: number, alpha: number): number {
   return from + (to - from) * alpha;
 }
@@ -1189,16 +1147,5 @@ function particleGeometry({ pool }: ParticleSystem): THREE.InstancedBufferGeomet
   geometry.setAttribute('instanceLight', instanced(pool.lights, 2));
   geometry.setAttribute('instanceAlpha', instanced(pool.alphas, 1));
   geometry.instanceCount = 0;
-  return geometry;
-}
-
-function toGeometry(data: MeshData): THREE.BufferGeometry {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
-  geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
-  geometry.setAttribute('uv', new THREE.BufferAttribute(data.uvs, 2));
-  geometry.setAttribute('light', new THREE.BufferAttribute(data.light, 2));
-  geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
-  geometry.computeBoundingSphere();
   return geometry;
 }

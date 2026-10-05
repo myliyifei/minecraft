@@ -13,13 +13,14 @@ import {
   WORLD_MAX_Y,
   WORLD_MIN_Y,
 } from '../core/constants';
+import { OPAQUE_FACES, faceCulling } from '../core/face-culling';
 import { BLOCK_TILES, faceTile, tileAtUv, tileUvRect, type FaceTiles } from './atlas';
 import { CUBE_FACES, type FaceSpec } from './cube-faces';
 import { SELF_LIT_BLOCK_LIGHT } from './shading';
 import { torchModel } from './torch-model';
 
 /**
- * 一个区块的网格数据。纯 TypedArray，不含任何 three.js 类型——
+ * 一份几何：纯 TypedArray，不含任何 three.js 类型——
  * 这样面剔除与贴图映射能在 Node 里测，Three.js 只负责把它包成 BufferGeometry。
  */
 export interface MeshData {
@@ -33,6 +34,15 @@ export interface MeshData {
    */
   readonly light: Float32Array;
   readonly indices: Uint32Array;
+}
+
+/**
+ * 一个区块的网格（#83，ADR-0016 补记）：不透明与半透明两部分，各是一份几何，渲染层用两种材质画（`ChunkMeshes`）。
+ * 半透明部分是水与冰的面，其余方块（含树叶与火把细杆）都在不透明部分。
+ */
+export interface ChunkMeshData {
+  readonly opaque: MeshData;
+  readonly translucent: MeshData;
   /**
    * 这个区块里的发光方块（火把、燃烧中的熔炉）：粒子系统从这里挑出玩家附近的，让它们冒火焰与烟（#59）。
    * 跟着网格一起建：方块一变区块就重建网格，列表也就跟着变，熄火的熔炉下一次重建就不在了。
@@ -108,14 +118,25 @@ const CORNER_SAMPLES = CUBE_FACES.map((spec) => {
  */
 const FLAT_SAMPLES = CUBE_FACES.map((spec) => Int8Array.from({ length: 4 * 4 * 3 }, (_, k) => spec.normal[k % 3]!));
 
-/** 方块编号 → 不透明、发光、是不是火把，摊成按编号索引的表：内层循环每格都要问（同 `light.ts` 的做法）。 */
+/** 画进网格半透明部分的方块（#83）。 */
+const TRANSLUCENT_BLOCKS: readonly BlockType[] = [BlockType.Water, BlockType.Ice];
+
+/**
+ * 方块编号 → 不透明、发光、是不是火把、剔除的那一档（`faceCulling`）、进不进半透明部分，
+ * 摊成按编号索引的表：内层循环每格都要问（同 `light.ts` 的做法）。剔除的档是 −1 到 255，用 Int16Array。
+ */
 const OPAQUE = new Uint8Array(256);
 const GLOWS = new Uint8Array(256);
 const TORCHES = new Uint8Array(256);
+const CULLING = new Int16Array(256);
+const TRANSLUCENT = new Uint8Array(256);
 for (const [id, def] of Object.entries(BLOCKS)) {
-  OPAQUE[Number(id)] = def.opaque ? 1 : 0;
-  GLOWS[Number(id)] = def.lightEmission > 0 ? 1 : 0;
-  TORCHES[Number(id)] = torchModel(Number(id) as BlockType) ? 1 : 0;
+  const block = Number(id) as BlockType;
+  OPAQUE[block] = def.opaque ? 1 : 0;
+  GLOWS[block] = def.lightEmission > 0 ? 1 : 0;
+  TORCHES[block] = torchModel(block) ? 1 : 0;
+  CULLING[block] = faceCulling(block);
+  TRANSLUCENT[block] = TRANSLUCENT_BLOCKS.includes(block) ? 1 : 0;
 }
 
 const LAST = CHUNK_SIZE - 1;
@@ -143,7 +164,8 @@ export function meshTiles(uvs: ArrayLike<number>): Set<number> {
 }
 
 /**
- * 为一个区块生成网格：只有暴露面进网格，被不透明方块挡住的面直接跳过。
+ * 为一个区块生成网格：只有暴露面进网格，被不透明方块挡住的面直接跳过，与隔壁同一档的面（`faceCulling`：同一种
+ * 树叶之间，水与水、冰与冰、水与冰之间）也不画。水与冰的面写进半透明部分，其余的写进不透明部分（#83）。
  *
  * 每个顶点带天光与方块光（ADR-0016），按**平滑光照**取：这一面外侧那一层里挨着这个角的 4 格，
  * 两个等级各自平均，不透明的格子按 0 计入，墙脚与凹处因此偏暗。`smoothLighting` 为假时（设置里关掉了平滑光照）
@@ -160,20 +182,22 @@ export function meshTiles(uvs: ArrayLike<number>): Set<number> {
  * （三次取整 + Map 查找）实测 22ms，下标算术是 4ms（都是在 Vitest 里测的）。先把六面都被挡住的格排除
  * 之后，打包后的代码在 Node 里每个区块约 0.4ms，Windows 上的 Edge 里连着建是约 0.5ms，夹在画面的帧之间是 0.5–1ms（#62）。
  */
-export function buildChunkMesh(chunk: ChunkView, view: MeshView, smoothLighting = true): MeshData {
-  meshBuffers.reset();
+export function buildChunkMesh(chunk: ChunkView, view: MeshView, smoothLighting = true): ChunkMeshData {
+  opaqueBuffers.reset();
+  translucentBuffers.reset();
   glowing.reset();
   torches.reset();
   scanChunk(chunk, view, smoothLighting ? CORNER_SAMPLES : FLAT_SAMPLES);
   emitTorches(chunk.blocks);
   return {
-    ...meshBuffers.take(),
+    opaque: opaqueBuffers.take(),
+    translucent: translucentBuffers.take(),
     glowingBlocks: glowingBlocksIn(chunk.blocks, chunk.cx * CHUNK_SIZE, chunk.cz * CHUNK_SIZE),
   };
 }
 
 /**
- * 扫一遍区块：整格方块的暴露面写进 `meshBuffers`，发光方块与火把的下标记进 `glowing`、`torches`。
+ * 扫一遍区块：整格方块的暴露面写进 `opaqueBuffers` 或 `translucentBuffers`，发光方块与火把的下标记进 `glowing`、`torches`。
  *
  * 单独一个函数，只做整数与 TypedArray 上的事：建火把细杆、建发光方块的对象都在它外面（见 `warmUpChunkMeshes`）。
  */
@@ -202,6 +226,8 @@ function scanChunk(chunk: ChunkView, view: MeshView, cornerSamples: readonly Int
           torches.push(i);
           continue;
         }
+        const culling = CULLING[block]!;
+        const out = TRANSLUCENT[block] ? translucentBuffers : opaqueBuffers;
 
         // 六个邻格都不透明的格一个面都不出。地下的石头大多是这种，先用六次查表把它们跳过，不进下面
         // 逐面判断边界的循环（#62）。区块边上的那一侧读隔壁区块的数据，读不到的当作空气，交给下面的循环。
@@ -236,12 +262,12 @@ function scanChunk(chunk: ChunkView, view: MeshView, cornerSamples: readonly Int
             neighbor = view.getBlock(originX + nlx, ny, originZ + nlz);
           }
 
-          if (OPAQUE[neighbor]) continue;
-          // 走到这里说明邻居不遮挡视线（空气或树叶）。同一种方块相邻时两个面完全重合：
-          // 留着只会 z-fighting、还让树冠内部的几何翻倍。整片树叶因此只保留最外层的面。
-          if (neighbor === block) continue;
+          // 邻居不透明，或者与这一格同一档（`faceHidden` 的同一个判定，摊成了查表）。同一种树叶相邻时两个面完全重合：
+          // 留着只会 z-fighting、还让树冠内部的几何翻倍，整片树叶因此只保留最外层的面。水与冰同理，一片水只画外面那一层。
+          const against = CULLING[neighbor]!;
+          if (against === OPAQUE_FACES || against === culling) continue;
 
-          meshBuffers.quad(CUBE_FACES[f]!, lx, y, lz, tiles);
+          out.quad(CUBE_FACES[f]!, lx, y, lz, tiles);
           const samples = cornerSamples[f]!;
           for (let v = 0; v < 4; v++) {
             let sky = 0;
@@ -252,7 +278,7 @@ function scanChunk(chunk: ChunkView, view: MeshView, cornerSamples: readonly Int
               blockLight += s & BLOCK_LIGHT_MASK;
             }
             // 乘 0.25 而不是除以 4，理由见 warmUpChunkMeshes。
-            meshBuffers.light(sky * 0.25, blockLight * 0.25);
+            out.light(sky * 0.25, blockLight * 0.25);
           }
         }
       }
@@ -286,8 +312,8 @@ function emitTorches(blocks: ChunkView['blocks']): void {
     const block = blocks[i] as BlockType;
     const { lx, y, lz } = cellOf(i);
     for (const spec of torchModel(block)!) {
-      meshBuffers.quad(spec, lx, y, lz, BLOCK_TILES[block]!);
-      for (let v = 0; v < 4; v++) meshBuffers.light(MAX_LIGHT_LEVEL, SELF_LIT_BLOCK_LIGHT);
+      opaqueBuffers.quad(spec, lx, y, lz, BLOCK_TILES[block]!);
+      for (let v = 0; v < 4; v++) opaqueBuffers.light(MAX_LIGHT_LEVEL, SELF_LIT_BLOCK_LIGHT);
     }
   }
 }
@@ -339,7 +365,8 @@ const glowing = new IndexList();
 const torches = new IndexList();
 
 /**
- * 建网格时往里写顶点的缓冲，整个模块共用一份，不够就翻倍；建完一个区块按实际长度复制出去（`take`）。
+ * 建网格时往里写顶点的缓冲，不够就翻倍；建完一个区块按实际长度复制出去（`take`）。整个模块共两份，不透明与半透明
+ * 部分各一份（`opaqueBuffers`、`translucentBuffers`），同一个类，扫描循环按方块挑一份往里写。
  *
  * 写进定长的 TypedArray 而不是 `number[]`：元素的存法是定的，不会因为写进第一个小数（火把细杆的坐标、方块光的
  * 平均）而换一种，写入它的那段优化代码也就不会因此作废（见 `warmUpChunkMeshes`）。共用一份还省掉每个区块的几次
@@ -400,7 +427,7 @@ class MeshBuffers {
     this.lit++;
   }
 
-  take(): Omit<MeshData, 'glowingBlocks'> {
+  take(): MeshData {
     const vertices = this.vertices;
     return {
       positions: this.positions.slice(0, vertices * 3),
@@ -425,7 +452,8 @@ class MeshBuffers {
   }
 }
 
-const meshBuffers = new MeshBuffers();
+const opaqueBuffers = new MeshBuffers();
+const translucentBuffers = new MeshBuffers();
 
 /** 预热用的视图：区块之外处处是空气，没有光，也没有隔壁区块的数据。 */
 const EMPTY_VIEW: MeshView = {

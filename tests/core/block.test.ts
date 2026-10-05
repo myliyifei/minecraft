@@ -28,6 +28,7 @@ import {
   type MiningTool,
 } from '../../src/core/item';
 import { GRAVEL, GRAVEL_ITEM, SAND, SAND_ITEM } from '../helpers/surface-rules';
+import { DANDELION, DANDELION_ITEM, POPPY, POPPY_ITEM, isPlantBlock } from '../helpers/plants';
 
 /**
  * 木、石、铁三档：材质档加它的挖掘速度倍率，倍率来自 #15 的物品属性表，写死字面值。
@@ -78,11 +79,11 @@ describe('方块的硬度表', () => {
     }
   });
 
-  it('除空气与火把外每种方块都有正的硬度；火把硬度 0（#56）；水挖不到，不在此列（#74）', () => {
+  it('除空气、火把与地表植物外每种方块都有正的硬度；火把（#56）与地表植物（#80）硬度 0；水挖不到，不在此列（#74）', () => {
     for (const block of Object.values(BlockType)) {
       if (block === BlockType.Water) continue;
       const { hardness } = BLOCKS[block];
-      if (block === BlockType.Air || baseBlock(block) === BlockType.Torch) {
+      if (block === BlockType.Air || baseBlock(block) === BlockType.Torch || isPlantBlock(block)) {
         expect(hardness, `方块 ${block} 的硬度`).toBe(0);
       } else {
         expect(hardness, `方块 ${block} 的硬度`).toBeGreaterThan(0);
@@ -495,6 +496,9 @@ describe('放置表', () => {
     // 沙子与沙砾放下去是对应的方块（#76）；雪草方块与草方块一样没有物品
     ['沙子放下去是沙子方块（#76）', SAND_ITEM, SAND],
     ['沙砾放下去是沙砾方块', GRAVEL_ITEM, GRAVEL],
+    // 两种花放下去是对应的方块（#80）；矮草与蕨没有物品
+    ['蒲公英放下去是蒲公英方块（#80）', DANDELION_ITEM, DANDELION],
+    ['虞美人放下去是虞美人方块', POPPY_ITEM, POPPY],
   ];
 
   it('上面这张表覆盖了物品表的每一行：加一种物品就得在这里补一条', () => {
@@ -554,7 +558,7 @@ describe('方块表的发光等级与透光方式两列（issue #51）', () => {
     }
   });
 
-  it('三种树叶、水与冰是树叶式（#85、#74），空气与火把不衰减，其余都是不透明', () => {
+  it('三种树叶、水与冰是树叶式（#85、#74），空气、火把与地表植物（#80）不衰减，其余都是不透明', () => {
     const passages: Partial<Record<BlockType, LightPassage>> = {
       [BlockType.Air]: LightPassage.Clear,
       [BlockType.OakLeaves]: LightPassage.Leaves,
@@ -565,9 +569,9 @@ describe('方块表的发光等级与透光方式两列（issue #51）', () => {
       [BlockType.Ice]: LightPassage.Leaves,
     };
     for (const block of Object.values(BlockType)) {
-      const torch = baseBlock(block) === BlockType.Torch;
+      const clear = baseBlock(block) === BlockType.Torch || isPlantBlock(block);
       expect(BLOCKS[block].lightPassage, `方块 ${block}`).toBe(
-        torch ? LightPassage.Clear : (passages[block] ?? LightPassage.Opaque),
+        clear ? LightPassage.Clear : (passages[block] ?? LightPassage.Opaque),
       );
     }
   });

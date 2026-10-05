@@ -75,11 +75,11 @@ describe('方块到贴图格号的映射表', () => {
     expect(new Set([off.top, off.side, off.front, lit.front]).size).toBe(4);
   });
 
-  it('图集是 8x16，128 格里现在用了 60 格（#73 从 8 行扩到 16 行，#85 加白桦与云杉 8 格，#74 加水与冰两格，#76 加沙子、沙砾与雪草方块的顶面、侧面 4 格）', () => {
+  it('图集是 8x16，128 格里现在用了 64 格（#73 从 8 行扩到 16 行，#85 加白桦与云杉 8 格，#74 加水与冰两格，#76 加沙子、沙砾与雪草方块的顶面、侧面 4 格，#80 加四种地表植物 4 格）', () => {
     expect(ATLAS_COLS).toBe(8);
     expect(ATLAS_ROWS).toBe(16);
-    expect(Object.keys(TILE)).toHaveLength(60);
-    expect(new Set(Object.values(TILE)).size).toBe(60);
+    expect(Object.keys(TILE)).toHaveLength(64);
+    expect(new Set(Object.values(TILE)).size).toBe(64);
   });
 
   it('水与冰接在火焰之后各占一格：水第 47 格、冰第 48 格，六面同一张，现有格号不变（#74）', () => {

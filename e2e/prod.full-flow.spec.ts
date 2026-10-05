@@ -1,8 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { BlockType } from '../src/core/block';
+import { BlockType, isSolid } from '../src/core/block';
 import { blockIndex } from '../src/core/chunk';
-import { CHUNK_SIZE, DEFAULT_SEED, TICK_RATE } from '../src/core/constants';
+import { CHUNK_SIZE, DEFAULT_SEED, TICK_RATE, WORLD_MIN_Y } from '../src/core/constants';
 import { Difficulty } from '../src/core/difficulty';
 import { PICKUP_DELAY_TICKS } from '../src/core/drop';
 import { GameCore } from '../src/core/game';
@@ -134,6 +134,13 @@ function newCore(difficulty: Difficulty): GameCore {
  * 另放一座熔炉，装好粗铁与煤炭但还没推进：回到游戏的第一个 tick 它点火，方块换成燃烧中的熔炉，那个区块从此算改过，
  * 下次写盘要经压缩 Worker 压。导入的区块本身不算改过，不放它的话生产构建上的写盘一个区块都不压。
  */
+/** 这一列最高的实心方块的 y：地表植物（#80）不是地面。 */
+function groundY(core: GameCore, x: number, z: number): number {
+  let y = core.highestBlockY(x, z);
+  while (y >= WORLD_MIN_Y && !isSolid(core.getBlock(x, y, z))) y--;
+  return y;
+}
+
 function playedSnapshot(): { snapshot: Snapshot; furnace: Vec3 } {
   const core = newCore(Difficulty.Normal);
   core.setTimeOfDay(MIDNIGHT);
@@ -141,8 +148,8 @@ function playedSnapshot(): { snapshot: Snapshot; furnace: Vec3 } {
   core.giveItem(ItemType.Cobblestone, 7);
   const px = Math.floor(core.player.position.x);
   const pz = Math.floor(core.player.position.z);
-  core.setBlock(px + 2, core.highestBlockY(px + 2, pz) + 1, pz, BlockType.Cobblestone);
-  core.setBlock(px, core.highestBlockY(px, pz + 2) + 1, pz + 2, BlockType.Torch);
+  core.setBlock(px + 2, groundY(core, px + 2, pz) + 1, pz, BlockType.Cobblestone);
+  core.setBlock(px, groundY(core, px, pz + 2) + 1, pz + 2, BlockType.Torch);
 
   core.selectHotbarSlot(2);
   core.turn(0, -MAX_PITCH);
@@ -162,7 +169,7 @@ function playedSnapshot(): { snapshot: Snapshot; furnace: Vec3 } {
   core.toggleInventory();
   core.tick(TICK_RATE);
 
-  const furnace = { x: px - 2, y: core.highestBlockY(px - 2, pz) + 1, z: pz };
+  const furnace = { x: px - 2, y: groundY(core, px - 2, pz) + 1, z: pz };
   core.setBlock(furnace.x, furnace.y, furnace.z, BlockType.Furnace);
   const state = core.blockStateAt(furnace.x, furnace.y, furnace.z)!;
   state.input = { item: ItemType.RawIron, count: 8 };

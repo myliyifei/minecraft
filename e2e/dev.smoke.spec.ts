@@ -77,7 +77,7 @@ import {
   installPixelProbe,
   readElementPixels,
 } from './canvas';
-import { enterDefaultWorld, ignorePause, reloadAndEnter } from './world-list';
+import { GROUND_ARGS, PLANT_BLOCKS, enterDefaultWorld, ignorePause, reloadAndEnter } from './world-list';
 
 /** 熔炉三格各自的下标与读屏名字。 */
 const FURNACE_SLOTS: ReadonlyArray<readonly [number, string]> = [
@@ -1351,7 +1351,7 @@ test('调试句柄挖空脚下 6 格：落地后少一颗半心，红色遮罩�
 }) => {
   // 整段跑在一次同步的 evaluate 里，游戏循环插不进来：落地那一 tick 与之后第几 tick 都是精确的。
   const samples = await page.evaluate(
-    ({ depth, flashTicks, full, air }) => {
+    ({ depth, flashTicks, full, air, ground }) => {
       const { core, hud } = window.__VOXEL__!;
 
       /** 心与红闪现在画的是什么，加核心里的生命值好对照。 */
@@ -1376,7 +1376,8 @@ test('调试句柄挖空脚下 6 格：落地后少一颗半心，红色遮罩�
 
       const { x, z } = core.player.position;
       const column = { x: Math.floor(x), z: Math.floor(z) };
-      const top = core.highestBlockY(column.x, column.z);
+      let top = core.highestBlockY(column.x, column.z);
+      while (top >= ground.minY && ground.nonSolid.includes(core.getBlock(column.x, top, column.z))) top--;
       for (let y = top; y > top - depth; y--) core.setBlock(column.x, y, column.z, air);
 
       let ticks = 0;
@@ -1393,7 +1394,7 @@ test('调试句柄挖空脚下 6 格：落地后少一颗半心，红色遮罩�
       hud.update();
       return { landed, lastFlashTick, after: read() };
     },
-    { depth: 6, flashTicks: HURT_FLASH_TICKS, full: MAX_HEALTH, air: BlockType.Air },
+    { depth: 6, flashTicks: HURT_FLASH_TICKS, full: MAX_HEALTH, air: BlockType.Air, ground: GROUND_ARGS },
   );
 
   // 落差 6 格，超出 3 格的部分每格 1 点：20 → 17，8 颗整心、1 颗半心、1 颗空心
@@ -1417,17 +1418,18 @@ test('调试句柄让玩家摔死：死亡画面铺满屏幕并交还鼠标，�
   await grabPointer(page);
   // 挖空脚下 24 格，落地摔 21 点。整段跑在一次同步的 evaluate 里，游戏循环插不进来
   const died = await page.evaluate(
-    ({ depth, air }) => {
+    ({ depth, air, ground }) => {
       const { core, hud } = window.__VOXEL__!;
       const { x, z } = core.player.position;
       const column = { x: Math.floor(x), z: Math.floor(z) };
-      const top = core.highestBlockY(column.x, column.z);
+      let top = core.highestBlockY(column.x, column.z);
+      while (top >= ground.minY && ground.nonSolid.includes(core.getBlock(column.x, top, column.z))) top--;
       for (let y = top; y > top - depth; y--) core.setBlock(column.x, y, column.z, air);
       for (let ticks = 0; ticks < 100 && !core.health.dead; ticks++) core.tick();
       hud.update();
       return { dead: core.health.dead, points: core.health.points };
     },
-    { depth: 24, air: BlockType.Air },
+    { depth: 24, air: BlockType.Air, ground: GROUND_ARGS },
   );
   expect(died).toEqual({ dead: true, points: 0 });
 
@@ -3742,11 +3744,17 @@ test('区块边上放挖方块与火把：下一帧网格就更新，隔壁区�
   // 看的是西边区块的网格。C 是地下一个四面都是石头的空格，放挖石头时光照一格都不变，西边区块只能因为方块变了而
   // 当帧重建。放挖火把的那一格 T 在地面上、一个区块的角上：火把的光照进含对角在内的 4 个区块，每帧的预算重建不完
   const seen = await page.evaluate(
-    ({ stone, air, torch, chunkSize }) => {
+    ({ stone, air, torch, chunkSize, ground }) => {
       const { core, renderer } = window.__VOXEL__!;
+      /** 这一列最高的实心方块。 */
+      const groundY = (x: number, z: number) => {
+        let y = core.highestBlockY(x, z);
+        while (y >= ground.minY && ground.nonSolid.includes(core.getBlock(x, y, z))) y--;
+        return y;
+      };
       const x = Math.round(core.player.position.x / chunkSize) * chunkSize;
       const z = Math.floor(core.player.position.z) + 3;
-      const y = Math.min(core.highestBlockY(x, z), core.highestBlockY(x - 1, z)) - 10;
+      const y = Math.min(groundY(x, z), groundY(x - 1, z)) - 10;
       const east = { cx: x / chunkSize, cz: Math.floor(z / chunkSize) };
       const west = { cx: east.cx - 1, cz: east.cz };
       for (let bx = x - 2; bx <= x + 1; bx++) {
@@ -3756,7 +3764,7 @@ test('区块边上放挖方块与火把：下一帧网格就更新，隔壁区�
       }
       core.setBlock(x, y, z, air);
       const tz = Math.round(core.player.position.z / chunkSize) * chunkSize;
-      const ty = core.highestBlockY(x, tz) + 1;
+      const ty = groundY(x, tz) + 1;
       const corner = { cx: x / chunkSize, cz: tz / chunkSize };
       renderer.syncChunkMeshes(Infinity);
 
@@ -3815,6 +3823,7 @@ test('区块边上放挖方块与火把：下一帧网格就更新，隔壁区�
       air: BlockType.Air,
       torch: BlockType.Torch,
       chunkSize: CHUNK_SIZE,
+      ground: GROUND_ARGS,
     },
   );
 
@@ -4178,9 +4187,9 @@ test('连锁挖头顶 20 块原木与挖单块原木：碎掉之后的碎屑数�
 
 test('玩家周围插 50 支火把并连续挖掘：粒子一直在冒，总数始终不超过上限', async ({ page }) => {
   await waitForFullViewDistance(page);
-  // 10×5 的一片，间隔 2 格，全在 16 格内。每支放在那一列最高的方块之上
+  // 10×5 的一片，间隔 2 格，全在 16 格内。每支放在那一列最高的实心方块之上（替换那里的地表植物）
   const placed = await page.evaluate(
-    ({ torch }) => {
+    ({ torch, ground }) => {
       const { core, renderer } = window.__VOXEL__!;
       const px = Math.floor(core.player.position.x);
       const pz = Math.floor(core.player.position.z);
@@ -4189,14 +4198,15 @@ test('玩家周围插 50 支火把并连续挖掘：粒子一直在冒，总数�
         for (let k = 0; k < 5; k++) {
           const x = px - 9 + i * 2;
           const z = pz - 5 + k * 2;
-          const y = core.highestBlockY(x, z) + 1;
-          if (core.setBlock(x, y, z, torch)) count++;
+          let y = core.highestBlockY(x, z);
+          while (y >= ground.minY && ground.nonSolid.includes(core.getBlock(x, y, z))) y--;
+          if (core.setBlock(x, y + 1, z, torch)) count++;
         }
       }
       renderer.syncChunkMeshes();
       return count;
     },
-    { torch: BlockType.Torch },
+    { torch: BlockType.Torch, ground: GROUND_ARGS },
   );
   expect(placed).toBe(50);
 
@@ -4283,8 +4293,14 @@ test('调试句柄在玩家前方 3 格生成一只僵尸：下一帧场景里�
   // 整段跑在一次同步的 evaluate 里，游戏循环插不进来。平视前方，僵尸生成在视线正前方 3 格那一列的
   // 顶面上：相机在眼睛的高度，视线正好落在它的头上。
   const seen = await page.evaluate(
-    ({ distance }) => {
+    ({ distance, ground }) => {
       const { core, renderer } = window.__VOXEL__!;
+      /** 这一列最高的实心方块。 */
+      const groundY = (x: number, z: number) => {
+        let y = core.highestBlockY(x, z);
+        while (y >= ground.minY && ground.nonSolid.includes(core.getBlock(x, y, z))) y--;
+        return y;
+      };
       const centerRgb = window.__CENTER_RGB__!;
       core.turn(0, -core.player.pitch);
       renderer.render(1);
@@ -4293,7 +4309,7 @@ test('调试句柄在玩家前方 3 格生成一只僵尸：下一帧场景里�
       const { position, yaw } = core.player;
       const x = position.x - Math.sin(yaw) * distance;
       const z = position.z - Math.cos(yaw) * distance;
-      core.spawnZombieAt(x, core.highestBlockY(Math.floor(x), Math.floor(z)) + 1, z);
+      core.spawnZombieAt(x, groundY(Math.floor(x), Math.floor(z)) + 1, z);
       renderer.render(1);
       const spawned = { zombies: renderer.zombies, camera: renderer.cameraPosition, rgb: centerRgb() };
 
@@ -4310,7 +4326,7 @@ test('调试句柄在玩家前方 3 格生成一只僵尸：下一帧场景里�
         count: core.zombies.count,
       };
     },
-    { distance: 3 },
+    { distance: 3, ground: GROUND_ARGS },
   );
   const horizontal = (a: Vec3, b: Vec3) => Math.hypot(a.x - b.x, a.z - b.z);
 
@@ -4409,8 +4425,14 @@ test('对准 2 格外的僵尸按左键：组的材质带红色叠色，10 tick 
   // 先拨到夜晚：白天露天的僵尸在燃烧（#44），材质叠的是橙色。夜里可能另有僵尸自然生成，所以按编号找到
   // 生成的这一只。
   const seen = await page.evaluate(
-    ({ distance, pickaxe, tintTicks, night }) => {
+    ({ distance, pickaxe, tintTicks, night, ground }) => {
       const { core, renderer } = window.__VOXEL__!;
+      /** 这一列最高的实心方块。 */
+      const groundY = (x: number, z: number) => {
+        let y = core.highestBlockY(x, z);
+        while (y >= ground.minY && ground.nonSolid.includes(core.getBlock(x, y, z))) y--;
+        return y;
+      };
       core.setTimeOfDay(night);
       core.turn(0, -core.player.pitch);
       core.giveItem(pickaxe, 1);
@@ -4418,7 +4440,7 @@ test('对准 2 格外的僵尸按左键：组的材质带红色叠色，10 tick 
       const { position, yaw } = core.player;
       const x = position.x - Math.sin(yaw) * distance;
       const z = position.z - Math.cos(yaw) * distance;
-      core.spawnZombieAt(x, core.highestBlockY(Math.floor(x), Math.floor(z)) + 1, z);
+      core.spawnZombieAt(x, groundY(Math.floor(x), Math.floor(z)) + 1, z);
       const id = core.zombies.all().at(-1)!.id;
       const ours = () => renderer.zombies.find((zombie) => zombie.id === id);
       core.tick();
@@ -4439,7 +4461,7 @@ test('对准 2 格外的僵尸按左键：组的材质带红色叠色，10 tick 
       renderer.render(1);
       return { id, before, hit, after: { zombie: ours(), held: renderer.heldItem } };
     },
-    { distance: 2, pickaxe: ItemType.WoodenPickaxe, tintTicks: ZOMBIE_HURT_TINT_TICKS, night: NIGHT_START },
+    { distance: 2, pickaxe: ItemType.WoodenPickaxe, tintTicks: ZOMBIE_HURT_TINT_TICKS, night: NIGHT_START, ground: GROUND_ARGS },
   );
   const rgb = (hex: number) => [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff] as const;
 
@@ -4466,7 +4488,7 @@ test('调试句柄把僵尸生成在玩家身旁：下一 tick 少一颗半心�
   page,
 }) => {
   // 整段跑在一次同步的 evaluate 里，游戏循环插不进来：被打的那一 tick 是精确的。
-  const seen = await page.evaluate(() => {
+  const seen = await page.evaluate((ground) => {
     const { core, hud } = window.__VOXEL__!;
     const shown = (selector: string): boolean => {
       const element = document.querySelector(selector);
@@ -4477,10 +4499,12 @@ test('调试句柄把僵尸生成在玩家身旁：下一 tick 少一颗半心�
         (heart) => heart.dataset.state,
       );
 
-    // 玩家 +X 方向 1 格那一列的顶面上
+    // 玩家 +X 方向 1 格那一列最高的实心方块的顶面上
     const { position } = core.player;
     const x = position.x + 1;
-    core.spawnZombieAt(x, core.highestBlockY(Math.floor(x), Math.floor(position.z)) + 1, position.z);
+    let top = core.highestBlockY(Math.floor(x), Math.floor(position.z));
+    while (top >= ground.minY && ground.nonSolid.includes(core.getBlock(Math.floor(x), top, Math.floor(position.z)))) top--;
+    core.spawnZombieAt(x, top + 1, position.z);
     core.tick();
     hud.update();
     const hit = { points: core.health.points, hearts: hearts(), flash: shown('#hurt-flash') };
@@ -4489,7 +4513,7 @@ test('调试句柄把僵尸生成在玩家身旁：下一 tick 少一颗半心�
     for (; ticks < 600 && !core.health.dead; ticks++) core.tick();
     hud.update();
     return { hit, died: { dead: core.health.dead, ticks }, deathScreen: shown('#death-screen') };
-  });
+  }, GROUND_ARGS);
 
   // 僵尸打一下 3 点：20 → 17，8 颗整心、1 颗半心、1 颗空心，红闪铺着
   expect(seen.hit).toEqual({
@@ -4681,12 +4705,18 @@ test('整条战斗流程：夜里等到僵尸，铁剑打死一只拾到腐肉�
   // 第二段：朝 −Z 走，走到离出生点 16 格以外的露天处站住，等僵尸把玩家打死。每 tick 记下身上带着什么，以及
   // 已有哪些掉落物与经验球：死亡那一 tick 背包清空，新出现的那些就是从他身上掉出来的
   const death = await page.evaluate(
-    ({ away, limit, step }) => {
+    ({ away, limit, step, ground }) => {
       const core = window.__VOXEL__!.core;
       const idle = { forward: false, back: false, left: false, right: false, jump: false };
       const spawn = core.spawnPoint;
       const fromSpawn = () => Math.hypot(core.player.position.x - spawn.x, core.player.position.z - spawn.z);
-      const openSky = ({ x, y, z }: Vec3) => core.highestBlockY(Math.floor(x), Math.floor(z)) < y;
+      /** 头顶没有实心方块：脚下那一格长着地表植物时最高的非空气方块是植物，不算挡着天。 */
+      const openSky = ({ x, y, z }: Vec3) => {
+        const [bx, bz] = [Math.floor(x), Math.floor(z)];
+        let top = core.highestBlockY(bx, bz);
+        while (top >= ground.minY && ground.nonSolid.includes(core.getBlock(bx, top, bz))) top--;
+        return top < y;
+      };
       const stacks = () =>
         Array.from({ length: core.inventory.size }, (_, i) => core.inventory.slot(i)).filter(
           (stack) => stack !== undefined,
@@ -4738,7 +4768,7 @@ test('整条战斗流程：夜里等到僵尸，铁剑打死一只拾到腐肉�
           .map((orb) => ({ id: orb.id, amount: orb.amount, fromSite: fromSite(orb.position) })),
       };
     },
-    { away: DEATH_SITE_DISTANCE, limit: COMBAT_CHAIN_PHASE_TICKS, step: WALK_STEP },
+    { away: DEATH_SITE_DISTANCE, limit: COMBAT_CHAIN_PHASE_TICKS, step: WALK_STEP, ground: GROUND_ARGS },
   );
   expect(death.dead).toBe(true);
   // 死在离出生点经验球吸引范围以外的露天处
@@ -5132,7 +5162,7 @@ test('火把全流程：挖原木与煤，2x2 做火把，挖下行矿道在墙�
   // 24 到 48 格的圆环里，朝 −X 的扇形留着不插火把，其余三分之二按固定的网格在列顶插火把。固定到第
   // TORCH_CHAIN_SPAWN_START_TICK 个 tick，拨到午夜，逐 tick 记下新生成的僵尸
   const spawning = await page.evaluate(
-    ({ pitX, pitZ, startTick, ticks, night, spacing, darkCenter, darkHalf, minD, maxD, torch, stone, air, nonSolid }) => {
+    ({ pitX, pitZ, startTick, ticks, night, spacing, darkCenter, darkHalf, minD, maxD, torch, stone, air, nonSolid, plants }) => {
       const core = window.__VOXEL__!.core;
       const me = { ...core.player.position };
       const feetY = Math.floor(me.y);
@@ -5161,9 +5191,14 @@ test('火把全流程：挖原木与煤，2x2 做火把，挖下行矿道在墙�
         }
       }
       const lit = ring.filter(({ x, z }) => !inDarkSector(x + 0.5, z + 0.5));
+      /** 列顶：最高的非空气方块，是地表植物时看它下面那一格（CONTEXT.md「生成」，#80）。 */
+      const columnTop = (x: number, z: number) => {
+        const top = core.highestBlockY(x, z);
+        return plants.includes(core.getBlock(x, top, z)) ? top - 1 : top;
+      };
       /** 这一列会不会生成：列顶是实心方块，上面那一格方块光是 0。 */
       const unlit = ({ x, z }: { x: number; z: number }) => {
-        const top = core.highestBlockY(x, z);
+        const top = columnTop(x, z);
         return !nonSolid.includes(core.getBlock(x, top, z)) && core.blockLightAt(x, top + 1, z) === 0;
       };
       // 火把按固定的网格插，不看插下去之后的光照：插在哪里只由种子与网格决定，光照算错时不会被补插的火把
@@ -5172,7 +5207,7 @@ test('火把全流程：挖原木与煤，2x2 做火把，挖下行矿道在墙�
       const onGrid = (v: number) => ((v % spacing) + spacing) % spacing === 0;
       for (const { x, z } of lit) {
         if (!onGrid(x) || !onGrid(z)) continue;
-        if (core.setBlock(x, core.highestBlockY(x, z) + 1, z, torch)) torches++;
+        if (core.setBlock(x, columnTop(x, z) + 1, z, torch)) torches++;
       }
 
       if (core.tickCount > startTick) throw new Error(`前几段走完已经是第 ${core.tickCount} 个 tick`);
@@ -5219,6 +5254,7 @@ test('火把全流程：挖原木与煤，2x2 做火把，挖下行矿道在墙�
       stone: BlockType.Stone,
       air: BlockType.Air,
       nonSolid: NON_SOLID_BLOCKS,
+      plants: PLANT_BLOCKS,
     },
   );
   const night = JSON.parse(spawning);

@@ -1,8 +1,25 @@
 import { expect, type Page } from '@playwright/test';
-import { BlockType } from '../src/core/block';
-import { DEFAULT_SEED } from '../src/core/constants';
+import { BlockType, isSolid } from '../src/core/block';
+import { DEFAULT_SEED, WORLD_MIN_Y } from '../src/core/constants';
 import type { Difficulty } from '../src/core/difficulty';
 import { STRINGS } from '../src/ui/strings';
+
+/**
+ * 不实心的方块编号：空气、火把、水、地表植物等。页面里找「一列最高的实心方块」时跳过它们——调试句柄的 `highestBlockY`
+ * 报的是最高的非空气方块，地表植物（#80）长出来之后那一格是植物，不是地面。
+ */
+export const NON_SOLID_BLOCKS: readonly number[] = Object.values(BlockType).filter((block) => !isSolid(block));
+
+/**
+ * 地表植物（#80）的四个编号。按名称取，编号未定义时不在里面：类型检查与生产构建不因此失败。
+ * 生成僵尸判断列顶时只跳过它们（CONTEXT.md「生成」），不跳过水与火把。
+ */
+export const PLANT_BLOCKS: readonly number[] = ['ShortGrass', 'Fern', 'Dandelion', 'Poppy']
+  .map((name) => (BlockType as Readonly<Record<string, number>>)[name])
+  .filter((block): block is number => block !== undefined);
+
+/** 找「最高的实心方块」要传进页面的参数：不实心的编号与世界最低的 y。 */
+export const GROUND_ARGS = { nonSolid: NON_SOLID_BLOCKS, minY: WORLD_MIN_Y } as const;
 
 /** 新建世界表单里要填的。不给的项保持表单的默认值。 */
 export interface NewWorldForm {
@@ -69,16 +86,17 @@ export async function exitToList(page: Page): Promise<void> {
   await waitForWorldList(page);
 }
 
-/** 把这一列地表最上面那一块挖掉，返回它的 y。 */
+/** 把这一列最高的实心方块挖掉，返回它的 y。上面长着的植物随之碎掉。 */
 export function digTop(page: Page, x: number, z: number): Promise<number> {
   return page.evaluate(
-    ({ x, z, air }) => {
+    ({ x, z, air, nonSolid, minY }) => {
       const core = window.__VOXEL__!.core;
-      const y = core.highestBlockY(x, z);
+      let y = core.highestBlockY(x, z);
+      while (y >= minY && nonSolid.includes(core.getBlock(x, y, z))) y--;
       core.setBlock(x, y, z, air);
       return y;
     },
-    { x, z, air: BlockType.Air },
+    { x, z, air: BlockType.Air, ...GROUND_ARGS },
   );
 }
 
@@ -86,20 +104,21 @@ export function blockAt(page: Page, x: number, y: number, z: number): Promise<nu
   return page.evaluate(({ x, y, z }) => window.__VOXEL__!.core.getBlock(x, y, z), { x, y, z });
 }
 
-/** 挖空脚下 24 格，推进到摔死。整段在一次同步的 evaluate 里，游戏循环插不进来。 */
+/** 从脚下最高的实心方块起挖空 24 格，推进到摔死。整段在一次同步的 evaluate 里，游戏循环插不进来。 */
 export async function fallToDeath(page: Page): Promise<void> {
   const dead = await page.evaluate(
-    ({ depth, air }) => {
+    ({ depth, air, nonSolid, minY }) => {
       const { core, hud } = window.__VOXEL__!;
       const { x, z } = core.player.position;
       const column = { x: Math.floor(x), z: Math.floor(z) };
-      const top = core.highestBlockY(column.x, column.z);
+      let top = core.highestBlockY(column.x, column.z);
+      while (top >= minY && nonSolid.includes(core.getBlock(column.x, top, column.z))) top--;
       for (let y = top; y > top - depth; y--) core.setBlock(column.x, y, column.z, air);
       for (let ticks = 0; ticks < 100 && !core.health.dead; ticks++) core.tick();
       hud.update();
       return core.health.dead;
     },
-    { depth: 24, air: BlockType.Air },
+    { depth: 24, air: BlockType.Air, ...GROUND_ARGS },
   );
   expect(dead).toBe(true);
 }

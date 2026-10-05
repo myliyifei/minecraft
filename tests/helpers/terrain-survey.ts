@@ -3,6 +3,7 @@ import type { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import type { Biome, ColumnCoord, Terrain } from '../../src/core/terrain';
 import { chunkOf, localOf, type ChunkCoord } from '../../src/core/world';
+import { PLANT_BLOCKS } from './plants';
 
 /**
  * 三维密度地形（#75）的大范围采样工具：沿采样线读群系、找群系交界、按群系找列、读区块里一列的结构。
@@ -17,9 +18,10 @@ export const SURVEY_SEEDS: readonly number[] = [314_159, 777, -42];
  * 不是地形方块的方块：空气、水、冰、树（见 CONTEXT.md「地表高度」：水、冰、树与地表植物不算）。
  * 这也就是地表之上允许出现的方块：土石只在地表之下，树长在它之上，低于海平面的列地表之上是水，
  * 寒冷处海平面那一层是冰——几处测试都要断言这条分界，所以只放这一份。
- * #80 加地表植物时要把矮草、蕨、两种花加进来；沙子、沙砾、雪草方块是地形方块，不用加。
+ * 地表植物（#80）的四种方块也在里面（编号未定义时不加）；沙子、沙砾、雪草方块是地形方块，不在里面。
  */
 export const NON_TERRAIN: ReadonlySet<BlockType> = new Set([
+  ...PLANT_BLOCKS,
   BlockType.Air,
   BlockType.Water,
   BlockType.Ice,

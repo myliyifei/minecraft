@@ -4,7 +4,7 @@ import { ItemType } from '../src/core/item';
 import { DEFAULT_KEY_BINDINGS } from '../src/input/keybindings';
 import { CHUNKS, DB_NAME, WORLDS } from '../src/storage/world-storage';
 import { STRINGS } from '../src/ui/strings';
-import { createWorld, pressEscape, resumeGame, waitForWorld, waitForWorldList } from './world-list';
+import { GROUND_ARGS, createWorld, pressEscape, resumeGame, waitForWorld, waitForWorldList } from './world-list';
 
 /*
  * 暂停与写盘（#68，ADR-0019）。每条测试的浏览器上下文都是新的，IndexedDB 一开始是空的；进入的是一个新建的世界。
@@ -217,12 +217,15 @@ test('离开确认：推进过 tick 或改过方块时要确认；暂停写完�
   await waitForWorld(page);
   await expect.poll(() => asksBeforeLeaving(page)).toBe(false);
   await page.evaluate(
-    ({ air }) => {
+    ({ air, nonSolid, minY }) => {
       const core = window.__VOXEL__!.core;
       const { x, z } = core.player.position;
-      core.setBlock(Math.floor(x) + 2, core.highestBlockY(Math.floor(x) + 2, Math.floor(z)), Math.floor(z), air);
+      const [bx, bz] = [Math.floor(x) + 2, Math.floor(z)];
+      let y = core.highestBlockY(bx, bz);
+      while (y >= minY && nonSolid.includes(core.getBlock(bx, y, bz))) y--;
+      core.setBlock(bx, y, bz, air);
     },
-    { air: BlockType.Air },
+    { air: BlockType.Air, ...GROUND_ARGS },
   );
   expect(await asksBeforeLeaving(page)).toBe(true);
   expect(errors).toEqual([]);
@@ -233,17 +236,18 @@ test('死亡画面上切走标签页：回来先看到暂停菜单，死亡按�
 }) => {
   await resumeGame(page);
   const dead = await page.evaluate(
-    ({ depth, air }) => {
+    ({ depth, air, nonSolid, minY }) => {
       const { core, hud } = window.__VOXEL__!;
       const { x, z } = core.player.position;
       const column = { x: Math.floor(x), z: Math.floor(z) };
-      const top = core.highestBlockY(column.x, column.z);
+      let top = core.highestBlockY(column.x, column.z);
+      while (top >= minY && nonSolid.includes(core.getBlock(column.x, top, column.z))) top--;
       for (let y = top; y > top - depth; y--) core.setBlock(column.x, y, column.z, air);
       for (let ticks = 0; ticks < 100 && !core.health.dead; ticks++) core.tick();
       hud.update();
       return core.health.dead;
     },
-    { depth: 24, air: BlockType.Air },
+    { depth: 24, air: BlockType.Air, ...GROUND_ARGS },
   );
   expect(dead).toBe(true);
   // 死亡画面那一帧由每帧同步交还鼠标，不算暂停

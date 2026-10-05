@@ -8,7 +8,7 @@ import { MAX_PITCH } from '../src/core/player';
 import type { Vec3 } from '../src/core/vec3';
 import { DEFAULT_KEY_BINDINGS, keyLabel } from '../src/input/keybindings';
 import { STRINGS } from '../src/ui/strings';
-import { createWorld, fallToDeath, pressEscape, resumeGame, waitForWorld, waitForWorldList } from './world-list';
+import { GROUND_ARGS, createWorld, fallToDeath, pressEscape, resumeGame, waitForWorld, waitForWorldList } from './world-list';
 
 /*
  * 第六切片的全流程（#71）：全程在同一个浏览器上下文里，从空的世界列表走到导出再导入，IndexedDB 与 localStorage
@@ -65,7 +65,7 @@ interface Spots {
  */
 function playInWorld(page: Page): Promise<Spots> {
   return page.evaluate(
-    ({ items, blocks, maxPitch, pickupTicks, tickRate, midnight }) => {
+    ({ items, blocks, maxPitch, pickupTicks, tickRate, midnight, nonSolid, minY }) => {
       const core = window.__VOXEL__!.core;
       core.setTimeOfDay(midnight);
       core.giveItem(items.torch, 4);
@@ -79,9 +79,10 @@ function playInWorld(page: Page): Promise<Spots> {
         const dz = z + 0.5 - eye.z;
         core.turn(Math.atan2(-dx, -dz) - core.player.yaw, Math.atan2(dy, Math.hypot(dx, dz)) - core.player.pitch);
       };
-      /** 选第 slot 格，对准 (x, ground, z) 的顶面按使用键，返回放下去的那一格。 */
+      /** 选第 slot 格，对准 (x, ground, z) 的顶面按使用键，返回放下去的那一格。ground 是这一列最高的实心方块。 */
       const placeOnGround = (slot: number, x: number, z: number): { x: number; y: number; z: number } => {
-        const ground = core.highestBlockY(x, z);
+        let ground = core.highestBlockY(x, z);
+        while (ground >= minY && nonSolid.includes(core.getBlock(x, ground, z))) ground--;
         core.selectHotbarSlot(slot);
         aimAtTop(x, ground, z);
         core.tick();
@@ -125,6 +126,7 @@ function playInWorld(page: Page): Promise<Spots> {
       pickupTicks: PICKUP_DELAY_TICKS,
       tickRate: TICK_RATE,
       midnight: MIDNIGHT,
+      ...GROUND_ARGS,
     },
   );
 }

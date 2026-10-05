@@ -1,6 +1,7 @@
 import { sightPassesThrough, type BlockType, type BlockView } from './block';
 import type { Hitbox } from './physics';
-import { isTorch, torchHitbox } from './torch';
+import { plantHitbox } from './plant';
+import { torchHitbox } from './torch';
 import type { Axis, Vec3 } from './vec3';
 
 /** 视线命中的方块。 */
@@ -19,6 +20,14 @@ export interface BlockHit {
 }
 
 const AXES: readonly Axis[] = ['x', 'y', 'z'];
+
+/**
+ * (x, y, z) 那一格视线碰的盒子比整格小时，那个盒子（世界坐标）：火把是细杆（`torchHitbox`），地表植物是比整格小的
+ * 方盒（`plantHitbox`，#80）。整格命中的方块是 undefined。选框也套这个盒子（`selectionBounds`）。
+ */
+export function partialHitbox(block: BlockType, x: number, y: number, z: number): Hitbox | undefined {
+  return torchHitbox(block, x, y, z) ?? plantHitbox(block, x, y, z);
+}
 
 /**
  * 命中面外侧那一格的方块坐标：射线在撞上目标之前正好经过的那一格。
@@ -44,12 +53,12 @@ export function blockOutsideFace(hit: BlockHit): Vec3 {
  * `direction` 必须是单位向量，`distance` 与 `maxDistance` 才是真实距离。方向为零向量时
  * 没有命中。
  *
- * 火把那一格（#56）不是整格命中：射线与那根细杆占的轴对齐盒子求交（`torchHitbox`），碰到才算命中这一格，
- * 命中面取盒子被碰到的那一面；碰不到就穿过这一格接着走。挖掘、使用、放置、攻击分派都走这一条。
+ * 火把（#56）与地表植物（#80）那一格不是整格命中：射线与那一格比整格小的盒子求交（`partialHitbox`），碰到才算
+ * 命中这一格，命中面取盒子被碰到的那一面；碰不到就穿过这一格接着走。挖掘、使用、放置、攻击分派都走这一条。
  *
  * 起点那一格本身不是整格候选：眼睛埋在方块里时没有「进入面」可报，继续往前走又会命中墙后面
  * 的方块，所以直接判为没有目标。玩家进得去的格子里视线照常往前走：起点是空气或水（眼睛在水里，#74）
- * 时与别处一样；起点是火把那一格时照样与细杆求交，碰不到（含眼睛就在细杆里面）就接着往前走。
+ * 时与别处一样；起点是火把或植物那一格时照样与盒子求交，碰不到（含眼睛就在盒子里面）就接着往前走。
  */
 export function raycastBlocks(
   blocks: BlockView,
@@ -63,7 +72,7 @@ export function raycastBlocks(
     z: Math.floor(origin.z),
   };
   const start = blocks.getBlock(at.x, at.y, at.z);
-  if (!sightPassesThrough(start) && !isTorch(start)) return undefined;
+  if (!sightPassesThrough(start) && !partialHitbox(start, at.x, at.y, at.z)) return undefined;
 
   /** 沿这个轴每次跨一格，坐标加多少。 */
   const step: Record<Axis, number> = { x: 0, y: 0, z: 0 };
@@ -82,8 +91,8 @@ export function raycastBlocks(
     toBoundary[axis] = gap / speed;
   }
 
-  // 起点在火把那一格里：先看这一格的细杆挡不挡视线。
-  const startHit = torchCellHit(start, at.x, at.y, at.z, origin, direction, maxDistance);
+  // 起点在火把或植物那一格里：先看这一格的盒子挡不挡视线。
+  const startHit = partialCellHit(start, at.x, at.y, at.z, origin, direction, maxDistance);
   if (startHit) return startHit;
 
   for (;;) {
@@ -98,8 +107,9 @@ export function raycastBlocks(
     toBoundary[axis] += perBlock[axis];
     const block = blocks.getBlock(at.x, at.y, at.z);
     if (sightPassesThrough(block)) continue;
-    if (isTorch(block)) {
-      const hit = torchCellHit(block, at.x, at.y, at.z, origin, direction, maxDistance);
+    const box = partialHitbox(block, at.x, at.y, at.z);
+    if (box) {
+      const hit = boxHit(box, at.x, at.y, at.z, origin, direction, maxDistance);
       if (hit) return hit;
       continue;
     }
@@ -115,10 +125,10 @@ export function raycastBlocks(
 }
 
 /**
- * 射线碰到 (x, y, z) 那一格火把的细杆就是命中这一格：坐标是这一格，命中面是盒子被碰到的那一面。
- * 不是火把、碰不到、或者起点就在细杆里面（报不出进入面）时 undefined。
+ * 射线碰到 (x, y, z) 那一格比整格小的盒子（`partialHitbox`）就是命中这一格：坐标是这一格，命中面是盒子被碰到的那一面。
+ * 那一格是整格命中的方块、碰不到、或者起点就在盒子里面（报不出进入面）时 undefined。
  */
-function torchCellHit(
+function partialCellHit(
   block: BlockType,
   x: number,
   y: number,
@@ -127,8 +137,20 @@ function torchCellHit(
   direction: Vec3,
   maxDistance: number,
 ): BlockHit | undefined {
-  const box = torchHitbox(block, x, y, z);
-  if (!box) return undefined;
+  const box = partialHitbox(block, x, y, z);
+  return box && boxHit(box, x, y, z, origin, direction, maxDistance);
+}
+
+/** 射线碰到 (x, y, z) 那一格的盒子 box 时的命中，碰不到或起点在盒子里面时 undefined。 */
+function boxHit(
+  box: Hitbox,
+  x: number,
+  y: number,
+  z: number,
+  origin: Vec3,
+  direction: Vec3,
+  maxDistance: number,
+): BlockHit | undefined {
   const entry = boxEntry(origin, direction, box, maxDistance);
   if (!entry || entry.axis === undefined) return undefined;
   return {
@@ -185,7 +207,7 @@ interface BoxEntry {
   readonly axis: Axis | undefined;
 }
 
-/** `raycastBox` 的算法本身，多报一个进入面所在的轴：火把的命中面要它（`torchCellHit`）。 */
+/** `raycastBox` 的算法本身，多报一个进入面所在的轴：火把与植物的命中面要它（`boxHit`）。 */
 function boxEntry(origin: Vec3, direction: Vec3, box: Hitbox, maxDistance: number): BoxEntry | undefined {
   let near = 0;
   let far = maxDistance;

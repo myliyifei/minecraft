@@ -21,6 +21,7 @@ import {
 } from '../../src/render/atlas';
 import { buildChunkMesh, meshTiles, type MeshData, type MeshView } from '../../src/render/mesh';
 import { SELF_LIT_BLOCK_LIGHT } from '../../src/render/shading';
+import { selectionBounds } from '../../src/render/selection';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
 import {
   DANDELION,
@@ -377,6 +378,27 @@ describe('已提交的图集 PNG 画了这 4 格', () => {
     const indices = [...PLANT_TILES.map(([, index]) => index), TILE.torch, TILE.oakLeaves];
     const hex = indices.map((index) => Buffer.from(tilePixels(atlas, index)).toString('hex'));
     expect(new Set(hex).size).toBe(indices.length);
+  });
+
+  it('两种花画出来的像素都落在花的命中盒以内：瞄得到的花瓣都选得中（交叉面片铺满一格，贴图的列对应对角线上的水平位置）', () => {
+    expectPlantsDefined();
+    const atlas = decodeAtlas();
+    for (const [name, flower] of FLOWERS) {
+      const { min, max } = selectionBounds(flower, 0, 0, 0);
+      const pixels = tilePixels(atlas, BLOCK_TILES[flower]!.side);
+      const outside: string[] = [];
+      for (let row = 0; row < TILE_PX; row++) {
+        for (let col = 0; col < TILE_PX; col++) {
+          if (pixels[(row * TILE_PX + col) * 4 + 3] === 0) continue;
+          // 第 row 行占高度 1 − (row + 1)/16 到 1 − row/16，第 col 列占对角线上 col/16 到 (col + 1)/16
+          const top = 1 - row / TILE_PX;
+          const left = col / TILE_PX;
+          const right = (col + 1) / TILE_PX;
+          if (top > max.y + 1e-9 || left < min.x - 1e-9 || right > max.x + 1e-9) outside.push(`(${col}, ${row})`);
+        }
+      }
+      expect(outside, name).toEqual([]);
+    }
   });
 
   it('矮草与蕨以绿色为主；蒲公英有黄色的花，虞美人有红色的花', () => {

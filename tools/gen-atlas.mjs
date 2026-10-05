@@ -348,7 +348,7 @@ function onBirchMark(x, y) {
 }
 
 /**
- * 地表植物（#80）四格的颜色与形状。四格都是透明底，alpha 只有 0 与 255，网格靠透明裁剪抠出轮廓（与树叶相同）。
+ * 地表植物（#80）四格的颜色与形状。四格都是透明底，alpha 只有 0 与 255，网格按透明裁剪去掉透明像素（与树叶相同）。
  */
 const PLANT_GREEN = [78, 138, 48];
 const PLANT_TIP = [118, 160, 60];
@@ -377,19 +377,20 @@ function onFern(x, y) {
 }
 
 /**
- * 一朵花：第 7、8 列从第 7 行到格底是茎，第 10、12 行各伸出一片叶子；花头以 (7.5, 4.5) 为中心，
- * 半径 3 以内是花瓣（四角缺掉，像四瓣），中间 2×2 是花心。
+ * 一朵花，整朵画在花的命中盒以内（`src/core/plant.ts`：水平 5/16 到 11/16，高 10/16，即第 5 到 10 列、第 6 行以下），
+ * 视线瞄得到的花瓣都在盒子里：花头以 (7.5, 9.5) 为中心，半径 3 以内是花瓣（四角缺掉，像四瓣），中间 2×2 是花心；
+ * 第 7、8 列从第 12 行到格底是茎，第 12、13 行与第 13、14 行各伸出一片叶子。
  */
 function flower(petal, center) {
   return (x, y, rand) => {
     const noise = Math.floor(rand() * 14) - 7;
     const dx = x - 7.5;
-    const dy = y - 4.5;
+    const dy = y - 9.5;
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return shade(center, noise);
     if (Math.hypot(dx, dy) <= 3 && !(Math.abs(dx) > 2 && Math.abs(dy) > 2)) return shade(petal, noise);
-    if ((x === 7 || x === 8) && y >= 7) return shade(STEM_GREEN, noise);
-    if ((y === 10 && x >= 4 && x <= 6) || (y === 9 && x === 4)) return shade(STEM_GREEN, noise);
-    if ((y === 12 && x >= 9 && x <= 11) || (y === 11 && x === 11)) return shade(STEM_GREEN, noise);
+    if ((x === 7 || x === 8) && y >= 12) return shade(STEM_GREEN, noise);
+    if ((y === 13 && x >= 5 && x <= 6) || (y === 12 && x === 5)) return shade(STEM_GREEN, noise);
+    if ((y === 14 && x >= 9 && x <= 10) || (y === 13 && x === 10)) return shade(STEM_GREEN, noise);
     return [0, 0, 0, 0];
   };
 }

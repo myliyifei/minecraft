@@ -7,7 +7,7 @@ import { raycastBlocks } from '../../src/core/raycast';
 import type { Vec3 } from '../../src/core/vec3';
 import { selectionBounds } from '../../src/render/selection';
 import { AIM_EYE as EYE, AIM_LAYER_Y as L, aimAt, unit, worldWithBlocks } from '../helpers/aiming';
-import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTerrain } from '../helpers/flat-terrain';
+import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTerrain, flatTestWorld } from '../helpers/flat-terrain';
 import {
   DANDELION,
   DANDELION_ITEM,
@@ -86,6 +86,23 @@ describe('视线与地表植物的命中盒', () => {
     const world = worldWithBlocks([[0, L, 0], SHORT_GRASS], [[3, L, 0], BlockType.Stone]);
     expect(world.getBlock(0, L, 0)).toBe(SHORT_GRASS);
     expect(raycastBlocks(world, EYE, EAST, PLAYER_REACH)).toMatchObject({ x: 3, y: L, z: 0 });
+  });
+
+  it.each([
+    ['两格外瞄准上排花瓣', 2.5, 0.53],
+    ['两格外瞄准花心', 2.5, 0.41],
+    ['三格外瞄准上排花瓣', 3.5, 0.53],
+  ] as const)('平地上的花，%s：目标是花，不是后面的地面', (_name, eyeX, height) => {
+    expectPlantsDefined();
+    // 花瓣画在第 7 到 12 行（高 0.25 到 0.5625），瞄准点取上排花瓣与花心的高度（贴图与命中盒的对齐另见 plant-mesh 测试）
+    for (const flower of [DANDELION, POPPY]) {
+      const world = flatTestWorld();
+      world.setBlock(0, S, 0, flower);
+      const eye = { x: eyeX, y: S + 1.62, z: 0.5 };
+      const target = { x: 0.5, y: S + height, z: 0.5 };
+      const direction = unit({ x: target.x - eye.x, y: target.y - eye.y, z: target.z - eye.z });
+      expect(raycastBlocks(world, eye, direction, PLAYER_REACH), `编号 ${flower}`).toMatchObject({ x: 0, y: S, z: 0 });
+    }
   });
 
   it('触及距离内只有植物而视线都从盒子旁边穿过时没有目标', () => {

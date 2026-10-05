@@ -1,4 +1,4 @@
-import { BLOCKS, BlockType, isAir, type BlockView } from '../core/block';
+import { BLOCKS, BlockType, isAir, isPlant, type BlockView } from '../core/block';
 import {
   BLOCK_LIGHT_MASK,
   CHUNK_BLOCK_COUNT,
@@ -16,6 +16,7 @@ import {
 import { OPAQUE_FACES, faceCulling } from '../core/face-culling';
 import { BLOCK_TILES, faceTile, tileAtUv, tileUvRect, type FaceTiles } from './atlas';
 import { CUBE_FACES, type FaceSpec } from './cube-faces';
+import { PLANT_FACES } from './plant-model';
 import { SELF_LIT_BLOCK_LIGHT } from './shading';
 import { torchModel } from './torch-model';
 
@@ -38,7 +39,7 @@ export interface MeshData {
 
 /**
  * 一个区块的网格（#83，ADR-0016 补记）：不透明与半透明两部分，各是一份几何，渲染层用两种材质画（`ChunkMeshes`）。
- * 半透明部分是水与冰的面，其余方块（含树叶与火把细杆）都在不透明部分。
+ * 半透明部分是水与冰的面，其余方块（含树叶、火把细杆与地表植物的交叉面片）都在不透明部分。
  */
 export interface ChunkMeshData {
   readonly opaque: MeshData;
@@ -122,12 +123,13 @@ const FLAT_SAMPLES = CUBE_FACES.map((spec) => Int8Array.from({ length: 4 * 4 * 3
 const TRANSLUCENT_BLOCKS: readonly BlockType[] = [BlockType.Water, BlockType.Ice];
 
 /**
- * 方块编号 → 不透明、发光、是不是火把、剔除的那一档（`faceCulling`）、进不进半透明部分、顶面画不画背面，
+ * 方块编号 → 不透明、发光、是不是火把、是不是地表植物、剔除的那一档（`faceCulling`）、进不进半透明部分、顶面画不画背面，
  * 预先算成按编号索引的表：内层循环每格都要问（同 `light.ts` 的做法）。剔除的档是 −1 到 255，用 Int16Array。
  */
 const OPAQUE = new Uint8Array(256);
 const GLOWS = new Uint8Array(256);
 const TORCHES = new Uint8Array(256);
+const PLANTS = new Uint8Array(256);
 const CULLING = new Int16Array(256);
 const TRANSLUCENT = new Uint8Array(256);
 const BACK_OF_TOP = new Uint8Array(256);
@@ -136,6 +138,7 @@ for (const [id, def] of Object.entries(BLOCKS)) {
   OPAQUE[block] = def.opaque ? 1 : 0;
   GLOWS[block] = def.lightEmission > 0 ? 1 : 0;
   TORCHES[block] = torchModel(block) ? 1 : 0;
+  PLANTS[block] = isPlant(block) ? 1 : 0;
   CULLING[block] = faceCulling(block);
   TRANSLUCENT[block] = TRANSLUCENT_BLOCKS.includes(block) ? 1 : 0;
   // 水与冰的顶面从下面也要看得到：半透明材质是单面的，背面另出一份反向的面。冰盖在水上时，水的顶面与冰的底面
@@ -192,8 +195,10 @@ export function buildChunkMesh(chunk: ChunkView, view: MeshView, smoothLighting 
   translucentBuffers.reset();
   glowing.reset();
   torches.reset();
+  plants.reset();
   scanChunk(chunk, view, smoothLighting ? CORNER_SAMPLES : FLAT_SAMPLES);
   emitTorches(chunk.blocks);
+  emitPlants(chunk);
   return {
     opaque: opaqueBuffers.take(),
     translucent: translucentBuffers.take(),
@@ -202,7 +207,8 @@ export function buildChunkMesh(chunk: ChunkView, view: MeshView, smoothLighting 
 }
 
 /**
- * 扫一遍区块：整格方块的暴露面写进 `opaqueBuffers` 或 `translucentBuffers`，发光方块与火把的下标记进 `glowing`、`torches`。
+ * 扫一遍区块：整格方块的暴露面写进 `opaqueBuffers` 或 `translucentBuffers`，发光方块、火把与地表植物的下标记进
+ * `glowing`、`torches`、`plants`。
  *
  * 单独一个函数，只做整数与 TypedArray 上的事：建火把细杆、建发光方块的对象都在它外面（见 `warmUpChunkMeshes`）。
  */
@@ -225,10 +231,14 @@ function scanChunk(chunk: ChunkView, view: MeshView, cornerSamples: readonly Int
         if (isAir(block)) continue;
         const tiles = BLOCK_TILES[block];
         if (!tiles) continue;
-        // 发光方块与火把在这里只记下下标，扫完整个区块再处理（见 `IndexList`）。
+        // 发光方块、火把与地表植物在这里只记下下标，扫完整个区块再处理（见 `IndexList`）。
         if (GLOWS[block]) glowing.push(i);
         if (TORCHES[block]) {
           torches.push(i);
+          continue;
+        }
+        if (PLANTS[block]) {
+          plants.push(i);
           continue;
         }
         const culling = CULLING[block]!;
@@ -324,6 +334,26 @@ function emitTorches(blocks: ChunkView['blocks']): void {
   }
 }
 
+/**
+ * 记下的那些地表植物（`plants`）的两片交叉面片，正反两面共 4 个四边形（`PLANT_FACES`）。不走六面剔除：面片在格子里面，
+ * 邻格挡不住它。四片的每个顶点都取植物自己那一格的天光与方块光，不按平滑光照取 4 格平均，也不是火把那样的自发光：
+ * 面片斜着穿过整格，没有「外侧那一层」可取；植物那一格不是不透明方块，它的光照就是植物所在处的明暗。
+ */
+function emitPlants(chunk: ChunkView): void {
+  for (let k = 0; k < plants.length; k++) {
+    const i = plants.at(k);
+    const block = chunk.blocks[i] as BlockType;
+    const { lx, y, lz } = cellOf(i);
+    const own = chunk.light ? chunk.light[i]! : 0;
+    const sky = own >> SKY_LIGHT_SHIFT;
+    const blockLight = own & BLOCK_LIGHT_MASK;
+    for (const spec of PLANT_FACES) {
+      opaqueBuffers.quad(spec, lx, y, lz, BLOCK_TILES[block]!);
+      for (let v = 0; v < 4; v++) opaqueBuffers.light(sky, blockLight);
+    }
+  }
+}
+
 /** 记下的那些发光方块（`glowing`），按扫描的顺序。 */
 function glowingBlocksIn(blocks: ChunkView['blocks'], originX: number, originZ: number): GlowingBlock[] {
   const found: GlowingBlock[] = [];
@@ -341,9 +371,9 @@ function cellOf(i: number): { lx: number; y: number; lz: number } {
 }
 
 /**
- * 一串区块数据下标，模块共用一份，不够就翻倍。扫区块的循环遇到发光方块与火把只往这里记一个整数，建火把细杆、
- * 建发光方块的对象移到循环之后的两个函数里（`emitTorches`、`glowingBlocksIn`），扫描循环本身不必为它们走别的
- * 分支（见 `warmUpChunkMeshes`）。两个函数每次都调，没有火把时只是循环一次都不走。
+ * 一串区块数据下标，模块共用一份，不够就翻倍。扫区块的循环遇到发光方块、火把与地表植物只往这里记一个整数，建火把细杆、
+ * 植物面片与发光方块的对象移到循环之后的几个函数里（`emitTorches`、`emitPlants`、`glowingBlocksIn`），扫描循环本身
+ * 不必为它们走别的分支（见 `warmUpChunkMeshes`）。这几个函数每次都调，没有火把或植物时只是循环一次都不走。
  */
 class IndexList {
   private data = new Int32Array(64);
@@ -369,6 +399,7 @@ class IndexList {
 
 const glowing = new IndexList();
 const torches = new IndexList();
+const plants = new IndexList();
 
 /**
  * 建网格时往里写顶点的缓冲，不够就翻倍；建完一个区块按实际长度复制出去（`take`）。整个模块共两份，不透明与半透明

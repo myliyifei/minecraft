@@ -449,6 +449,7 @@ export class WorldRenderer {
       this.selectionMaterial,
     );
     this.selectionBox.visible = false;
+    this.selectionBox.renderOrder = OVERLAY_RENDER_ORDER;
     this.scene.add(this.selectionBox);
 
     // 预览轮廓是不透明的亮黄线，选框是半透明的黑线：两圈套在同一格上时也分得出。
@@ -470,12 +471,14 @@ export class WorldRenderer {
       }),
     );
     this.crackBox.visible = false;
+    this.crackBox.renderOrder = OVERLAY_RENDER_ORDER;
     this.scene.add(this.crackBox);
 
     this.particleGeometry = particleGeometry(this.particleSystem);
     const particleMesh = new THREE.Mesh(this.particleGeometry, particleMaterial(texture, this.frame));
     // 几何体只是一张原点上的四边形，粒子摆在哪由实例属性定，按它算的包围球不对，不做视锥剔除
     particleMesh.frustumCulled = false;
+    particleMesh.renderOrder = OVERLAY_RENDER_ORDER;
     this.scene.add(particleMesh);
 
     this.resize();
@@ -1110,6 +1113,13 @@ function entityCenter(
     lerp(previousPosition.z, position.z, alpha),
   );
 }
+
+/**
+ * 选框、裂纹与粒子的绘制顺序：在半透明的区块网格（水与冰，#83）之后画。它们与水、冰都在 three 的透明列表里，
+ * 列表先按 `renderOrder` 排，再按到相机的远近。只按远近排的话，挖冰时裂纹可能先画、再被冰盖上一层颜色；
+ * 粒子的几何是原点上的一张四边形，按它排出来的先后与粒子实际的位置无关。
+ */
+const OVERLAY_RENDER_ORDER = 1;
 
 /**
  * 太阳或月亮那张方片：摆在绕转那一层的 +X（`side` 为 1）或 −X（`side` 为 −1）上，正面朝向

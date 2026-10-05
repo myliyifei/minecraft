@@ -86,6 +86,21 @@ function tank(game: GameCore, fillWith: BlockType = BlockType.Water): void {
   fill(game, [-1, 1], [G - 14, TANK_TOP], [-1, 1], fillWith);
 }
 
+/** 平地加一根石柱：原点那一列从 G + 1 到 G + height 是石头，出生点因此在柱顶。 */
+function pillarTerrain(height: number): (seed: number) => Terrain {
+  return (seed) => {
+    const flat = flatTerrain(seed);
+    return {
+      ...flat,
+      generateChunk: (cx, cz) => {
+        const chunk = flat.generateChunk(cx, cz);
+        if (cx === 0 && cz === 0) chunk.fillColumn(0, 0, G + 1, G + height, BlockType.Stone);
+        return chunk;
+      },
+    };
+  };
+}
+
 describe('在水里的水平移动（#77）', () => {
   it('平地上挖一个 3 格深的水池，玩家在池底走同样多的 tick，走得比在陆上近', () => {
     const land = core();
@@ -131,6 +146,25 @@ describe('在水里的下沉与上浮（#77）', () => {
     }
     expect(Math.max(...drops)).toBeLessThanOrEqual(WATER_MAX_SINK_SPEED + 1e-9);
     // 场景搭对了：60 tick 之后还悬在水中，没有落到箱底
+    expect(game.player.position.y).toBeGreaterThan(G - 14);
+  });
+
+  it('从高处落进深水：入水之后每 tick 的下降都不超过水里的下落速度上限，不按空气里的速度一直冲下去', () => {
+    // 出生在 30 格高的石柱顶上；水箱替换掉石柱的下段，再拆掉水面以上的那段，玩家从水面上方 27 格落进水箱
+    const game = core(pillarTerrain(30));
+    tank(game);
+    fill(game, [0, 0], [TANK_SURFACE, G + 30], [0, 0], BlockType.Air);
+    let wetTicks = 0;
+    for (let i = 0; i < 80; i++) {
+      const wasInWater = game.player.inWater;
+      game.tick();
+      if (!wasInWater) continue;
+      wetTicks++;
+      const drop = game.player.previousPosition.y - game.player.position.y;
+      expect(drop, `第 ${i + 1} tick`).toBeLessThanOrEqual(WATER_MAX_SINK_SPEED + 1e-9);
+    }
+    // 场景搭对了：真的落进了水箱，在水里待了一阵，还没沉到箱底
+    expect(wetTicks).toBeGreaterThan(20);
     expect(game.player.position.y).toBeGreaterThan(G - 14);
   });
 
@@ -194,22 +228,9 @@ describe('落进水里不受摔落伤害（#77）', () => {
   /** 出生列上立着的石柱高度：玩家出生在柱顶，脚底离地面 PILLAR 格。 */
   const PILLAR = 20;
 
-  /** 平地加一根石柱：原点那一列从 G + 1 到 G + PILLAR 是石头，出生点因此在柱顶。 */
-  function pillarTerrain(seed: number): Terrain {
-    const flat = flatTerrain(seed);
-    return {
-      ...flat,
-      generateChunk: (cx, cz) => {
-        const chunk = flat.generateChunk(cx, cz);
-        if (cx === 0 && cz === 0) chunk.fillColumn(0, 0, G + 1, G + PILLAR, BlockType.Stone);
-        return chunk;
-      },
-    };
-  }
-
   /** 站在柱顶上，按 withPool 在柱脚挖一个 3 格深的水池，再拆掉石柱，推进到落定为止。 */
   function fallFromPillar(withPool: boolean): GameCore {
-    const game = core(pillarTerrain);
+    const game = core(pillarTerrain(PILLAR));
     expect(game.player.position.y).toBe(FLAT_STAND_Y + PILLAR);
     if (withPool) fill(game, [-2, 2], [G - 2, G], [-2, 2], BlockType.Water);
     fill(game, [0, 0], [G + 1, G + PILLAR], [0, 0], BlockType.Air);
@@ -222,6 +243,24 @@ describe('落进水里不受摔落伤害（#77）', () => {
     expect(game.health.points).toBe(MAX_HEALTH);
     // 场景搭对了：玩家确实落进了水池，在地面以下
     expect(game.player.position.y).toBeLessThan(FLAT_STAND_Y);
+  });
+
+  it('从 20 格高处落进铺在草地上的一层水里，同一 tick 入水并落到水底，生命值也不变', () => {
+    const game = core(pillarTerrain(PILLAR));
+    // 一层水铺在草地上（G + 1），石柱那一格留给下面拆
+    fill(game, [-2, 2], [G + 1, G + 1], [-2, 2], BlockType.Water);
+    fill(game, [0, 0], [G + 1, G + PILLAR], [0, 0], BlockType.Air);
+    game.setBlock(0, G + 1, 0, BlockType.Water);
+    let landedFromAir = false;
+    for (let i = 0; i < 100; i++) {
+      const wasInWater = game.player.inWater;
+      game.tick();
+      if (game.player.onGround && !wasInWater && game.player.inWater) landedFromAir = true;
+    }
+    // 场景搭对了：入水与落到草地上是同一 tick，这一 tick 开始时还在空中
+    expect(landedFromAir).toBe(true);
+    expect(game.player.position.y).toBe(FLAT_STAND_Y);
+    expect(game.health.points).toBe(MAX_HEALTH);
   });
 
   it('对照：同样高度落在草地上扣血', () => {
@@ -262,6 +301,14 @@ describe('在水里与眼睛在水下的判定（#77）', () => {
     game.setBlock(1, FEET_Y, 0, BlockType.Water);
     game.setBlock(-1, FEET_Y, 0, BlockType.Water);
     expect(game.player.inWater).toBe(false);
+  });
+
+  it('只有头顶上方那一格是水：碰撞箱没有伸进去，不在水里', () => {
+    const game = core();
+    // 碰撞箱顶在 G + 1 + 1.8，离 G + 3 那一格还有 0.2 格
+    game.setBlock(0, FEET_Y + 2, 0, BlockType.Water);
+    expect(game.player.inWater).toBe(false);
+    expect(game.player.eyeInWater).toBe(false);
   });
 
   it('拆掉水之后两者都回到假', () => {

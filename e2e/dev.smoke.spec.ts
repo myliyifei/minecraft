@@ -2797,6 +2797,108 @@ test('工作台界面右侧也有配方书，点木板配方自动填入材料',
   expect(errors).toEqual([]);
 });
 
+test('背包里只有 2 块橡木板加 2 块白桦木板：配方书里工作台那条高亮，点它按格号填入两种木板，输出格是工作台（#85）', async ({
+  page,
+}) => {
+  // 开局背包是空的：两堆依次进第 0、1 格，橡木在前
+  await page.evaluate(
+    ({ oak, birch }) => {
+      const core = window.__VOXEL__!.core;
+      core.giveItem(oak, 2);
+      core.giveItem(birch, 2);
+    },
+    { oak: ItemType.OakPlanks, birch: ItemType.BirchPlanks },
+  );
+  await openInventoryScreen(page);
+  const book = page.locator('#inventory-screen .invscreen__recipes');
+  // 工作台只有一条配方，不按木板种类分成几条；木板组按三种木板合计 4 块，够
+  const table = recipeEntry(book, ItemType.CraftingTable);
+  await expect(table).toHaveCount(1);
+  await expect(table).toHaveAttribute('data-craftable', 'true');
+  await table.click();
+
+  const gridCells = page.locator('#inventory-screen .invscreen__grid .invscreen__slot');
+  const filled = [ItemType.OakPlanks, ItemType.OakPlanks, ItemType.BirchPlanks, ItemType.BirchPlanks];
+  for (const [i, item] of filled.entries()) {
+    await expect(gridCells.nth(i)).toHaveAttribute('data-item', String(item));
+  }
+  // 白桦木板的图标取的是图集里白桦木板那一格，名称来自物品名称表
+  const { col, row } = tileCell(ITEM_TILES[ItemType.BirchPlanks].side);
+  const birchIcon = gridCells.nth(2).locator('.invscreen__icon');
+  await expect(birchIcon).toHaveCSS('--tile-col', String(col));
+  await expect(birchIcon).toHaveCSS('--tile-row', String(row));
+  await expect(gridCells.nth(2)).toHaveAttribute('title', ITEM_NAMES[ItemType.BirchPlanks]);
+
+  const output = page.locator('#inventory-screen [data-output]');
+  await expect(output).toHaveAttribute('data-item', String(ItemType.CraftingTable));
+  await expect(output).toHaveAttribute('title', ITEM_NAMES[ItemType.CraftingTable]);
+  await expect(page.locator('#inventory-screen .invscreen__slot[data-slot="0"]')).not.toHaveAttribute('data-item', /./);
+  await expect(page.locator('#inventory-screen .invscreen__slot[data-slot="1"]')).not.toHaveAttribute('data-item', /./);
+  expect(errors).toEqual([]);
+});
+
+test('调试句柄放下白桦与云杉的六种方块：区块网格用上第 49 到 56 格；头顶一层白桦树叶之下天光 14，再垫一层云杉树叶是 13（#85）', async ({
+  page,
+}) => {
+  const seen = await page.evaluate(
+    ({ blocks, birchLeaves, spruceLeaves, chunkSize }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const px = Math.floor(core.player.position.x);
+      const pz = Math.floor(core.player.position.z);
+      const groundY = Math.floor(core.player.position.y) - 1;
+
+      // 六种方块悬空排成一行，各面都露在空气里
+      const chunks = new Set<string>();
+      blocks.forEach((block, i) => {
+        const x = px - 3 + i;
+        const z = pz + 3;
+        core.setBlock(x, groundY + 14, z, block);
+        chunks.add(`${Math.floor(x / chunkSize)},${Math.floor(z / chunkSize)}`);
+      });
+
+      // 25×25 一层树叶盖在高处：正中离边缘 12 格，从边上横着绕进来的光到不了 13
+      const layer = (y: number, block: BlockType): void => {
+        for (let dx = -12; dx <= 12; dx++) {
+          for (let dz = -12; dz <= 12; dz++) core.setBlock(px + dx, y, pz + dz, block);
+        }
+      };
+      const sampleY = groundY + 18;
+      const open = core.skyLightAt(px, sampleY, pz);
+      layer(groundY + 20, birchLeaves);
+      const underBirch = core.skyLightAt(px, sampleY, pz);
+      layer(groundY + 19, spruceLeaves);
+      const underBoth = core.skyLightAt(px, sampleY, pz);
+
+      renderer.syncChunkMeshes(Infinity);
+      const tiles = new Set<number>();
+      for (const key of chunks) {
+        const [cx, cz] = key.split(',').map(Number) as [number, number];
+        for (const tile of renderer.chunkMeshTiles(cx, cz)) tiles.add(tile);
+      }
+      return { open, underBirch, underBoth, tiles: [...tiles] };
+    },
+    {
+      blocks: [
+        BlockType.BirchLog,
+        BlockType.BirchLeaves,
+        BlockType.BirchPlanks,
+        BlockType.SpruceLog,
+        BlockType.SpruceLeaves,
+        BlockType.SprucePlanks,
+      ],
+      birchLeaves: BlockType.BirchLeaves,
+      spruceLeaves: BlockType.SpruceLeaves,
+      chunkSize: CHUNK_SIZE,
+    },
+  );
+
+  expect(seen.open).toBe(15);
+  expect(seen.underBirch).toBe(14);
+  expect(seen.underBoth).toBe(13);
+  for (const tile of [49, 50, 51, 52, 53, 54, 55, 56]) expect(seen.tiles, `第 ${tile} 格`).toContain(tile);
+  expect(errors).toEqual([]);
+});
+
 /**
  * 挖穿一块之后玩家落到下一块上、目标方块重算完成要的 tick 数。连着往下挖几块时每块加上它，
  * 后一块的挖掘才从落地之后算起。

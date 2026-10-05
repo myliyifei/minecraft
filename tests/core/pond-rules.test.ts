@@ -97,6 +97,7 @@ describe('起伏的合成地表上的水塘', () => {
       if (diameter < 5 || diameter > 10) wrong.push(`(${pond.x}, ${pond.z}) 直径 ${diameter}`);
     }
     expect(wrong.slice(0, 20)).toEqual([]);
+    expect(ponds.some((p) => diameterOf(p.columns) === 5), '直径正好 5 的水塘').toBe(true);
   });
 });
 
@@ -120,6 +121,23 @@ describe('平地上的水塘', () => {
   it('水面要高于海平面：地表正好在海平面时没有水塘，高一格就有', () => {
     expect(pondsIn(flat(SEA_LEVEL), chunkSquare(12))).toEqual([]);
     expect(pondsIn(flat(SEA_LEVEL + 1), chunkSquare(12)).length).toBeGreaterThan(0);
+  });
+
+  it('水深的边界：水塘里一列地表挖低到塘底比水面低 4 格时照放，低 5 格时整个不放', () => {
+    const ponds = pondsIn(flat(80), chunkSquare(12)).slice(0, 10);
+    expect(ponds.length).toBe(10);
+    const wrong: string[] = [];
+    for (const pond of ponds) {
+      // 不是中心列的一列：塘底 = min(地表 − 1, 水面 − 深度)，地表低到 水面 − 3 时塘底在 水面 − 4
+      const pit = pond.columns.find((c) => c.x !== pond.x || c.z !== pond.z)!;
+      for (const below of [3, 4]) {
+        const surface = (x: number, z: number): number => (x === pit.x && z === pit.z ? pond.waterY - below : 80);
+        const found = pondsIn(placement(surface), [{ cx: chunkOf(pond.x), cz: chunkOf(pond.z) }]);
+        const present = found.some((p) => p.x === pond.x && p.z === pond.z);
+        if (present !== (below === 3)) wrong.push(`(${pond.x}, ${pond.z}) 的 ${key(pit)} 低 ${below} 格：${present ? '放了' : '没放'}`);
+      }
+    }
+    expect(wrong).toEqual([]);
   });
 
   it('出生列的边界：出生列离水塘最近的一列正好 8 格时水塘照放，7 格时整个不放', () => {
@@ -165,5 +183,29 @@ describe('真实地形的出生列旁本来会有水塘的种子', () => {
       }
     }
     expect(wrong).toEqual([]);
+  });
+});
+
+describe('陡坡上的水塘列', () => {
+  /**
+   * 挖之前列顶是陡坡石头的水塘列（与相邻列的地表高度差有 3 格以上），在三个种子 ±2560 格里找出来的。
+   * 嵌矿脉之后要把这种列顶写回石头（矿脉会换掉它），水塘得在那之后挖，否则地表高度那一格又成了石头。
+   */
+  const STEEP_POND_COLUMNS: ReadonlyArray<readonly [number, number, number]> = [
+    [314_159, -2127, -534],
+    [314_159, -2126, -534],
+    [777, -790, 2322],
+    [777, -789, 2323],
+    [-42, -1486, 2285],
+    [-42, 621, 2031],
+  ];
+
+  it.each(STEEP_POND_COLUMNS)('种子 %i 列 (%i, %i)：列顶地表方块查询是水，生成结果里地表高度那一格也是水', (seed, x, z) => {
+    const terrain = createTerrain(seed);
+    const h = terrain.surfaceHeightAt(x, z);
+    const rise = Math.max(...NEIGHBORS.map(([dx, dz]) => Math.abs(terrain.surfaceHeightAt(x + dx, z + dz) - h)));
+    expect(rise, '是陡坡').toBeGreaterThanOrEqual(3);
+    expect(terrain.surfaceBlockAt(x, z)).toBe(BlockType.Water);
+    expect(terrain.generateChunk(chunkOf(x), chunkOf(z)).get(localOf(x), h, localOf(z))).toBe(BlockType.Water);
   });
 });

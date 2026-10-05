@@ -299,6 +299,29 @@ describe('从水里爬上岸（#77）', () => {
     expect(climbed).toBe(true);
     expect(Math.floor(position.z)).toBeLessThanOrEqual(-7);
   });
+
+  it('水面结着冰：在冰下的水里按住跳朝岸游，向上被冰挡住，浮不到水面附近，不给爬岸的速度，留在冰下', () => {
+    // 与寒冷处的海面一样：水在 G − 4 到 G − 1，最上面一层 G 是冰。岸在 z ≤ −7，是平地本来的石头与草方块，顶面与冰面齐平
+    const game = core();
+    fill(game, [-2, 2], [G - 4, G], [-6, 1], BlockType.Water);
+    // 先沉到池底，再把水面那一层换成冰：铺冰时玩家不在那一层里
+    game.tick(60);
+    expect(game.player.position.y).toBe(G - 4);
+    fill(game, [-2, 2], [G, G], [-6, 1], BlockType.Ice);
+
+    game.setMoveIntent(SWIM_FORWARD);
+    let highestFeet = -Infinity;
+    for (let i = 0; i < 300; i++) {
+      game.tick();
+      highestFeet = Math.max(highestFeet, game.player.position.y);
+    }
+    game.setMoveIntent(IDLE_INTENT);
+    // 头顶贴着冰的底面：脚底至多到 G − 碰撞箱高度
+    expect(highestFeet).toBeLessThanOrEqual(G - PLAYER_HEIGHT + 1e-9);
+    expect(game.player.inWater).toBe(true);
+    // 场景搭对了：游到了岸边、被岸挡住，而不是还没游过去
+    expect(game.player.position.z).toBeCloseTo(-6 + PLAYER_WIDTH / 2, 9);
+  });
 });
 
 describe('落进水里不受摔落伤害（#77）', () => {

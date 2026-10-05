@@ -18,7 +18,7 @@ import { placeBlock } from './placement';
 import { IDLE_INTENT, Player, type MoveIntent, type PlayerView } from './player';
 import type { Snapshot } from './snapshot';
 import { streamChunks } from './streaming';
-import { plainsTerrain } from './terrain';
+import { createTerrain, type Terrain } from './terrain';
 import { effectiveSkyLight, isNightAt, skyDarkeningAt, timeOfDayAt, wrapTimeOfDay } from './time-of-day';
 import type { Vec3 } from './vec3';
 import { XpOrbs, type XpOrbsView } from './xp-orb';
@@ -28,7 +28,7 @@ import {
   ORIGIN_CHUNK,
   World,
   type ChunkCoord,
-  type ChunkSourceFactory,
+  type ChunkSource,
   type StaleChunks,
 } from './world';
 
@@ -60,11 +60,17 @@ export interface GameCoreOptions {
    */
   readonly restore?: Snapshot;
   /**
-   * 换掉区块的来源：测试里塞一个特定形状的世界，浏览器里塞一个由 Worker 生成区块的
-   * 来源。拿到的是本世界的种子，因此替换实现同样受种子驱动。
+   * 由本世界的种子造出地形对象，默认 `createTerrain`。新建与读档都只调一次，读档时拿到的是快照里的种子。
+   * 测试里换成平地那一份地形对象，浏览器里把生成器换成由 Worker 生成区块的来源。
    */
-  readonly chunkSource?: ChunkSourceFactory;
+  readonly terrain?: (seed: number) => CoreTerrain;
 }
+
+/**
+ * 核心接的地形对象：与 `Terrain` 相同，只是生成器可以当场给不出区块（返回 `undefined`，即
+ * `ChunkSource`，下一 tick 再问）。浏览器里区块由 Worker 生成，就是这种情形；`Terrain` 可以直接当它用。
+ */
+export type CoreTerrain = Omit<Terrain, 'generateChunk'> & { readonly generateChunk: ChunkSource };
 
 /**
  * 无头游戏核心：纯 TypeScript，不依赖 Three.js 与 DOM，可在 Node 中直接实例化。
@@ -152,7 +158,9 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.radius = options.viewRadius ?? DEFAULT_VIEW_RADIUS;
     // 支撑没了的火把交给掉落物（`World.dropDetachedTorches`）。掉落物要拿世界算碰撞，比世界晚建，
     // 所以这里传一个转发给掉落物的函数。世界在这个构造函数里只加载区块、不写方块，调用到它时掉落物已经建好。
-    this.world = new World((options.chunkSource ?? plainsTerrain)(this.worldSeed), {
+    // 出生点仍取原点那一列，#84 改为地形对象的出生列。
+    const terrain = (options.terrain ?? createTerrain)(this.worldSeed);
+    this.world = new World(terrain.generateChunk, {
       spawnInBlock: (stack, x, y, z) => this.dropsState.spawnInBlock(stack, x, y, z),
     });
     if (restore) {
@@ -681,7 +689,7 @@ export class GameCore implements BlockEdit, BlockStateView {
    * 某一列最高的非空气方块的 y。整列都是空气（或区块未加载）时返回世界底面之下一格。
    *
    * 注意它不是「地表高度」：地表高度是地形生成给出的地面，不随挖掘与放置变化，
-   * 由 `plainsSurfaceHeight` 那类函数回答。这里问的是那一列现在实际堆到了多高，
+   * 由地形对象的 `surfaceHeightAt` 回答。这里问的是那一列现在实际堆到了多高，
    * 出生点与僵尸的生成要的是这个。
    */
   highestBlockY(x: number, z: number): number {

@@ -1,4 +1,4 @@
-import { plainsTerrain } from '../core/terrain';
+import { createTerrain } from '../core/terrain';
 import type { ChunkRequest, ChunkResponse } from './protocol';
 
 /**
@@ -20,11 +20,11 @@ interface WorkerScope {
 
 const scope = globalThis as unknown as WorkerScope;
 
-// 不缓存生成器：`plainsTerrain(seed)` 只是把种子闭包起来，代价可以忽略，而 Worker
+// 不缓存地形对象：`createTerrain(seed)` 现在只是把种子闭包起来，代价可以忽略，而 Worker
 // 因此一点可变状态都没有——同一个请求任何时候处理都得到同样的区块（ADR-0003）。
 scope.onmessage = ({ data }) => {
   const { seed, cx, cz } = data;
-  const chunk = plainsTerrain(seed)(cx, cz);
+  const chunk = createTerrain(seed).generateChunk(cx, cz);
   // 转移 buffer 而不是复制：这一块内存交给主线程之后，Worker 这边就不再持有它。
   scope.postMessage({ cx, cz, blocks: chunk.blocks }, [chunk.blocks.buffer]);
 };

@@ -1,7 +1,8 @@
 import type { Difficulty } from './core/difficulty';
 import { GameCore } from './core/game';
 import type { Snapshot } from './core/snapshot';
-import { chunkKey, chunkOf, chunksAround, ORIGIN_CHUNK, type ChunkCoord, type ChunkSource } from './core/world';
+import { createTerrain } from './core/terrain';
+import { chunkKey, chunkOf, chunksAround, ORIGIN_CHUNK, type ChunkCoord } from './core/world';
 import { installDebugHandle, removeDebugHandle } from './debug';
 import { installPlayerControls } from './input/controls';
 import { startGameLoop } from './loop';
@@ -79,13 +80,14 @@ export async function startWorldSession({
       chunksAround(center, SPAWN_READY_RADIUS).filter(({ cx, cz }) => !edited.has(chunkKey(cx, cz))),
     );
 
-    // 种子只有一个出处：Worker 与核心都用区块来源记着的那个，两边不可能对不上。
-    const chunkSource = (): ChunkSource => chunks.source;
+    // 种子只有一个出处：Worker 与核心都用区块来源记着的那个，两边不可能对不上。地形对象的查询在主线程上
+    // 按同一个种子算，只把生成器换成 Worker 那一侧的区块来源。
+    const terrain = (worldSeed: number) => ({ ...createTerrain(worldSeed), generateChunk: chunks.source });
     const { viewRadius } = settings;
     const core =
       'restore' in start
-        ? new GameCore({ restore: start.restore, chunkSource, viewRadius })
-        : new GameCore({ seed: chunks.seed, difficulty: start.difficulty, chunkSource, viewRadius });
+        ? new GameCore({ restore: start.restore, terrain, viewRadius })
+        : new GameCore({ seed: chunks.seed, difficulty: start.difficulty, terrain, viewRadius });
     // 设置界面上拖视距滑条：改小时超出范围的区块当场卸载，改大时缺的从下一 tick 起按平时的节奏加载。
     unsubscribe = settings.subscribe(() => {
       if (core.viewRadius !== settings.viewRadius) core.setViewRadius(settings.viewRadius);

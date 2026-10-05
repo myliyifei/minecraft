@@ -44,13 +44,6 @@ export interface StaleChunks {
 export type ChunkSource = (cx: number, cz: number) => Chunk | undefined;
 
 /**
- * 由种子造出区块来源。
- * 核心只认这个类型，因此换地形算法（测试用的假地形、将来的多群系地形）或者换生成的
- * 去处（Worker）都不必改动核心的接线。
- */
-export type ChunkSourceFactory = (seed: number) => ChunkSource;
-
-/**
  * 已加载区块的集合，按世界坐标读写方块。
  *
  * 未加载的区块视为边界：读到空气，写入被丢弃。这与连锁挖掘「未加载区块视为边界」

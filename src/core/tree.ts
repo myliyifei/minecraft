@@ -14,7 +14,7 @@ import type { ColumnCoord } from './world';
 export type SurfaceHeightAt = (x: number, z: number) => number;
 
 /**
- * 放树要的五样输入：世界种子（决定哪里长树、树长多高）、任意一列的群系（大海里不长树）、
+ * 放树要的五样输入：世界种子（决定哪里长树、长哪种、树长多高）、任意一列的群系（决定长哪种树，大海里不长树）、
  * 任意一列的地表高度（决定树根落在哪）、任意一列的列顶地表方块（只长在草方块与雪草方块上），与出生列（它周围不长树）。
  *
  * 地表高度当参数传进来而不是直接调地形模块：树的规则与地形算法因此互不依赖，
@@ -26,7 +26,7 @@ export interface TreePlacement {
   readonly biomeAt: (x: number, z: number) => Biome;
   readonly surfaceHeightAt: SurfaceHeightAt;
   readonly surfaceBlockAt: (x: number, z: number) => BlockType;
-  /** 出生列（见 CONTEXT.md「出生点」），树根不落在它周围 `OAK_SPAWN_CLEARANCE` 格内。 */
+  /** 出生列（见 CONTEXT.md「出生点」），树根不落在它周围 `TREE_SPAWN_CLEARANCE` 格内。 */
   readonly spawnColumn: ColumnCoord;
 }
 
@@ -67,45 +67,50 @@ export function trunkTopY(tree: Tree): number {
  * 几格的哈希决定，不必顺着别的树查下去——每个区块因此能独立算出所有该写的树，
  * 见 ADR-0005。
  */
-export const OAK_CELL_SIZE = 8;
+export const TREE_CELL_SIZE = 8;
 
-/** 树格坐标用位移算，负坐标也向下取整。满足 `1 << OAK_CELL_SHIFT === OAK_CELL_SIZE`。 */
-const OAK_CELL_SHIFT = 3;
+/** 树格坐标用位移算，负坐标也向下取整。满足 `1 << TREE_CELL_SHIFT === TREE_CELL_SIZE`。 */
+const TREE_CELL_SHIFT = 3;
 
 /** 格内落点的掩码：树落在格内哪一列。 */
-const OAK_CELL_MASK = OAK_CELL_SIZE - 1;
+const TREE_CELL_MASK = TREE_CELL_SIZE - 1;
 
-/** 树干的原木格数：每棵树在这个闭区间里由种子确定性地取一个。 */
+/** 橡树与白桦树干的原木格数：每棵树在这个闭区间里由种子确定性地取一个。 */
 export const OAK_TRUNK_MIN = 4;
 export const OAK_TRUNK_MAX = 6;
 
-/** 树干高度的取值个数（OAK_TRUNK_MIN..OAK_TRUNK_MAX 闭区间）。 */
-const OAK_TRUNK_SPAN = OAK_TRUNK_MAX - OAK_TRUNK_MIN + 1;
-
-/** 树冠的水平半径（方块）：最宽那两层是 (2r+1)×(2r+1) 去掉四角。 */
+/** 橡树与白桦树冠的水平半径（方块）：最宽那两层是 (2r+1)×(2r+1) 去掉四角。 */
 export const OAK_CANOPY_RADIUS = 2;
 
 /**
- * 两棵树之间最小的间距（方块，切比雪夫距离）。
- *
- * 取「两个树冠刚好贴到一起」那个距离：再近一格树冠就互相穿插，两棵树长成连体——
- * 原版放树也会检查落点的空间。挨太近时让位的那一棵见 `EARLIER_CELLS`。
+ * 云杉树干的原木格数。树冠最下面一层在树干顶之下 5 格，树干至少 7 格，那一层才在地表之上至少 1 格。
  */
-export const OAK_MIN_SPACING = 2 * OAK_CANOPY_RADIUS + 1;
+export const SPRUCE_TRUNK_MIN = 7;
+export const SPRUCE_TRUNK_MAX = 9;
+
+/** 云杉树冠的水平半径（方块）：最下面那层 7×7 去掉四角。ADR-0005 补记：不超过 3。 */
+export const SPRUCE_CANOPY_RADIUS = 3;
+
+/**
+ * 所有树种中最大的树冠半径。区块扫描「树冠还能伸进来」的树格时按它扩一圈（ADR-0005）：按橡树的 2 扩，
+ * 树根离区块边 3 格的云杉最外一圈就漏写了。
+ */
+export const MAX_CANOPY_RADIUS = Math.max(OAK_CANOPY_RADIUS, SPRUCE_CANOPY_RADIUS);
 
 /**
  * 出生列周围不长树的半径（方块，切比雪夫距离）。指的是树根：树冠还会再伸出
- * OAK_CANOPY_RADIUS 格。
+ * 树冠半径那么多格。
  *
  * 出生点在出生列上（`TreePlacement.spawnColumn`、`GameCore.spawnPoint`）。树叶是实心的：树冠盖到出生点，玩家
  * 一进世界就卡在树叶里；盖到旁边几格，他刚迈步就撞上。所以给出生点留一小片空地，按
  * 「随便朝哪个方向走一秒都还撞不到东西」定大小——一秒 4.3 格，加半个碰撞箱是 4.6 格，
- * 所以树冠不能进 |5| 格，树根因此不能进 |7| 格。
+ * 所以橡树冠不能进 |5| 格，树根因此不能进 |7| 格。出生列在平原（CONTEXT.md「出生点」），周围长的是橡树与白桦；
+ * 云杉的树冠宽一格，出生列落在平原之外时云杉的树冠能伸到 |4| 格，这种情形少见，不另加大。
  */
-export const OAK_SPAWN_CLEARANCE = 7;
+export const TREE_SPAWN_CLEARANCE = 7;
 
-/** 橡树分布用的种子偏移量。派生出一条与地形密度、泥土层数都无关的哈希流。 */
-const OAK_TREE_SALT = 0x2f1a_9c37;
+/** 树的分布用的种子偏移量。派生出一条与地形密度、泥土层数都无关的哈希流。 */
+const TREE_SALT = 0x2f1a_9c37;
 
 /**
  * 一个树格的哈希切成五段互不重叠的位，各当一个独立的随机数用：格内落点 x、格内落点 z、
@@ -122,48 +127,86 @@ const SPECIES_SHIFT = 22;
 const ROLL_MASK = 0xff;
 
 /** 随机数小于这个数，这一格就长树。64/256 = 25%，一个区块 4 个树格，平均约一棵。 */
-const OAK_TREE_CHANCE = 64;
+const TREE_CHANCE = 64;
 
-/** 平原的树里，长树种那段随机数小于这个数的是白桦：77/256 ≈ 30%（CONTEXT.md「树」约三成）。 */
+/** 平原的树里，树种那段随机数小于这个数的是白桦：77/256 ≈ 30%（CONTEXT.md「树」约三成）。 */
 const BIRCH_CHANCE = 77;
 
+/** 树冠的一层：`dy` 相对最上面那格原木。 */
+interface CanopyLayer {
+  readonly dy: number;
+  readonly radius: number;
+  /** 这一层保不保留四角。半径 0 的那层只有一格，没有四角可去。 */
+  readonly corners: boolean;
+}
+
 /**
- * 树冠自下而上每一层的形状，`dy` 相对最上面那格原木。
+ * 橡树与白桦的树冠，自下而上。
  *
  * 原版式橡树冠：最宽的两层是 5×5 去掉四角，树干顶那一层是完整的 3×3，
  * 最上面一层是 3×3 去掉四角的十字。
  */
-const OAK_CANOPY_LAYERS: ReadonlyArray<{
-  readonly dy: number;
-  readonly radius: number;
-  /** 这一层保不保留四角。 */
-  readonly corners: boolean;
-}> = [
+const OAK_CANOPY_LAYERS: readonly CanopyLayer[] = [
   { dy: -2, radius: OAK_CANOPY_RADIUS, corners: false },
   { dy: -1, radius: OAK_CANOPY_RADIUS, corners: false },
   { dy: 0, radius: 1, corners: true },
   { dy: 1, radius: 1, corners: false },
 ];
 
-/** 一种树写进区块时用的原木、树叶与树冠形状。 */
+/**
+ * 云杉的尖塔形树冠，自下而上，共 7 层（ADR-0005 补记）。
+ *
+ * 最下面一层 7×7 去掉四角，往上半径 2、1、2、1 交替收窄，树干顶那一层是 3×3 去掉四角的十字，
+ * 树干顶之上再盖一格树叶。半径交替收放是原版云杉的样子：从侧面看是一圈一圈的，不是一个光滑的锥。
+ */
+const SPRUCE_CANOPY_LAYERS: readonly CanopyLayer[] = [
+  { dy: -5, radius: SPRUCE_CANOPY_RADIUS, corners: false },
+  { dy: -4, radius: 2, corners: false },
+  { dy: -3, radius: 1, corners: true },
+  { dy: -2, radius: 2, corners: false },
+  { dy: -1, radius: 1, corners: true },
+  { dy: 0, radius: 1, corners: false },
+  { dy: 1, radius: 0, corners: true },
+];
+
+/** 一种树的原木、树叶、树干高度范围与树冠形状。 */
 interface TreeForm {
   readonly log: BlockType;
   readonly leaves: BlockType;
-  readonly canopy: typeof OAK_CANOPY_LAYERS;
+  readonly trunkMin: number;
+  readonly trunkMax: number;
+  readonly canopyRadius: number;
+  readonly canopy: readonly CanopyLayer[];
 }
+
+const OAK_FORM: TreeForm = {
+  log: BlockType.OakLog,
+  leaves: BlockType.OakLeaves,
+  trunkMin: OAK_TRUNK_MIN,
+  trunkMax: OAK_TRUNK_MAX,
+  canopyRadius: OAK_CANOPY_RADIUS,
+  canopy: OAK_CANOPY_LAYERS,
+};
 
 /** 白桦与橡树同形（CONTEXT.md「树」），只换原木与树叶。 */
 const TREE_FORMS: Readonly<Record<TreeSpecies, TreeForm>> = {
-  [TreeSpecies.Oak]: { log: BlockType.OakLog, leaves: BlockType.OakLeaves, canopy: OAK_CANOPY_LAYERS },
-  [TreeSpecies.Birch]: { log: BlockType.BirchLog, leaves: BlockType.BirchLeaves, canopy: OAK_CANOPY_LAYERS },
-  [TreeSpecies.Spruce]: { log: BlockType.SpruceLog, leaves: BlockType.SpruceLeaves, canopy: OAK_CANOPY_LAYERS },
+  [TreeSpecies.Oak]: OAK_FORM,
+  [TreeSpecies.Birch]: { ...OAK_FORM, log: BlockType.BirchLog, leaves: BlockType.BirchLeaves },
+  [TreeSpecies.Spruce]: {
+    log: BlockType.SpruceLog,
+    leaves: BlockType.SpruceLeaves,
+    trunkMin: SPRUCE_TRUNK_MIN,
+    trunkMax: SPRUCE_TRUNK_MAX,
+    canopyRadius: SPRUCE_CANOPY_RADIUS,
+    canopy: SPRUCE_CANOPY_LAYERS,
+  },
 };
 
 /**
  * 判断「挨得够不够开」时要看的邻格。
  *
  * 最小间距只可能被紧邻的 8 个树格破坏：再远的格子隔着一整个树格，两棵树必然够远
- * （OAK_CELL_SIZE 大于 OAK_MIN_SPACING）。这里只取字典序在本格之前的那 4 个，
+ * （TREE_CELL_SIZE 大于最大的间距 2 × MAX_CANOPY_RADIUS + 1）。这里只取字典序在本格之前的那 4 个，
  * 于是「谁给谁让位」有个固定的先后，不会两棵树互相让、最后一棵都不长。
  *
  * 让位的那一棵仍然算数：它自己被让掉了，却还能挤掉字典序在它之后的树。这么做是为了
@@ -178,97 +221,101 @@ const EARLIER_CELLS: ReadonlyArray<readonly [number, number]> = [
 
 /** 世界坐标所属的树格坐标。 */
 function cellOf(worldCoord: number): number {
-  return worldCoord >> OAK_CELL_SHIFT;
+  return worldCoord >> TREE_CELL_SHIFT;
+}
+
+/** 某个树格里的落点：树干那一列、那一列的群系、这一格的哈希，与这里长的树种的树冠半径。 */
+interface Site {
+  readonly x: number;
+  readonly z: number;
+  readonly biome: Biome;
+  readonly roll: number;
+  readonly canopyRadius: number;
 }
 
 /**
- * 某个树格里的落点：树干那一列，与树干高度。这一格不长树则 undefined。
+ * 某个树格里的落点。这一格不长树、落点在出生列周围或者落点是大海，则 undefined，它也就不挤掉邻格的树。
  *
- * 只问种子与出生列，不问地表高度——判断两棵树是否相距足够只看水平距离，而地表高度是这里开销最大的
- * 一次计算（要求那一列四角格点的三维密度），邻格检查不该承担这个开销。落点在出生列周围的也是 undefined，
- * 所以它也不替换邻格的树。
+ * 只问种子、出生列与群系，不问地表高度——判断两棵树是否相距足够只看水平距离与树冠半径，而地表高度是这里
+ * 开销最大的一次计算（要求那一列四角格点的三维密度），邻格检查不该承担这个开销。群系查询便宜得多，树冠半径
+ * 由它定：平原长橡树与白桦，高山与冰雪长云杉。
  */
-function oakSiteInCell(
-  placement: TreePlacement,
-  cellX: number,
-  cellZ: number,
-): (Omit<Tree, 'rootY' | 'species'> & { readonly roll: number }) | undefined {
-  const roll = hashCoords(placement.seed ^ OAK_TREE_SALT, cellX, cellZ);
-  if (((roll >>> PRESENCE_SHIFT) & ROLL_MASK) >= OAK_TREE_CHANCE) return undefined;
+function siteInCell(placement: TreePlacement, cellX: number, cellZ: number): Site | undefined {
+  const roll = hashCoords(placement.seed ^ TREE_SALT, cellX, cellZ);
+  if (((roll >>> PRESENCE_SHIFT) & ROLL_MASK) >= TREE_CHANCE) return undefined;
 
-  const x = cellX * OAK_CELL_SIZE + ((roll >>> SLOT_X_SHIFT) & OAK_CELL_MASK);
-  const z = cellZ * OAK_CELL_SIZE + ((roll >>> SLOT_Z_SHIFT) & OAK_CELL_MASK);
+  const x = cellX * TREE_CELL_SIZE + ((roll >>> SLOT_X_SHIFT) & TREE_CELL_MASK);
+  const z = cellZ * TREE_CELL_SIZE + ((roll >>> SLOT_Z_SHIFT) & TREE_CELL_MASK);
   const spawn = placement.spawnColumn;
-  if (Math.max(Math.abs(x - spawn.x), Math.abs(z - spawn.z)) <= OAK_SPAWN_CLEARANCE) return undefined;
+  if (Math.max(Math.abs(x - spawn.x), Math.abs(z - spawn.z)) <= TREE_SPAWN_CLEARANCE) return undefined;
 
-  return {
-    x,
-    z,
-    roll,
-    trunkHeight: OAK_TRUNK_MIN + (((roll >>> TRUNK_SHIFT) & ROLL_MASK) % OAK_TRUNK_SPAN),
-  };
+  // 大海里不长树（父 spec #72）：岸边的大海列叠上起伏会露出海面，单看地表高度挡不住。
+  const biome = placement.biomeAt(x, z);
+  if (biome === Biome.Ocean) return undefined;
+  const canopyRadius = TREE_FORMS[biome === Biome.Plains ? TreeSpecies.Oak : TreeSpecies.Spruce].canopyRadius;
+  return { x, z, biome, roll, canopyRadius };
+}
+
+/** 落点上长哪种树：平原约三成白桦、其余橡树，高山与冰雪是云杉。 */
+function speciesAt(site: Site): TreeSpecies {
+  if (site.biome !== Biome.Plains) return TreeSpecies.Spruce;
+  return ((site.roll >>> SPECIES_SHIFT) & ROLL_MASK) < BIRCH_CHANCE ? TreeSpecies.Birch : TreeSpecies.Oak;
 }
 
 /**
- * 某个树格里的树。这一格不长树、树给邻格让了位、落点是大海、落点的地表不高于海平面，或者落点的列顶地表方块
+ * 某个树格里的树。这一格没有落点、树给邻格让了位、落点的地表不高于海平面，或者落点的列顶地表方块
  * 不是草方块与雪草方块，则 undefined。
  */
-function treeInCell(
-  placement: TreePlacement,
-  cellX: number,
-  cellZ: number,
-): Tree | undefined {
-  const site = oakSiteInCell(placement, cellX, cellZ);
+function treeInCell(placement: TreePlacement, cellX: number, cellZ: number): Tree | undefined {
+  const site = siteInCell(placement, cellX, cellZ);
   if (!site) return undefined;
 
+  // 两棵树的最小间距取「两个树冠刚好贴到一起」的那个距离（切比雪夫距离）：再近一格树冠就互相穿插，
+  // 两棵树长成连体——原版放树也会检查落点的空间。云杉与橡树挨着时按各自的半径算。
   for (const [dx, dz] of EARLIER_CELLS) {
-    const earlier = oakSiteInCell(placement, cellX + dx, cellZ + dz);
+    const earlier = siteInCell(placement, cellX + dx, cellZ + dz);
     if (!earlier) continue;
     const distance = Math.max(Math.abs(earlier.x - site.x), Math.abs(earlier.z - site.z));
-    if (distance < OAK_MIN_SPACING) return undefined;
+    if (distance <= earlier.canopyRadius + site.canopyRadius) return undefined;
   }
 
-  // 大海里不长树（父 spec #72）：岸边的大海列叠上起伏会露出海面，单看地表高度挡不住。群系查询比地表高度便宜，先问它。
-  const biome = placement.biomeAt(site.x, site.z);
-  if (biome === Biome.Ocean) return undefined;
   // 地表不高于海平面的列不长：低于海平面的上面是水，正好在海平面的是水边那一圈。
   const surface = placement.surfaceHeightAt(site.x, site.z);
   if (surface <= SEA_LEVEL) return undefined;
   // 只长在草方块与雪草方块上（#76）：沙滩是沙子，陡坡与石头岸是石头，这些列都不长。
   if (!TREE_GROUND.has(placement.surfaceBlockAt(site.x, site.z))) return undefined;
-  const birch = biome === Biome.Plains && ((site.roll >>> SPECIES_SHIFT) & ROLL_MASK) < BIRCH_CHANCE;
-  const { x, z, trunkHeight } = site;
-  return { x, z, rootY: surface + 1, trunkHeight, species: birch ? TreeSpecies.Birch : TreeSpecies.Oak };
+
+  const species = speciesAt(site);
+  const { trunkMin, trunkMax } = TREE_FORMS[species];
+  const trunkHeight = trunkMin + (((site.roll >>> TRUNK_SHIFT) & ROLL_MASK) % (trunkMax - trunkMin + 1));
+  return { x: site.x, z: site.z, rootY: surface + 1, trunkHeight, species };
 }
 
 /** 这棵树的树冠有没有伸进以 (originX, originZ) 为角的那个区块。 */
 function reachesChunk(tree: Tree, originX: number, originZ: number): boolean {
+  const radius = TREE_FORMS[tree.species].canopyRadius;
   const reaches = (coord: number, origin: number): boolean =>
-    coord + OAK_CANOPY_RADIUS >= origin && coord - OAK_CANOPY_RADIUS < origin + CHUNK_SIZE;
+    coord + radius >= origin && coord - radius < origin + CHUNK_SIZE;
   return reaches(tree.x, originX) && reaches(tree.z, originZ);
 }
 
 /**
- * 会写进某个区块的全部橡树，按写入顺序排好。
+ * 会写进某个区块的全部树（三种），按写入顺序排好。
  *
  * 树根可能在邻近区块里：树冠越过边界时两边的区块各写自己那一半，合起来才是一棵完整的
- * 树。所以扫的是「树冠还能伸进这个区块」的那一圈树格，而不只是区块自己盖住的那几格。
+ * 树。所以扫的是「最宽的树冠还能伸进这个区块」的那一圈树格，而不只是区块自己盖住的那几格。
  * 每个区块各算一遍、只写自己的格子，结果因此与加载顺序无关，见 ADR-0005。
  *
  * 顺序按树格坐标从小到大，在任何区块里都一样——两棵树写同一格时谁盖住谁因此是确定的。
  */
-export function treesTouching(
-  placement: TreePlacement,
-  cx: number,
-  cz: number,
-): Tree[] {
+export function treesTouching(placement: TreePlacement, cx: number, cz: number): Tree[] {
   const originX = cx * CHUNK_SIZE;
   const originZ = cz * CHUNK_SIZE;
   const trees: Tree[] = [];
-  const lastCellZ = cellOf(originZ + CHUNK_SIZE - 1 + OAK_CANOPY_RADIUS);
-  const lastCellX = cellOf(originX + CHUNK_SIZE - 1 + OAK_CANOPY_RADIUS);
-  for (let cellZ = cellOf(originZ - OAK_CANOPY_RADIUS); cellZ <= lastCellZ; cellZ++) {
-    for (let cellX = cellOf(originX - OAK_CANOPY_RADIUS); cellX <= lastCellX; cellX++) {
+  const lastCellZ = cellOf(originZ + CHUNK_SIZE - 1 + MAX_CANOPY_RADIUS);
+  const lastCellX = cellOf(originX + CHUNK_SIZE - 1 + MAX_CANOPY_RADIUS);
+  for (let cellZ = cellOf(originZ - MAX_CANOPY_RADIUS); cellZ <= lastCellZ; cellZ++) {
+    for (let cellX = cellOf(originX - MAX_CANOPY_RADIUS); cellX <= lastCellX; cellX++) {
       const tree = treeInCell(placement, cellX, cellZ);
       if (tree && reachesChunk(tree, originX, originZ)) trees.push(tree);
     }

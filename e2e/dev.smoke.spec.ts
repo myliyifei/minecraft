@@ -886,7 +886,7 @@ test('按住连锁键对准树干，画面上出现一圈连锁预览轮廓', as
       look(pitch);
       core.tick();
 
-      // 出生点那一带不长树（OAK_SPAWN_CLEARANCE），自己往脚下砌一根原木树干
+      // 出生点那一带不长树（TREE_SPAWN_CLEARANCE），自己往脚下砌一根原木树干
       const x = Math.floor(core.player.position.x);
       const z = Math.floor(core.player.position.z);
       const topY = Math.floor(core.player.position.y) - 1;

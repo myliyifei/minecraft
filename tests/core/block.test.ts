@@ -714,7 +714,7 @@ describe('水与冰的方块表（#74）', () => {
     }
   });
 
-  it('水与冰不发光、不带方块状态、不可使用，各自归到自己', () => {
+  it('水与冰不发光、不带方块状态、不可使用，基础方块是它自己', () => {
     for (const block of [BlockType.Water, BlockType.Ice]) {
       expect(BLOCKS[block].lightEmission, `方块 ${block}`).toBe(0);
       expect(blockStateKind(block), `方块 ${block}`).toBe(BlockStateKind.None);

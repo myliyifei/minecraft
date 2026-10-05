@@ -593,15 +593,15 @@ export function isPlantSoil(block: BlockType): boolean {
 
 /**
  * 支撑表（见 CONTEXT.md「火把」「地表植物」、ADR-0012 补记）：贴着别的方块才立得住的方块，它贴着的那一格相对它的偏移，
- * 以及那一格要是什么才撑得住它。与几何无关：火把的朝向、细杆与命中盒在 `torch.ts`，植物的命中盒在 `plant.ts`，
- * 这里只回答「贴着哪一格、那一格换成什么之后撑不住」。
+ * 以及那一格要是什么它才仍有支撑（支撑条件）。与几何无关：火把的朝向、细杆与命中盒在 `torch.ts`，植物的命中盒在
+ * `plant.ts`，这里只回答「贴着哪一格、那一格换成什么之后不再满足支撑条件」。
  *
  * - 地面火把贴下方，墙上火把贴编号上写的那一侧（`WallTorchNegX` 的墙在 x − 1），那一格要是不透明方块。
  * - 四种地表植物贴下方，那一格要是实心方块：下面那格变成空气或水时随之碎掉。
  */
 interface Support {
   readonly offset: Vec3;
-  /** 贴着的那一格换成这种方块之后还撑不撑得住。 */
+  /** 支撑条件：贴着的那一格换成这种方块之后它是否仍有支撑。 */
   readonly holds: (support: BlockType) => boolean;
 }
 
@@ -627,7 +627,7 @@ export function supportCell(block: BlockType, x: number, y: number, z: number): 
   return offset && { x: x + offset.x, y: y + offset.y, z: z + offset.z };
 }
 
-/** block 贴着的那一格换成 support 之后还撑不撑得住它。不贴着任何一格的方块永远撑得住。 */
+/** block 贴着的那一格换成 support 之后 block 是否仍有支撑。不贴着任何一格的方块总是仍有支撑。 */
 export function supportHolds(block: BlockType, support: BlockType): boolean {
   return SUPPORTS[block]?.holds(support) ?? true;
 }
@@ -642,12 +642,18 @@ export const SUPPORT_ATTACH_OFFSETS: readonly Vec3[] = Object.freeze(
   ),
 );
 
+/** 支撑表里出现过的几种支撑条件，各记一次（现在是「不透明」与「实心」两种）。 */
+const SUPPORT_CONDITIONS: ReadonlyArray<(support: BlockType) => boolean> = [
+  ...new Set(Object.values(SUPPORTS).map(({ holds }) => holds)),
+];
+
 /**
- * 一格从 previous 换成 block 之后，有没有可能让贴着它的方块撑不住：从不透明变成非不透明（火把），或从实心变成不实心
- * （植物）。都不是时贴着它的方块都还撑得住，世界不必查邻格。
+ * 一格从 previous 换成 block 之后，贴着它的方块有没有可能失去支撑：某一种支撑条件 previous 满足而 block 不满足
+ * （从不透明变成非不透明影响火把，从实心变成不实心影响植物）。条件由支撑表推出，不另记。都没有时贴着它的方块都仍有支撑，
+ * 世界不必查邻格。
  */
 export function mayDetachNeighbors(previous: BlockType, block: BlockType): boolean {
-  return (isOpaque(previous) && !isOpaque(block)) || (isSolid(previous) && !isSolid(block));
+  return SUPPORT_CONDITIONS.some((holds) => holds(previous) && !holds(block));
 }
 
 /**

@@ -227,7 +227,7 @@ export class World implements BlockEdit, BlockStateView {
    * 写入方块。返回值表示这次写入是否落到了世界里：
    * 坐标所在区块未加载、或 y 超出世界高度时不做任何事并返回 false。
    *
-   * 一格换掉之后，贴着它而撑不住了的方块（支撑表 `supportCell`）在原位碎掉（`dropDetached`）：不再是不透明方块时贴着它的火把、
+   * 一格换掉之后，贴着它而失去支撑的方块（支撑表 `supportCell`）在原位碎掉（`dropDetached`）：不再是不透明方块时贴着它的火把、
    * 不再是实心方块时长在它上面的地表植物。连锁挖掘逐块写入，自然覆盖。
    */
   setBlock(x: number, y: number, z: number, block: BlockType): boolean {
@@ -256,10 +256,10 @@ export class World implements BlockEdit, BlockStateView {
   }
 
   /**
-   * (x, y, z) 那一格刚换成 block：上方与四侧贴着它（支撑表）而 block 撑不住的方块各改成空气，按掉落表在原位掉出东西——
+   * (x, y, z) 那一格刚换成 block：上方与四侧贴着它（支撑表）而换成 block 之后不再满足支撑条件的方块各改成空气，按掉落表在原位掉出东西——
    * 火把掉一支火把，花掉它自己，矮草与蕨什么都不掉。改成空气走 `setBlock`，光照随之更新。要求整数输入。
    *
-   * 只在 `mayDetachNeighbors` 成立时查：贴着的那一格原本就撑不住它们时，它们不会立在那里。
+   * 只在 `mayDetachNeighbors` 成立时查：贴着的那一格原本就不满足支撑条件时，它们不会立在那里。
    */
   private dropDetached(x: number, y: number, z: number, block: BlockType): void {
     for (const offset of SUPPORT_ATTACH_OFFSETS) {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { BlockType } from '../../src/core/block';
+import { BlockType, isSolid } from '../../src/core/block';
 import type { Chunk } from '../../src/core/chunk';
-import { CHUNK_SIZE, DEFAULT_SEED, SEA_LEVEL, UNLOAD_MARGIN } from '../../src/core/constants';
+import { CHUNK_SIZE, DEFAULT_SEED, SEA_LEVEL, UNLOAD_MARGIN, WORLD_MIN_Y } from '../../src/core/constants';
 import { GameCore } from '../../src/core/game';
 import { IDLE_INTENT, WALK_STEP } from '../../src/core/player';
 import { createTerrain } from '../../src/core/terrain';
@@ -40,10 +40,11 @@ function walkEast(game: GameCore, ticks: number): void {
   game.setMoveIntent(IDLE_INTENT);
 }
 
-/** 挖空玩家脚下那一列，推进到摔死为止。 */
+/** 从玩家脚下那一列最高的实心方块起往下挖空，推进到摔死为止。最高的非空气方块可能是植物、火把这类不实心的方块。 */
 function fallToDeath(game: GameCore): void {
   const { x, z } = game.player.position;
-  const top = game.highestBlockY(Math.floor(x), Math.floor(z));
+  let top = game.highestBlockY(Math.floor(x), Math.floor(z));
+  while (top > WORLD_MIN_Y && !isSolid(game.getBlock(Math.floor(x), top, Math.floor(z)))) top--;
   for (let y = top; y > top - LETHAL_DEPTH; y--) game.setBlock(Math.floor(x), y, Math.floor(z), BlockType.Air);
   for (let n = 0; n < 100 && !game.health.dead; n++) game.tick();
   if (!game.health.dead) throw new Error('100 tick 还没摔死');

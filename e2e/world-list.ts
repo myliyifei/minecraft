@@ -11,12 +11,9 @@ import { STRINGS } from '../src/ui/strings';
 export const NON_SOLID_BLOCKS: readonly number[] = Object.values(BlockType).filter((block) => !isSolid(block));
 
 /**
- * 地表植物（#80）的四个编号。按名称取，编号未定义时不在里面：类型检查与生产构建不因此失败。
- * 生成僵尸判断列顶时只跳过它们（CONTEXT.md「生成」），不跳过水与火把。
+ * 地表植物（#80）的四个编号。生成僵尸判断列顶时只跳过它们（CONTEXT.md「生成」），不跳过水与火把。
  */
-export const PLANT_BLOCKS: readonly number[] = ['ShortGrass', 'Fern', 'Dandelion', 'Poppy']
-  .map((name) => (BlockType as Readonly<Record<string, number>>)[name])
-  .filter((block): block is number => block !== undefined);
+export const PLANT_BLOCKS: readonly number[] = [BlockType.ShortGrass, BlockType.Fern, BlockType.Dandelion, BlockType.Poppy];
 
 /** 找「最高的实心方块」要传进页面的参数：不实心的编号与世界最低的 y。 */
 export const GROUND_ARGS = { nonSolid: NON_SOLID_BLOCKS, minY: WORLD_MIN_Y } as const;

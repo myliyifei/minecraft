@@ -11,7 +11,7 @@ import { DANDELION, SHORT_GRASS, expectPlantsDefined, isPlantBlock } from '../he
 
 /**
  * 地表植物的两条补充规则（#80，开发补的用例）：
- * - 支撑撑不住的条件是「下面那格不再实心」，不只是「不再不透明」：长在树叶或冰上的植物，树叶挖成空气、冰挖成水时也碎。
+ * - 植物失去支撑的条件是「下面那格不再实心」，不只是「不再不透明」：长在树叶或冰上的植物，树叶挖成空气、冰挖成水时也碎。
  * - 生成避开的是地形对象给的出生列，不是原点：真实地形的三个调查种子出生列都在原点，分不出这两种写法，这里直接给一份
  *   出生列在别处的放植物参数。
  */
@@ -79,7 +79,7 @@ describe('生成避开地形对象给的出生列', () => {
     return counts;
   }
 
-  it('出生列周围 7 格内一株都没有，8 到 16 格有', () => {
+  it('出生列周围 7 格内没有植物，8 到 16 格有', () => {
     expectPlantsDefined();
     const counts = plantsByDistance(SPAWN, SPAWN, 16);
     expect(counts.slice(0, PLANT_SPAWN_CLEARANCE + 1)).toEqual(new Array(PLANT_SPAWN_CLEARANCE + 1).fill(0));

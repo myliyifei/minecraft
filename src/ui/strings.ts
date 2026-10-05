@@ -219,4 +219,6 @@ export const ITEM_NAMES: Readonly<Record<ItemType, string>> = {
   [ItemType.BirchPlanks]: '白桦木板',
   [ItemType.SpruceLog]: '云杉原木',
   [ItemType.SprucePlanks]: '云杉木板',
+  [ItemType.Sand]: '沙子',
+  [ItemType.Gravel]: '沙砾',
 };

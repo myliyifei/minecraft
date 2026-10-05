@@ -70,6 +70,14 @@ const SPRUCE_CORE = [128, 92, 56];
 const SPRUCE_LEAVES = [44, 82, 58];
 const SPRUCE_PLANKS = [116, 84, 50];
 const SPRUCE_PLANKS_SEAM = [72, 50, 28];
+/** 沙子：浅黄底，噪点小；沙砾：灰底上大小不一的深浅碎石；雪：近白、略偏蓝，阴影处更蓝。 */
+const SAND = [219, 207, 163];
+const SAND_GRAIN = [196, 182, 134];
+const GRAVEL = [136, 130, 126];
+const GRAVEL_DARK = [98, 92, 90];
+const GRAVEL_LIGHT = [172, 166, 160];
+const SNOW = [240, 246, 250];
+const SNOW_SHADOW = [208, 222, 236];
 const STICK = [140, 104, 58];
 const STICK_SHADOW = [96, 70, 38];
 const TABLE_TOP = [176, 142, 86];
@@ -577,6 +585,23 @@ const TILES = {
   55: leaves(SPRUCE_LEAVES, 0.1),
   // spruce_planks：偏红的深棕木板
   56: planks(SPRUCE_PLANKS, SPRUCE_PLANKS_SEAM),
+  // sand：浅黄底，零散几粒深一点的沙粒
+  57: (_x, _y, rand) => shade(rand() < 0.12 ? SAND_GRAIN : SAND, Math.floor(rand() * 14) - 7),
+  // gravel：灰底，按 3×3 像素一块分成深、中、浅三种碎石，块与块之间错开
+  58: (x, y, rand) => {
+    const stone = (Math.floor((x + (Math.floor(y / 3) % 2) * 2) / 3) * 5 + Math.floor(y / 3) * 3) % 4;
+    const base = stone === 0 ? GRAVEL_DARK : stone === 3 ? GRAVEL_LIGHT : GRAVEL;
+    return shade(base, Math.floor(rand() * 20) - 10);
+  },
+  // snowy_grass_top：雪面，近白，少量偏蓝的阴影点
+  59: (_x, _y, rand) => shade(rand() < 0.1 ? SNOW_SHADOW : SNOW, Math.floor(rand() * 8) - 4),
+  // snowy_grass_side：与草方块侧面同样的不规则交界，上沿换成雪，交界一行是雪的阴影
+  60: (x, y, rand) => {
+    const edge = 3 + Math.floor(rand() * 2) + (x % 4 === 0 ? 1 : 0);
+    if (y < edge) return shade(SNOW, Math.floor(rand() * 8) - 4);
+    if (y === edge) return shade(SNOW_SHADOW, Math.floor(rand() * 10) - 5);
+    return shade(DIRT, Math.floor(rand() * 28) - 14);
+  },
 };
 
 /** 太阳与月亮那块方片的范围：居中 12×12，四周各留 2 像素透明边。 */

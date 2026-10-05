@@ -3,7 +3,7 @@ import { isTorch } from '../core/torch';
 import { ItemType } from '../core/item';
 
 /**
- * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 16 行，目前用了 56 格：第 0 到 46 格（第 43 格不用）与第 47 到 56 格。
+ * 图集的格数与每格像素数。贴图是 16×16 像素风，图集为 8 列 16 行，目前用了 60 格：第 0 到 46 格（第 43 格不用）与第 47 到 60 格。
  *
  * 行列数都取 2 的幂：uv 是格号除以行列数，除以 8 在 float32 里是精确的，除以 5 就不是
  * ——顶点属性存的是 Float32Array，1/5 一进去就带上舍入误差，一个面的边缘会取到相邻那一格的像素。
@@ -85,6 +85,11 @@ export const TILE = {
   spruceLogSide: 54,
   spruceLeaves: 55,
   sprucePlanks: 56,
+  // 沙子、沙砾与雪草方块（#76）：雪草方块顶面是雪，侧面是草方块侧面把草边换成雪边，底面仍取泥土。
+  sand: 57,
+  gravel: 58,
+  snowyGrassTop: 59,
+  snowyGrassSide: 60,
 } as const;
 
 /**
@@ -186,6 +191,9 @@ export const BLOCK_TILES: Readonly<Record<BlockType, FaceTiles | null>> = {
   [BlockType.SprucePlanks]: flat(TILE.sprucePlanks),
   [BlockType.Water]: flat(TILE.water),
   [BlockType.Ice]: flat(TILE.ice),
+  [BlockType.Sand]: flat(TILE.sand),
+  [BlockType.Gravel]: flat(TILE.gravel),
+  [BlockType.SnowyGrass]: { top: TILE.snowyGrassTop, bottom: TILE.dirt, side: TILE.snowyGrassSide },
 };
 
 /**
@@ -233,6 +241,9 @@ export const ITEM_TILES: Readonly<Record<ItemType, FaceTiles>> = {
   [ItemType.BirchPlanks]: flat(TILE.birchPlanks),
   [ItemType.SpruceLog]: SPRUCE_LOG_TILES,
   [ItemType.SprucePlanks]: flat(TILE.sprucePlanks),
+  // 沙子与沙砾（#76）：小方块与方块本身六面相同。
+  [ItemType.Sand]: flat(TILE.sand),
+  [ItemType.Gravel]: flat(TILE.gravel),
 };
 
 /**

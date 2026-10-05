@@ -43,6 +43,9 @@ export const ItemType = {
   BirchPlanks: 27,
   SpruceLog: 28,
   SprucePlanks: 29,
+  /** 沙子与沙砾（#76）：可堆叠，放下去是对应的方块。雪草方块没有物品。 */
+  Sand: 30,
+  Gravel: 31,
 } as const;
 
 export type ItemType = (typeof ItemType)[keyof typeof ItemType];
@@ -257,6 +260,8 @@ export const ITEMS: Readonly<Record<ItemType, ItemDef>> = {
   [ItemType.BirchPlanks]: STACKABLE,
   [ItemType.SpruceLog]: STACKABLE,
   [ItemType.SprucePlanks]: STACKABLE,
+  [ItemType.Sand]: STACKABLE,
+  [ItemType.Gravel]: STACKABLE,
 };
 
 /** 这种物品一格最多堆多少个。 */

@@ -60,6 +60,14 @@ export const BlockType = {
    * 冰（见 CONTEXT.md 的「冰面」，#74）：实心、不是不透明，挖掉什么都不掉，原处变成一格水（`blockAfterMining`）。
    */
   Ice: 26,
+  /**
+   * 沙子、沙砾、雪草方块（#76）：地表铺法用的三种方块（见 CONTEXT.md「沙滩」「雪线」）。沙子与沙砾在原版是重力方块，
+   * 这一切片不下落，悬空时停在原处（CONTEXT.md「重力方块」）。雪草方块与草方块一样没有物品，挖掉掉泥土；
+   * 两者是不同的方块，连锁挖掘里互不算同一类型。
+   */
+  Sand: 27,
+  Gravel: 28,
+  SnowyGrass: 29,
 } as const;
 
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
@@ -362,6 +370,27 @@ const ICE: BlockDef = {
   lightPassage: LightPassage.Leaves,
 };
 
+/**
+ * 用铲挖更快、不需要工具、经验照普通方块给的一种土类方块（草方块、泥土、沙子、沙砾、雪草方块都是这个形状）：
+ * 只差硬度与掉什么。
+ */
+function soil(hardness: number, drop: ItemType): BlockDef {
+  return {
+    opaque: true,
+    solid: true,
+    hardness,
+    qualifiedToolClass: ToolClass.Shovel,
+    minimumMaterial: ToolMaterial.Wood,
+    requiresTool: false,
+    drop: one(drop),
+    experience: COMMON_EXPERIENCE,
+    use: BlockUse.None,
+    state: BlockStateKind.None,
+    lightEmission: 0,
+    lightPassage: LightPassage.Opaque,
+  };
+}
+
 /** 方块属性表——纯数据。加方块只加一行。 */
 export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
   // 空气不是挖掘目标，硬度、合格工具的类别与最低材质档只是占位。
@@ -380,34 +409,8 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
     lightPassage: LightPassage.Clear,
   },
   // 草方块掉的是泥土，不是草方块本身——与原版一致。
-  [BlockType.Grass]: {
-    opaque: true,
-    solid: true,
-    hardness: 0.6,
-    qualifiedToolClass: ToolClass.Shovel,
-    minimumMaterial: ToolMaterial.Wood,
-    requiresTool: false,
-    drop: one(ItemType.Dirt),
-    experience: COMMON_EXPERIENCE,
-    use: BlockUse.None,
-    state: BlockStateKind.None,
-    lightEmission: 0,
-    lightPassage: LightPassage.Opaque,
-  },
-  [BlockType.Dirt]: {
-    opaque: true,
-    solid: true,
-    hardness: 0.5,
-    qualifiedToolClass: ToolClass.Shovel,
-    minimumMaterial: ToolMaterial.Wood,
-    requiresTool: false,
-    drop: one(ItemType.Dirt),
-    experience: COMMON_EXPERIENCE,
-    use: BlockUse.None,
-    state: BlockStateKind.None,
-    lightEmission: 0,
-    lightPassage: LightPassage.Opaque,
-  },
+  [BlockType.Grass]: soil(0.6, ItemType.Dirt),
+  [BlockType.Dirt]: soil(0.5, ItemType.Dirt),
   // 石头要镐：持镐挖掉掉圆石（与原版一致），空手挖得掉但什么也拿不到。
   [BlockType.Stone]: {
     opaque: true,
@@ -495,6 +498,11 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
   [BlockType.SprucePlanks]: planks(ItemType.SprucePlanks),
   [BlockType.Water]: WATER,
   [BlockType.Ice]: ICE,
+  // 沙子与沙砾（#76）：铲，掉自己。这一切片不下落。
+  [BlockType.Sand]: soil(0.5, ItemType.Sand),
+  [BlockType.Gravel]: soil(0.6, ItemType.Gravel),
+  // 雪草方块（#76）：数值与草方块相同，掉泥土。
+  [BlockType.SnowyGrass]: soil(0.6, ItemType.Dirt),
 };
 
 export function isAir(block: BlockType): boolean {
@@ -726,6 +734,9 @@ export const PLACED_BLOCKS: Readonly<Record<ItemType, BlockType | null>> = {
   [ItemType.BirchPlanks]: BlockType.BirchPlanks,
   [ItemType.SpruceLog]: BlockType.SpruceLog,
   [ItemType.SprucePlanks]: BlockType.SprucePlanks,
+  // 沙子与沙砾（#76）放下去是对应的方块。雪草方块与草方块一样没有物品。
+  [ItemType.Sand]: BlockType.Sand,
+  [ItemType.Gravel]: BlockType.Gravel,
 };
 
 /**

@@ -304,9 +304,10 @@ export class WorldRenderer {
   /** 上一帧画的时候眼睛在不在水下（`updateSky`）。 */
   private underwater = false;
   /**
-   * 给不走光照材质的东西用的雾（经验球、选框、裂纹）：three 自带材质认 `scene.fog`，颜色与两个距离每帧从
-   * `frame` 抄过来，只在水下时挂到场景上。three 的雾按到相机平面的深度算，光照材质按到相机的距离算，
-   * 视野边缘差一点，这几样东西都在近处，看不出来。光照材质（`ShaderMaterial`）不认 `scene.fog`，不会混两遍。
+   * 给不走光照材质的东西用的雾（经验球、选框、裂纹）：three 自带材质读取 `scene.fog`，颜色与两个距离每帧从
+   * `frame` 复制，只在水下时设到 `scene.fog`。three 的雾按到相机平面的深度算，光照材质按到相机的距离算，
+   * 视野边缘有少量出入，这几样东西都在近处，画面上没有可见差异。光照材质（`ShaderMaterial`）不读取 `scene.fog`，
+   * 不会重复混入雾色。
    */
   private readonly sceneFog = new THREE.Fog(0x000000);
   private readonly core: GameCore;

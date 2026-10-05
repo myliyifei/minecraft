@@ -30,7 +30,7 @@ describe('这一帧的雾（#77）', () => {
     const { near, far } = fogAt(true);
     expect(near).toBeGreaterThanOrEqual(0);
     expect(far).toBeGreaterThan(near);
-    // 雾要在最近可能出现的区块边缘之前把地形盖满，否则水下看得到地形的断边
+    // 在最近可能出现的区块边缘之前，地形要全部显示为雾色，否则水下看得到区块边缘
     expect(far).toBeLessThan(VIEW_RADIUS_RANGE.min * CHUNK_SIZE);
   });
 });

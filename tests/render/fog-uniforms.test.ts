@@ -12,8 +12,8 @@ import {
  * 水下雾的 uniform（#77）：雾的开关、颜色与两个距离是每帧光照输入（`FrameLighting`）的一部分，四种材质的 uniform 表直接
  * 引用它们，片元着色器只有一份、按 `vWorldPosition` 到 `cameraPosition` 的距离混入雾色（ADR-0016 与 #83 的补记）。
  *
- * 与 tests/render/translucent-material.test.ts 同一种断言：只看材质上的接线。雾落在实体与粒子上的样子靠 Windows 浏览器实机截图，
- * 这里只证到它们与地形共用同一份片元着色器与同一组 uniform。
+ * 与 tests/render/translucent-material.test.ts 同一种断言：只看材质引用的 uniform。雾在实体与粒子上的效果靠 Windows 浏览器实机截图，
+ * 这里只验证到它们与地形共用同一份片元着色器与同一组 uniform。
  */
 
 describe('雾的 uniform（#77）', () => {

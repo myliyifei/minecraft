@@ -17,7 +17,7 @@ import { FLICKER_AMPLITUDE, SELF_LIT_FLICKER_DIM } from './torch-light';
  * 地形与实体只差一个宏，着色器源码相同，three 会复用编译好的程序；每个实体一份材质的代价只是 uniform 上传。
  * 粒子另有一份顶点着色器（面朝相机），片元着色器与它们相同，只多乘一个不透明度。
  *
- * 片元着色器的最后一步是雾（#77）：开启时按这一处到相机的距离混入雾色，四种材质因此同一帧一起蒙上雾。
+ * 片元着色器的最后一步是雾（#77）：开启时按这一处到相机的距离混入雾色，四种材质因此同一帧一起混入雾色。
  */
 
 /**
@@ -33,7 +33,7 @@ export interface FrameLighting {
   readonly heldLight: { value: number };
   /**
    * 雾开没开（`fogAt`，#77）：眼睛在水下时开启。开启时每一处按到相机的距离混入 `fogColor`：`fogNear` 以内不混，
-   * 到 `fogFar` 全是雾色，中间按 smoothstep 过渡。地形、实体与粒子都吃，半透明的水与冰也一样。
+   * 到 `fogFar` 全是雾色，中间按 smoothstep 过渡。地形、实体与粒子都按这组 uniform 混入雾色，半透明的水与冰也一样。
    */
   readonly fogEnabled: { value: boolean };
   /** 雾色。three 的工作色彩空间（线性），与着色器里混合的颜色是同一个空间；读回时 `getHex` 给 sRGB。 */

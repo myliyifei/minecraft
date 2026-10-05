@@ -259,7 +259,7 @@ function siteInCell(placement: TreePlacement, cellX: number, cellZ: number): Sit
   const spawn = placement.spawnColumn;
   if (Math.max(Math.abs(x - spawn.x), Math.abs(z - spawn.z)) <= TREE_SPAWN_CLEARANCE) return undefined;
 
-  // 大海里不长树（父 spec #72）：岸边的大海列叠上起伏会露出海面，单看地表高度挡不住。
+  // 大海里不长树（父 spec #72）：岸边的大海列叠上起伏会露出海面，只看地表高度排除不了。
   const biome = placement.biomeAt(x, z);
   if (biome === Biome.Ocean) return undefined;
   // 冰雪只留一部分落点。冰雪不长白桦，树种那段随机数在这里另作他用。
@@ -294,7 +294,7 @@ function treeInCell(placement: TreePlacement, cellX: number, cellZ: number): Tre
   // 地表不高于海平面的列不长：低于海平面的上面是水，正好在海平面的是水边那一圈。
   const surface = placement.surfaceHeightAt(site.x, site.z);
   if (surface <= SEA_LEVEL) return undefined;
-  // 高山雪线以上不长（CONTEXT.md「雪线」）：那里的列顶是雪草方块，单看列顶地表方块挡不住。
+  // 高山雪线以上不长（CONTEXT.md「雪线」）：那里的列顶是雪草方块，只看列顶地表方块排除不了。
   if (site.biome === Biome.Mountains && surface >= SNOW_LINE_Y) return undefined;
   // 只长在草方块与雪草方块上（#76）：沙滩是沙子，陡坡与石头岸是石头，这些列都不长。
   if (!TREE_GROUND.has(placement.surfaceBlockAt(site.x, site.z))) return undefined;

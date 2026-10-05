@@ -707,7 +707,10 @@ test('释放鼠标后按住的键不会卡着继续走', async ({ page }) => {
     return { from, to: { ...core.player.position } };
   }, TICK_RATE);
   await page.keyboard.up(DEFAULT_KEY_BINDINGS.forward);
-  expect(stuck.to).toEqual(stuck.from);
+  // 水平坐标由扫掠落点加回半宽算出（`movedAlong`），没有移动时也可能差出 1e-17 量级的舍入误差；
+  // 按键还算数的话这 1 秒会走出 4 格多，所以按容差比较
+  expect(Math.hypot(stuck.to.x - stuck.from.x, stuck.to.z - stuck.from.z)).toBeLessThan(1e-6);
+  expect(stuck.to.y).toBeCloseTo(stuck.from.y, 6);
 });
 
 test('鼠标移动转动视角', async ({ page }) => {

@@ -20,7 +20,7 @@ interface WorkerScope {
 
 const scope = globalThis as unknown as WorkerScope;
 
-// 不缓存地形对象：`createTerrain(seed)` 现在只是把种子闭包起来，代价可以忽略，而 Worker
+// 不缓存地形对象：`createTerrain(seed)` 现在只是在闭包里记下种子，代价可以忽略，而 Worker
 // 因此一点可变状态都没有——同一个请求任何时候处理都得到同样的区块（ADR-0003）。
 scope.onmessage = ({ data }) => {
   const { seed, cx, cz } = data;

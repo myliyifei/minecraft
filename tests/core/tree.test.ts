@@ -37,7 +37,7 @@ const SCAN_RADIUS = 4;
  * 范围边上那些只伸进来半个树冠的不算，密度才数得准。
  */
 function oakTreesIn(seed: number, radius: number): OakTree[] {
-  const placement = { seed, surfaceAt: createTerrain(seed).surfaceHeightAt };
+  const placement = createTerrain(seed);
   const found = new Map<string, OakTree>();
   for (let cx = -radius; cx <= radius; cx++) {
     for (let cz = -radius; cz <= radius; cz++) {
@@ -308,7 +308,7 @@ describe('树叶只往空气里长', () => {
       z > tree.z ? LEDGE_BASE_Y + LEDGE_STEP : LEDGE_BASE_Y;
 
     const chunk = groundOnly(cx, cz, surfaceAt);
-    plantOakTrees({ seed: SEED, surfaceAt }, chunk);
+    plantOakTrees({ seed: SEED, surfaceHeightAt: surfaceAt }, chunk);
 
     const eaten: string[] = [];
     let planted = 0;

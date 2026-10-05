@@ -7,7 +7,8 @@ import type { Terrain } from '../../src/core/terrain';
 import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTerrain } from '../helpers/flat-terrain';
 
 /**
- * 核心只接一个地形对象（#73）：构造选项 `terrain` 由种子造出地形对象，区块、出生列都从它来。
+ * 核心只接一个地形对象（#73）：构造选项 `terrain` 由本世界的种子造出地形对象，区块由它的生成器给出。出生点
+ * 现在仍取原点那一列，核心还不读 `spawnColumn`，#84 才改为出生列。
  *
  * 种子取 555：平原地形在原点那一列的地表是 y = 69，与平地（y = 70）不同。核心若还按平原地形生成区块，
  * 出生点与列顶的断言都会对不上。
@@ -33,7 +34,7 @@ describe('核心用传入的地形对象', () => {
     expect([...tops]).toEqual([FLAT_GROUND_Y]);
   });
 
-  it('新建世界时把种子传给地形工厂，只造一次', () => {
+  it('新建世界时把种子传给构造选项 terrain（由种子造出地形对象的函数），只调一次', () => {
     const seeds: number[] = [];
     const core = new GameCore({
       seed: 99,
@@ -47,7 +48,7 @@ describe('核心用传入的地形对象', () => {
     expect(core.getBlock(0, 0, 0)).toBe(BlockType.Air);
   });
 
-  it('读档时地形工厂拿到的是快照里的种子，不看构造参数', () => {
+  it('读档时构造选项 terrain 拿到的是快照里的种子，不看构造参数', () => {
     const before = new GameCore({ seed: 4321, viewRadius: 1, terrain: flatTerrain });
     const seeds: number[] = [];
     const restored = new GameCore({

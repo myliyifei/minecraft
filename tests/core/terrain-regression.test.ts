@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createTerrain } from '../../src/core/terrain';
 
 /**
- * 回归锁（#73）：换成地形对象之后，同一种子、同一区块坐标生成的区块与改动前逐字节相同。
+ * 回归基线（#73）：换成地形对象之后，同一种子、同一区块坐标生成的区块与改动前逐字节相同。
  *
  * 期望值是改动前（提交 8c817e1）用 `plainsTerrain(seed)(cx, cz)` 生成的区块方块数组的 SHA-256，写死成字面量，
  * 不在测试里重算：重算就成了拿新实现对照新实现。

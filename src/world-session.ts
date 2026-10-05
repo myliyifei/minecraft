@@ -80,9 +80,9 @@ export async function startWorldSession({
       chunksAround(center, SPAWN_READY_RADIUS).filter(({ cx, cz }) => !edited.has(chunkKey(cx, cz))),
     );
 
-    // 种子只有一个出处：Worker 与核心都用区块来源记着的那个，两边不可能对不上。地形对象的查询在主线程上
-    // 按同一个种子算，只把生成器换成 Worker 那一侧的区块来源。
-    const terrain = (worldSeed: number) => ({ ...createTerrain(worldSeed), generateChunk: chunks.source });
+    // 种子只有一个出处：Worker、核心与地形对象的查询都用区块来源记着的那个，两边不可能对不上。核心传来的
+    // 种子因此不用；地形对象的查询在主线程上算，只把生成器换成 Worker 那一侧的区块来源。
+    const terrain = () => ({ ...createTerrain(chunks.seed), generateChunk: chunks.source });
     const { viewRadius } = settings;
     const core =
       'restore' in start

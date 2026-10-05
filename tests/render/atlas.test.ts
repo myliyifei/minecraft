@@ -446,7 +446,7 @@ describe('图集与生成脚本、PNG 文件保持同步', () => {
  * 解码已提交的图集 PNG，返回 RGBA 像素与宽高。
  *
  * 只认 tools/gen-atlas.mjs 写出的那一种 PNG：8 位 RGBA、不隔行、每行滤波类型 0。别的写法当场报错，
- * 而不是解出一张错图让下面的断言莫名其妙地失败。
+ * 而不是解出一张错图，使下面的断言以与原因无关的方式失败。
  */
 function decodeAtlas(): { rgba: Uint8Array; width: number; height: number } {
   const png = readFileSync(ATLAS_PNG);

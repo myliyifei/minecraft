@@ -30,8 +30,8 @@ export interface ColumnCoord {
  * 地形对象：由种子构造，含区块生成器、三个纯函数查询与出生列（ADR-0021）。
  *
  * 核心、Worker 与测试都只经这个对象使用地形，换地形算法不必改调用方。成员都是不依赖 `this` 的
- * 函数属性：可以单独取出来传（树的放置拿 `surfaceHeightAt` 当 `TreePlacement.surfaceAt`），也可以
- * 展开成新对象再换掉生成器（浏览器把生成器换成 Worker 那一侧的区块来源）。
+ * 函数属性：可以单独取出来传，也可以展开成新对象再换掉生成器（浏览器把生成器换成 Worker 那一侧的区块来源）。
+ * 地形对象本身就是一份 `TreePlacement`（种子与地表高度），放树时直接传它。
  */
 export interface Terrain {
   readonly seed: number;
@@ -57,15 +57,14 @@ const ORIGIN_COLUMN: ColumnCoord = Object.freeze({ x: 0, z: 0 });
  * #75 换成三维密度与四种群系，#76 按铺地表的规则给出列顶地表方块，#84 改为螺旋搜索出生列。
  */
 export function createTerrain(seed: number): Terrain {
-  const surfaceHeightAt: SurfaceHeightAt = (x, z) => plainsSurfaceHeight(seed, x, z);
-  return {
+  const queries = {
     seed,
-    generateChunk: plainsGenerator(seed, surfaceHeightAt),
-    biomeAt: () => Biome.Plains,
-    surfaceHeightAt,
+    biomeAt: (): Biome => Biome.Plains,
+    surfaceHeightAt: (x: number, z: number) => plainsSurfaceHeight(seed, x, z),
     surfaceBlockAt: () => BlockType.Grass,
     spawnColumn: ORIGIN_COLUMN,
   };
+  return { ...queries, generateChunk: plainsGenerator(queries) };
 }
 
 /**
@@ -130,14 +129,14 @@ function dirtDepthAt(seed: number, x: number, z: number): number {
 
 /**
  * 平原地形的区块生成器。铺地表与放树都按传入的地表高度查询，与地形对象的查询是同一个函数，
- * 查询值与生成结果因此一致。
+ * 查询值与生成结果因此一致。传入的就是地形对象的查询部分，直接当放树的参数用。
  *
  * 每一列自上而下是：一层草方块、3–4 层泥土、一路石头到 y = −63、最底层 y = −64 基岩；
  * 石层里嵌着煤与铁的矿脉，地表之上散布橡树。同一个种子与区块坐标永远得到同样的区块——这是
  * ADR-0003 的核心约束。
  */
-function plainsGenerator(seed: number, surfaceHeightAt: SurfaceHeightAt): TerrainGenerator {
-  const trees: TreePlacement = { seed, surfaceAt: surfaceHeightAt };
+function plainsGenerator(terrain: TreePlacement): TerrainGenerator {
+  const { seed, surfaceHeightAt } = terrain;
   return (cx, cz) => {
     const chunk = new Chunk(cx, cz);
     chunk.fillLayer(WORLD_MIN_Y, BlockType.Bedrock);
@@ -159,7 +158,7 @@ function plainsGenerator(seed: number, surfaceHeightAt: SurfaceHeightAt): Terrai
     // 土石铺完再嵌矿脉：矿石只替换石头，得先有石头。
     plantOreVeins(seed, chunk);
     // 再种树：树叶只往空气里长，得先有地面才知道哪里是空气。
-    plantOakTrees(trees, chunk);
+    plantOakTrees(terrain, chunk);
     return chunk;
   };
 }

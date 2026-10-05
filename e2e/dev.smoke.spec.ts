@@ -99,6 +99,9 @@ const CHUNKS_IN_VIEW = (2 * DEFAULT_VIEW_RADIUS + 1) ** 2;
 /** 采样时 z 的步长：抽十来行就够判断起伏与确定性，不必读满六千多列。 */
 const PROFILE_Z_STEP = 8;
 
+/** 默认种子的地形对象：页面里的世界在 Node 这一侧的期望值（树、地表高度、列顶地表方块）都从它算。 */
+const DEFAULT_TERRAIN = createTerrain(DEFAULT_SEED);
+
 /**
  * 挖穿之后再等这么多 tick：掉落物落到坑底、玩家也掉进坑里站稳。
  * 必须小于拾取延迟（`PICKUP_DELAY_TICKS`），否则掉落物在断言之前就被吸走了。
@@ -115,11 +118,11 @@ const XP_ABSORB_TICKS = TICK_RATE;
  * 默认种子下、会写进原点区块的第一棵橡树。树根不一定落在原点区块里，但一定在页面
  * 进入世界时就等好了的那一片内（见 SPAWN_READY_RADIUS）。
  *
- * 在 Node 这一侧用纯地形函数算出来，再拿去核对页面里的世界——两边对得上，就说明
+ * 在 Node 这一侧用同一份地形对象算出来，再拿去核对页面里的世界——两边对得上，就说明
  * Worker 生成的区块与核心认的是同一个世界（ADR-0003）。
  */
 function spawnAreaTree(): OakTree {
-  const tree = oakTreesTouching({ seed: DEFAULT_SEED, surfaceAt: createTerrain(DEFAULT_SEED).surfaceHeightAt }, 0, 0)[0];
+  const tree = oakTreesTouching(DEFAULT_TERRAIN, 0, 0)[0];
   if (!tree) throw new Error('默认种子的原点区块附近应有一棵橡树');
   return tree;
 }
@@ -432,10 +435,9 @@ test('页面打开后是由默认种子生成的起伏平原', async ({ page }) 
 
   await waitForFullViewDistance(page);
   // 期望值在 Node 里用同一份地形对象算：页面里每一列地表高度那一格是列顶地表方块，有树的列列顶更高
-  const terrain = createTerrain(DEFAULT_SEED);
   const columns: Array<{ x: number; z: number; surface: number }> = [];
   for (let z = LOADED_MIN; z <= LOADED_MAX; z += PROFILE_Z_STEP) {
-    for (let x = LOADED_MIN; x <= LOADED_MAX; x++) columns.push({ x, z, surface: terrain.surfaceHeightAt(x, z) });
+    for (let x = LOADED_MIN; x <= LOADED_MAX; x++) columns.push({ x, z, surface: DEFAULT_TERRAIN.surfaceHeightAt(x, z) });
   }
   const seen = await page.evaluate(
     (cols) =>
@@ -447,7 +449,7 @@ test('页面打开后是由默认种子生成的起伏平原', async ({ page }) 
   );
   const mismatched = columns.filter(({ x, z, surface }, i) => {
     const { block, top } = seen[i]!;
-    return block !== terrain.surfaceBlockAt(x, z) || top < surface;
+    return block !== DEFAULT_TERRAIN.surfaceBlockAt(x, z) || top < surface;
   });
   expect(mismatched).toEqual([]);
 
@@ -523,6 +525,7 @@ test('走远之后前方区块生成、身后区块与它的网格一起卸载',
 
   // 走出去了好几个区块，脚下始终是地面而不是虚空
   expect(before.z - after.z).toBeGreaterThan(4 * CHUNK_SIZE);
+  // 高于海平面只对平原成立，#75 改
   expect(after.y).toBeGreaterThan(SEA_LEVEL);
   expect(after.y).toBeGreaterThanOrEqual(after.surface);
   // 前方的区块跟着生成，身后的连网格一起卸载

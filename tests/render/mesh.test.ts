@@ -541,9 +541,10 @@ describe('生成地形的网格', () => {
   it('长了树的区块，网格里有橡木原木与橡树叶的贴图', () => {
     // 从种子生成的世界一路走到网格：树长出来了，而且带着对的贴图上了画面。
     // 单块方块的六面贴图在上一节断言过，这里补的是「生成的树真的进了网格」这一段。
-    const world = new World(createTerrain(DEFAULT_SEED).generateChunk);
+    const terrain = createTerrain(DEFAULT_SEED);
+    const world = new World(terrain.generateChunk);
     for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 1)) world.loadChunk(cx, cz);
-    const tree = oakTreesTouching({ seed: DEFAULT_SEED, surfaceAt: createTerrain(DEFAULT_SEED).surfaceHeightAt }, 0, 0)[0];
+    const tree = oakTreesTouching(terrain, 0, 0)[0];
     if (!tree) throw new Error('原点区块附近应有一棵橡树');
 
     const tiles = meshTiles(meshOf(fromWorld(world, chunkOf(tree.x), chunkOf(tree.z))).uvs);

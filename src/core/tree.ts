@@ -15,12 +15,13 @@ export type SurfaceHeightAt = (x: number, z: number) => number;
  * 放树要的两样输入：世界种子（决定哪里长树、树长多高），与任意一列的地表高度
  * （决定树根落在哪）。
  *
- * 地表高度当参数传进来而不是直接调平原地形：树的规则与群系的高度场因此互不依赖，
- * 换个群系换个高度场就能复用，两个模块之间也不必绕一个循环 import。
+ * 地表高度当参数传进来而不是直接调地形模块：树的规则与群系的高度场因此互不依赖，
+ * 换个群系换个高度场就能复用，两个模块之间也不必绕一个循环 import。成员名与地形对象
+ * （`Terrain`）的同名成员一致，地形对象因此可以直接当它传。
  */
 export interface TreePlacement {
   readonly seed: number;
-  readonly surfaceAt: SurfaceHeightAt;
+  readonly surfaceHeightAt: SurfaceHeightAt;
 }
 
 /** 一棵橡树。位置与形状全由种子决定，所以这几个数就足以描述它。 */
@@ -183,7 +184,7 @@ function oakTreeInCell(
     if (distance < OAK_MIN_SPACING) return undefined;
   }
 
-  return { ...site, rootY: placement.surfaceAt(site.x, site.z) + 1 };
+  return { ...site, rootY: placement.surfaceHeightAt(site.x, site.z) + 1 };
 }
 
 /** 这棵树的树冠有没有伸进以 (originX, originZ) 为角的那个区块。 */

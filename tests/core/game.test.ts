@@ -199,10 +199,10 @@ describe('GameCore 在 Node 中的方块查询', () => {
     }
   });
 
-  it('地表那一层是草方块', () => {
+  it('地表那一层是列顶地表方块', () => {
     const core = sampleCore();
     for (const [x, z] of columns) {
-      expect(core.getBlock(x, surfaceAt(x, z), z)).toBe(BlockType.Grass);
+      expect(core.getBlock(x, surfaceAt(x, z), z)).toBe(DEFAULT_TERRAIN.surfaceBlockAt(x, z));
     }
   });
 
@@ -247,7 +247,7 @@ describe('GameCore 在 Node 中的方块查询', () => {
 });
 
 describe('GameCore 的地形形态', () => {
-  it('已加载范围内每一列的地表都高于海平面', () => {
+  it('已加载范围内每一列的地表都高于海平面（只对平原成立，#75 改）', () => {
     const core = sampleCore();
     const tooLow: string[] = [];
     for (let x = LOADED_MIN; x <= LOADED_MAX; x++) {
@@ -281,7 +281,7 @@ describe('GameCore 的地形形态', () => {
     // highestBlockY 不是「地表高度」：树一长出来两者就分叉，树冠会把它抬起来。
     const core = sampleCore();
     // 会写进原点区块的第一棵树。树根不一定在这个区块里，但一定在采样视距内。
-    const tree = oakTreesTouching({ seed: DEFAULT_SEED, surfaceAt: DEFAULT_TERRAIN.surfaceHeightAt }, 0, 0)[0];
+    const tree = oakTreesTouching(DEFAULT_TERRAIN, 0, 0)[0];
     if (!tree) throw new Error('原点区块附近应有一棵橡树');
     expect(core.getBlock(tree.x, tree.rootY, tree.z)).toBe(BlockType.OakLog);
     expect(core.highestBlockY(tree.x, tree.z)).toBeGreaterThan(surfaceAt(tree.x, tree.z));

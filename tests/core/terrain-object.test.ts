@@ -8,8 +8,8 @@ import { ABOVE_SURFACE } from '../helpers/above-surface';
 /**
  * 地形对象（#73）：由种子构造，含区块生成器、三个纯函数查询（群系、地表高度、列顶地表方块）与出生列。
  *
- * 这里断言的是对外的约定：查询只依赖种子与列坐标，与生成结果一致。本票一律按平原实现，只对平原成立的
- * 断言都注明了哪一张票要改。
+ * 这里断言的是对外的约定：查询只依赖种子与列坐标，与生成结果一致。本 issue 一律按平原实现，只对平原成立的
+ * 断言都注明了哪一个 issue 要改。
  */
 
 // 与 DEFAULT_SEED 无关的几个种子：地形对象的性质不该只在默认种子下成立。
@@ -38,7 +38,7 @@ const LOCAL_COLUMNS: ReadonlyArray<readonly [number, number]> = [
   [7, 8],
 ];
 
-/** 一大片采样列：含负坐标与跨区块的，步长取一个与区块边长互质的数，各个局部坐标都碰得到。 */
+/** 大范围的采样列：含负坐标与跨区块的，步长取一个与区块边长互质的数，各个局部坐标都碰得到。 */
 function* sampleColumns(): Generator<readonly [number, number]> {
   for (let x = -300; x <= 300; x += 37) {
     for (let z = -300; z <= 300; z += 41) yield [x, z];
@@ -111,7 +111,7 @@ describe('地形对象的三个查询是纯函数', () => {
   });
 
   it('查询与生成器可以单独取出来传递：不依赖 this，展开成新对象也照常可用', () => {
-    // 树的放置拿 `surfaceHeightAt` 当 `TreePlacement.surfaceAt` 用，浏览器把对象展开后换掉生成器，
+    // 树的放置把地形对象直接当 `TreePlacement` 用，浏览器把对象展开后换掉生成器，
     // 所以几个成员必须是不依赖 this 的函数属性。
     const terrain = createTerrain(SEEDS[2]);
     const { generateChunk, biomeAt, surfaceHeightAt, surfaceBlockAt } = terrain;
@@ -165,7 +165,7 @@ describe('地表高度与列顶地表方块的查询与生成结果一致', () =
   });
 });
 
-describe('本票的平原实现（#75、#76、#84 改）', () => {
+describe('本 issue 的平原实现（#75、#76、#84 改）', () => {
   it('群系总是平原（#75 改为四种群系）', () => {
     for (const seed of SEEDS) {
       const terrain = createTerrain(seed);

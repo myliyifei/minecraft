@@ -307,6 +307,19 @@ describe('世界元数据与世界列表', () => {
     await storage.saveWorld('b', 'b', editedGame().snapshot());
     expect((await storage.listWorlds()).map(({ meta }) => meta.id)).toEqual(['b', 'a', 'c']);
   });
+
+  it('上次游玩时间相同时按创建时间倒序，再相同按 id', async () => {
+    const { open, clock } = fixture();
+    const storage = await open();
+    // a 先建、b 后建，c、d 与 b 同时建；之后四个在同一毫秒各写一次
+    for (const [id, at] of [['a', 1], ['b', 2], ['d', 2], ['c', 2]] as const) {
+      clock.now = at;
+      await storage.saveWorld(id, id, editedGame().snapshot());
+    }
+    clock.now = 5;
+    for (const id of ['a', 'b', 'c', 'd']) await storage.saveWorld(id, id, editedGame().snapshot());
+    expect((await storage.listWorlds()).map(({ meta }) => meta.id)).toEqual(['b', 'c', 'd', 'a']);
+  });
 });
 
 describe('版本不兼容', () => {

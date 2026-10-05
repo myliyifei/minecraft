@@ -80,6 +80,12 @@ function worldsTable(page: Page, put: readonly WorldMeta[] = []): Promise<WorldM
   );
 }
 
+/** 每个世界的名称、上次游玩时间与创建时间：列表顺序的断言失败时一并给出，看得出是时间相同还是时刻倒退。 */
+async function playedTimes(page: Page): Promise<string> {
+  const metas = await worldsTable(page);
+  return JSON.stringify(metas.map(({ name, lastPlayedAt, createdAt }) => ({ name, lastPlayedAt, createdAt })));
+}
+
 test('首次打开列表为空；新建世界的加载画面消失后世界时刻为 0、玩家在出生点，锁定指针之前不推进；退出后列表一条，再进入接着上次', async ({
   page,
 }) => {
@@ -183,19 +189,19 @@ test('两个世界各挖不同的洞，交替进入互不串；列表按上次�
   await createWorld(page, { name: '世界乙', seed: '1' });
   const yB = await digTop(page, holeB.x, holeB.z);
   await exitToList(page);
-  expect(await entryNames(page)).toEqual(['世界乙', '世界甲']);
+  expect(await entryNames(page), await playedTimes(page)).toEqual(['世界乙', '世界甲']);
 
   await enterNamed(page, '世界甲');
   expect(await blockAt(page, holeA.x, yA, holeA.z)).toBe(BlockType.Air);
   expect(await blockAt(page, holeB.x, yB, holeB.z)).not.toBe(BlockType.Air);
   await exitToList(page);
-  expect(await entryNames(page)).toEqual(['世界甲', '世界乙']);
+  expect(await entryNames(page), await playedTimes(page)).toEqual(['世界甲', '世界乙']);
 
   await enterNamed(page, '世界乙');
   expect(await blockAt(page, holeB.x, yB, holeB.z)).toBe(BlockType.Air);
   expect(await blockAt(page, holeA.x, yA, holeA.z)).not.toBe(BlockType.Air);
   await exitToList(page);
-  expect(await entryNames(page)).toEqual(['世界乙', '世界甲']);
+  expect(await entryNames(page), await playedTimes(page)).toEqual(['世界乙', '世界甲']);
   expect(errors).toEqual([]);
 });
 

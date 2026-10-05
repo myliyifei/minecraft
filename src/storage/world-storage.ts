@@ -54,7 +54,7 @@ export interface WorldMeta {
   readonly terrainVersion: number;
   /** 第一次写盘的时刻，毫秒。 */
   readonly createdAt: number;
-  /** 最近一次写盘的时刻，毫秒。世界列表按它倒序。 */
+  /** 最近一次写盘的时刻，毫秒。世界列表按它倒序（`listWorlds`）。 */
   readonly lastPlayedAt: number;
   readonly hardcoreDead: boolean;
 }
@@ -144,11 +144,17 @@ export class WorldStorage {
     private readonly gzip: ChunkCompressor,
   ) {}
 
-  /** 全部世界，按上次游玩时间倒序。 */
+  /**
+   * 全部世界，按上次游玩时间倒序。上次游玩时间相同时按创建时间倒序，再相同按 id：id 是随机生成的，
+   * 只按时间排的话同一毫秒写的两个世界每次列出的先后不定。
+   */
   async listWorlds(): Promise<WorldEntry[]> {
     const metas: WorldMeta[] = await result(this.db.transaction(WORLDS).objectStore(WORLDS).getAll());
     return metas
-      .sort((a, b) => b.lastPlayedAt - a.lastPlayedAt)
+      .sort(
+        (a, b) =>
+          b.lastPlayedAt - a.lastPlayedAt || b.createdAt - a.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      )
       .map((meta) => ({ meta, compatible: this.compatible(meta) }));
   }
 

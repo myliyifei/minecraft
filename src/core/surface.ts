@@ -139,7 +139,8 @@ function coastTop(samples: SurfaceSamples, x: number, z: number, biome: Biome): 
 }
 
 /**
- * 列顶地表方块：一列地表高度那一格铺什么（优先次序见本模块开头）。列在水塘里给出水由水塘那一步（#81）加。
+ * 挖水塘之前的列顶地表方块：一列地表高度那一格铺什么（优先次序见本模块开头）。水塘列给出水在这之前判断
+ * （`terrain.ts` 的 `surfaceBlockAt` 先问 `isPondColumn`）：水塘不改地表高度，这里的规则与样本都不用变。
  */
 export function highestTopBlock(samples: SurfaceSamples, x: number, z: number): BlockType {
   const h = samples.heightAt(x, z);

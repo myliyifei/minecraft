@@ -378,6 +378,55 @@ describe('水与冰', () => {
   });
 });
 
+describe('寒冷处结冰与冰雪群系用同一个温度阈值', () => {
+  /** 从交界往大海一侧最多走几格找水面。 */
+  const OFFSHORE_WALK = 8;
+  /** 交界两侧的温度几乎相同，只有交界恰好挨着冷暖分界时才会对不上，所以留 5% 的余地。 */
+  const TOLERANCE = 0.05;
+
+  /** 某种陆地群系与大海交界处，大海一侧离岸最近的水面列（地表低于海平面）。 */
+  function offshoreColumns(seed: number, land: Biome): ColumnCoord[] {
+    const terrain = createTerrain(seed);
+    const kind = [Biome.Ocean, land].sort().join('|');
+    const columns: ColumnCoord[] = [];
+    for (const boundary of surveyLines(8).flatMap((line) => boundariesOn(terrain, line))) {
+      if (boundaryKind(boundary) !== kind) continue;
+      for (let d = 0; d <= OFFSHORE_WALK; d++) {
+        const column = sideOf(boundary, Biome.Ocean, d);
+        if (terrain.biomeAt(column.x, column.z) !== Biome.Ocean) continue;
+        if (terrain.surfaceHeightAt(column.x, column.z) >= SEA_LEVEL) continue;
+        columns.push(column);
+        break;
+      }
+    }
+    return columns;
+  }
+
+  /** 这些列里海平面那层是冰的有几列。 */
+  function icedCount(seed: number, columns: readonly ColumnCoord[]): number {
+    return columns.filter(
+      (column) => chunkAt(seed, chunkOfColumn(column)).get(localOf(column.x), SEA_LEVEL, localOf(column.z)) === BlockType.Ice,
+    ).length;
+  }
+
+  it('平原岸边的海面不结冰，冰雪岸边的海面结冰（三个种子合计）', () => {
+    const warm = { columns: 0, iced: 0 };
+    const cold = { columns: 0, iced: 0 };
+    for (const seed of SURVEY_SEEDS) {
+      const plainsCoast = offshoreColumns(seed, Biome.Plains);
+      const snowyCoast = offshoreColumns(seed, Biome.Snowy);
+      warm.columns += plainsCoast.length;
+      warm.iced += icedCount(seed, plainsCoast);
+      cold.columns += snowyCoast.length;
+      cold.iced += icedCount(seed, snowyCoast);
+    }
+    expect(warm.columns, '平原岸边的水面列').toBeGreaterThanOrEqual(30);
+    expect(cold.columns, '冰雪岸边的水面列').toBeGreaterThanOrEqual(30);
+    expect(warm.iced / warm.columns, `平原岸边 ${warm.iced}/${warm.columns} 列结冰`).toBeLessThanOrEqual(TOLERANCE);
+    expect(cold.iced / cold.columns, `冰雪岸边 ${cold.iced}/${cold.columns} 列结冰`).toBeGreaterThanOrEqual(1 - TOLERANCE);
+  });
+});
+
 describe('悬垂', () => {
   it('高山区块里存在「上方实心、中间空气、下方又是实心」的列', () => {
     let overhangs = 0;

@@ -16,6 +16,7 @@ import {
   type BiomeRun,
 } from '../helpers/terrain-survey';
 import { localOf } from '../../src/core/world';
+import { SEA_LEVEL } from '../../src/core/constants';
 
 /**
  * 群系的分布与各群系的高度（#75 验收条件第二、三条）。
@@ -192,6 +193,20 @@ describe('各群系的高度', () => {
       ),
     );
     expect(highest).toBeGreaterThanOrEqual(PEAK_AT_LEAST_Y);
+  });
+
+  it.each(SURVEY_SEEDS)('种子 %i：大海与陆地按海平面分开，平原与冰雪的列地表低于海平面的不到 5%', (seed) => {
+    // 先按大陆度分海与陆，地形的海陆也由大陆度决定：两者对不上时，陆地群系里会有成片的海底
+    const land = heightSurvey(seed).grid.filter(({ biome }) => biome === Biome.Plains || biome === Biome.Snowy);
+    expect(land.length, '平原与冰雪的采样列数').toBeGreaterThanOrEqual(30);
+    const below = land.filter(({ surface }) => surface < SEA_LEVEL);
+    expect(below.length / land.length).toBeLessThan(0.05);
+  });
+
+  it.each(SURVEY_SEEDS)('种子 %i：起伏大的陆地不论冷暖都是高山，冰雪列里最高的地表比高山列里最高的低至少 50 格', (seed) => {
+    const highest = (biome: Biome): number =>
+      Math.max(...allSamples(seed).filter((sample) => sample.biome === biome).map(({ surface }) => surface));
+    expect(highest(Biome.Mountains) - highest(Biome.Snowy)).toBeGreaterThanOrEqual(50);
   });
 
   it(`大海里头的列，海底至少 95% 在 y ${OCEAN_FLOOR_MIN_Y} 到 ${OCEAN_FLOOR_MAX_Y}`, () => {

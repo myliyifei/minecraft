@@ -23,8 +23,9 @@ import { BARE_HAND, ItemType } from '../../src/core/item';
 import { IDLE_INTENT, MAX_PITCH, WALK_SPEED, WALK_STEP } from '../../src/core/player';
 import { createTerrain } from '../../src/core/terrain';
 import type { Vec3 } from '../../src/core/vec3';
+import { treesTouching } from '../../src/core/tree';
 import { NON_TERRAIN } from '../helpers/terrain-survey';
-import { treeApi, woodOf } from '../helpers/trees';
+import { woodOf } from '../helpers/trees';
 import { FLAT_GROUND_Y, flatTerrain } from '../helpers/flat-terrain';
 import { STONE_LAYER } from '../helpers/stone-layer';
 import { allStale } from '../helpers/stale-chunks';
@@ -284,7 +285,7 @@ describe('GameCore 的地形形态', () => {
     const core = sampleCore();
     // 会写进原点区块的第一棵树。树根不一定在这个区块里，但一定在采样视距内。
     // 三种树都行（#79）：树根那一格是这种树的原木
-    const tree = treeApi().treesTouching(DEFAULT_TERRAIN, 0, 0)[0];
+    const tree = treesTouching(DEFAULT_TERRAIN, 0, 0)[0];
     if (!tree) throw new Error('原点区块附近应有一棵树');
     expect(core.getBlock(tree.x, tree.rootY, tree.z)).toBe(woodOf(tree.species).log);
     expect(core.highestBlockY(tree.x, tree.z)).toBeGreaterThan(surfaceAt(tree.x, tree.z));

@@ -4,7 +4,7 @@ import type { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, SEA_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { SNOW_LINE_Y } from '../../src/core/surface';
 import { Biome, createTerrain, type ColumnCoord, type Terrain } from '../../src/core/terrain';
-import { OAK_TRUNK_MAX, OAK_TRUNK_MIN, TreeSpecies } from '../../src/core/tree';
+import { OAK_TRUNK_MAX, OAK_TRUNK_MIN, TreeSpecies, treesTouching, trunkTopY } from '../../src/core/tree';
 import type { ChunkCoord } from '../../src/core/world';
 import { chunkCache, columnIn, SURVEY_SEEDS } from '../helpers/terrain-survey';
 import {
@@ -18,7 +18,6 @@ import {
   LOGS,
   surveyChunks,
   surveyTrees,
-  treeApi,
   treeKey,
   treesRootedIn,
   type SurveyedTree,
@@ -175,7 +174,6 @@ function trunkKey(trunk: Trunk): string {
 
 describe('树种按群系分布（真实地形大范围采样）', () => {
   it.each(SURVEY_SEEDS)('种子 %i：平原的树里橡树与白桦都有，没有云杉', (seed) => {
-    const { TreeSpecies } = treeApi();
     const plains = treesOfBiome(seed, Biome.Plains);
     expect(plains.length, '平原的树').toBeGreaterThanOrEqual(MIN_PLAINS_SAMPLE);
     expect(speciesOf(plains)).toEqual([TreeSpecies.Birch, TreeSpecies.Oak].sort());
@@ -184,7 +182,6 @@ describe('树种按群系分布（真实地形大范围采样）', () => {
   it.each(SURVEY_SEEDS)(
     `种子 %i：平原的树里白桦占 ${BIRCH_SHARE_MIN * 100}% 到 ${BIRCH_SHARE_MAX * 100}%（按树根计数）`,
     (seed) => {
-      const { TreeSpecies } = treeApi();
       const counts = countBySpecies(treesOfBiome(seed, Biome.Plains));
       const birch = counts.get(TreeSpecies.Birch) ?? 0;
       const oak = counts.get(TreeSpecies.Oak) ?? 0;
@@ -196,7 +193,6 @@ describe('树种按群系分布（真实地形大范围采样）', () => {
   );
 
   it.each(SURVEY_SEEDS)('种子 %i：高山的树全是云杉，树根那一列的地表都在雪线以下', (seed) => {
-    const { TreeSpecies } = treeApi();
     const terrain = terrainOf(seed);
     const mountains = treesOfBiome(seed, Biome.Mountains);
     expect(mountains.length, '高山的树').toBeGreaterThan(0);
@@ -208,7 +204,6 @@ describe('树种按群系分布（真实地形大范围采样）', () => {
   });
 
   it.each(SURVEY_SEEDS)('种子 %i：冰雪零散长着云杉，全是云杉', (seed) => {
-    const { TreeSpecies } = treeApi();
     const snowy = treesOfBiome(seed, Biome.Snowy);
     expect(snowy.length, '冰雪的树').toBeGreaterThan(0);
     expect(speciesOf(snowy)).toEqual([TreeSpecies.Spruce]);
@@ -230,7 +225,6 @@ describe('树种按群系分布（真实地形大范围采样）', () => {
   });
 
   it.each(SURVEY_SEEDS)('种子 %i：长在雪草方块上的树都在冰雪群系里，都是云杉', (seed) => {
-    const { TreeSpecies } = treeApi();
     const terrain = terrainOf(seed);
     const onSnowyGrass = surveyTrees(seed).filter(
       ({ tree }) => terrain.surfaceBlockAt(tree.x, tree.z) === BlockType.SnowyGrass,
@@ -353,7 +347,6 @@ describe('雪线与群系（平地）', () => {
   }
 
   it('高山地表在雪线以下一格（y 149，草方块）长云杉', () => {
-    const { TreeSpecies } = treeApi();
     const trees = treesOn(Biome.Mountains, SNOW_LINE_Y - 1);
     expect(trees.length).toBeGreaterThan(SEEDS.length);
     expect(speciesOf(trees)).toEqual([TreeSpecies.Spruce]);
@@ -365,14 +358,12 @@ describe('雪线与群系（平地）', () => {
   });
 
   it('冰雪的雪草方块上长云杉', () => {
-    const { TreeSpecies } = treeApi();
     const trees = treesOn(Biome.Snowy, 70);
     expect(trees.length).toBeGreaterThan(SEEDS.length);
     expect(speciesOf(trees)).toEqual([TreeSpecies.Spruce]);
   });
 
   it('平原长橡树与白桦，大海不长树', () => {
-    const { TreeSpecies } = treeApi();
     expect(speciesOf(treesOn(Biome.Plains, 70))).toEqual([TreeSpecies.Birch, TreeSpecies.Oak].sort());
     expect(treesOn(Biome.Ocean, 70).map(treeKey)).toEqual([]);
   });
@@ -404,7 +395,6 @@ describe('树种的选择由种子决定', () => {
   });
 
   it.each(SURVEY_SEEDS)('种子 %i：跨区块的树，从它伸进的每个区块查到的都是同一棵、同一种', (seed) => {
-    const { treesTouching } = treeApi();
     const terrain = terrainOf(seed);
     const crossing = spread(
       surveyTrees(seed).filter(({ tree }) => crossesChunk(tree)),
@@ -509,7 +499,6 @@ describe('树的形状', () => {
   }
 
   it('橡树与白桦是原版式橡树形状，白桦用白桦原木与白桦树叶', () => {
-    const { TreeSpecies } = treeApi();
     for (const [species, wood] of [
       [TreeSpecies.Oak, OAK],
       [TreeSpecies.Birch, BIRCH],
@@ -525,7 +514,6 @@ describe('树的形状', () => {
   });
 
   it('白桦换成橡树的原木与树叶后，与同一位置、同样树干高度的橡树逐格相同', () => {
-    const { TreeSpecies } = treeApi();
     const birches = sampleOf(TreeSpecies.Birch);
     expect(birches.length).toBeGreaterThan(SURVEY_SEEDS.length);
     for (const birch of birches) {
@@ -534,7 +522,7 @@ describe('树的形状', () => {
   });
 
   describe('云杉是尖塔形树冠', () => {
-    const spruces = (): Tree[] => sampleOf(treeApi().TreeSpecies.Spruce);
+    const spruces = (): Tree[] => sampleOf(TreeSpecies.Spruce);
 
     /** 有树叶的各层：y（相对树根）与这一层树叶到树干那一列的最大切比雪夫距离。 */
     function leafLayers(cells: readonly TreeCell[]): Array<{ dy: number; radius: number; coversTrunk: boolean }> {
@@ -554,7 +542,6 @@ describe('树的形状', () => {
     });
 
     it('只用云杉原木与云杉树叶；树干从树根连续到树干顶，树根之下没有方块', () => {
-      const { trunkTopY } = treeApi();
       const wrong: string[] = [];
       for (const tree of spruces()) {
         const cells = footprint(tree);
@@ -610,8 +597,7 @@ describe('树的形状', () => {
       expect(wrong.slice(0, 20)).toEqual([]);
     });
 
-    it('树冠至少 5 层，比橡树的 4 层高；最上一层在树干顶之上、半径不超过 1、盖住树干那一列', () => {
-      const { trunkTopY } = treeApi();
+    it('树冠至少 5 层，比橡树的 4 层高；最上一层在树干顶之上、半径不超过 1、覆盖树干那一列', () => {
       const wrong: string[] = [];
       for (const tree of spruces()) {
         const layers = leafLayers(footprint(tree));
@@ -620,7 +606,7 @@ describe('树的形状', () => {
         if (!topLayer) continue;
         if (topLayer.dy <= trunkTopY(tree) - tree.rootY) wrong.push(`${treeKey(tree)} 最上一层 dy ${topLayer.dy} 不在树干顶之上`);
         if (topLayer.radius > 1) wrong.push(`${treeKey(tree)} 最上一层半径 ${topLayer.radius}`);
-        if (!topLayer.coversTrunk) wrong.push(`${treeKey(tree)} 最上一层没盖住树干那一列`);
+        if (!topLayer.coversTrunk) wrong.push(`${treeKey(tree)} 最上一层没覆盖树干那一列`);
       }
       expect(wrong.slice(0, 20)).toEqual([]);
     });

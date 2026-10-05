@@ -3,7 +3,7 @@ import { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, WORLD_MIN_Y } from '../../src/core/constants';
 import { SNOW_LINE_Y } from '../../src/core/surface';
 import { Biome, createTerrain, type ColumnCoord, type Terrain } from '../../src/core/terrain';
-import { plantTree, plantTrees, TreeSpecies, treesTouching, trunkTopY, type Tree, type TreePlacement } from '../../src/core/tree';
+import { plantTree, plantTrees, TreeSpecies, treesTouching, type Tree, type TreePlacement } from '../../src/core/tree';
 import { chunkOf, type ChunkCoord } from '../../src/core/world';
 import { FLAT_GROUND_Y } from './flat-terrain';
 import { BIRCH, OAK, SPRUCE, type WoodSpecies } from './wood-species';
@@ -14,22 +14,6 @@ import { BIRCH, OAK, SPRUCE, type WoodSpecies } from './wood-species';
  */
 
 export type { Tree };
-
-/** 测试要用的 `tree.ts` 导出。 */
-export interface TreeApi {
-  readonly TreeSpecies: typeof TreeSpecies;
-  readonly treesTouching: typeof treesTouching;
-  readonly plantTrees: typeof plantTrees;
-  readonly plantTree: typeof plantTree;
-  readonly trunkTopY: typeof trunkTopY;
-}
-
-const API: TreeApi = { TreeSpecies, treesTouching, plantTrees, plantTree, trunkTopY };
-
-/** `tree.ts` 的三种树接口。测试先于实现写成时，这里按名称取导出、缺了按断言报出来；现在直接 import。 */
-export function treeApi(): TreeApi {
-  return API;
-}
 
 /** 树种对应的原木、树叶等方块（`wood-species.ts` 的表）。 */
 export function woodOf(species: TreeSpecies): WoodSpecies {
@@ -73,9 +57,8 @@ const FOOTPRINT_HEIGHT = 64;
  * 全空气区块里树叶不会被地面挡住，读到的就是完整的树。
  */
 export function footprint(tree: Tree): TreeCell[] {
-  const api = treeApi();
   const chunk = new Chunk(0, 0);
-  api.plantTree(chunk, { ...tree, x: FOOTPRINT_COLUMN, z: FOOTPRINT_COLUMN });
+  plantTree(chunk, { ...tree, x: FOOTPRINT_COLUMN, z: FOOTPRINT_COLUMN });
   const cells: TreeCell[] = [];
   for (let dy = -1; dy <= FOOTPRINT_HEIGHT; dy++) {
     for (let dz = -FOOTPRINT_COLUMN; dz < CHUNK_SIZE - FOOTPRINT_COLUMN; dz++) {
@@ -163,7 +146,7 @@ export function flatForest(seed: number, biome: Biome, options: FlatForestOption
           chunk.set(lx, surfaceY, lz, top);
         }
       }
-      treeApi().plantTrees(placement, chunk);
+      plantTrees(placement, chunk);
       return chunk;
     },
   };
@@ -173,10 +156,9 @@ export function flatForest(seed: number, biome: Biome, options: FlatForestOption
  * 树根落在这些区块里的全部树，每棵只算一次（树冠伸进别的区块时 `treesTouching` 在那边也会给出它）。
  */
 export function treesRootedIn(placement: TreePlacement, coords: Iterable<ChunkCoord>): Tree[] {
-  const api = treeApi();
   const trees: Tree[] = [];
   for (const { cx, cz } of coords) {
-    for (const tree of api.treesTouching(placement, cx, cz)) {
+    for (const tree of treesTouching(placement, cx, cz)) {
       if (chunkOf(tree.x) === cx && chunkOf(tree.z) === cz) trees.push(tree);
     }
   }

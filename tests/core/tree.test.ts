@@ -3,7 +3,7 @@ import { BlockType } from '../../src/core/block';
 import { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, DEFAULT_SEED, WORLD_MIN_Y } from '../../src/core/constants';
 import { Biome, createTerrain, type Terrain } from '../../src/core/terrain';
-import { OAK_CANOPY_RADIUS, OAK_TRUNK_MAX, OAK_TRUNK_MIN } from '../../src/core/tree';
+import { OAK_CANOPY_RADIUS, OAK_TRUNK_MAX, OAK_TRUNK_MIN, TreeSpecies, plantTrees, trunkTopY } from '../../src/core/tree';
 import {
   chunkOf,
   chunksAround,
@@ -23,7 +23,6 @@ import {
   flatForest,
   footprint,
   LOGS,
-  treeApi,
   treeKey,
   treesRootedIn,
   woodOf,
@@ -155,7 +154,7 @@ function square(r: number, corners: boolean, ...without: string[]): string[] {
  * 顶上一层是 3×3 去掉四角的十字。树干占着正中那一格，所以除了最上层，正中是原木。
  */
 function expectVanillaCanopy(world: World, tree: Tree): void {
-  const top = treeApi().trunkTopY(tree);
+  const top = trunkTopY(tree);
   const wide = OAK_CANOPY_RADIUS;
   const layers: Array<[y: number, shape: string[]]> = [
     [top - 2, square(wide, false, '0,0')],
@@ -172,7 +171,6 @@ function expectVanillaCanopy(world: World, tree: Tree): void {
 
 /** 橡树与白桦：形状相同的两种树。 */
 function isOakShaped(tree: Tree): boolean {
-  const { TreeSpecies } = treeApi();
   return tree.species === TreeSpecies.Oak || tree.species === TreeSpecies.Birch;
 }
 
@@ -283,7 +281,6 @@ describe.each([
 
   it('出生列在更远处时，那 7 格里本来会长这个群系的树，上面两条因此测得到东西', () => {
     const near = CLEARANCE_SEEDS.flatMap((seed) => treesNear(forest(seed, ELSEWHERE), SPAWN));
-    const { TreeSpecies } = treeApi();
     const expected = biome === Biome.Plains ? [TreeSpecies.Birch, TreeSpecies.Oak] : [TreeSpecies.Spruce];
     expect([...new Set(near.map((tree) => tree.species))].sort()).toEqual([...expected].sort());
   });
@@ -351,7 +348,6 @@ describe('生成出来的树', () => {
   });
 
   it('树干是连续的这种树的原木；橡树与白桦是 4–6 格', () => {
-    const { trunkTopY } = treeApi();
     const wrong: string[] = [];
     for (const tree of trees()) {
       const log = woodOf(tree.species).log;
@@ -377,7 +373,6 @@ describe('生成出来的树', () => {
   });
 
   it('树干顶上那一格是这种树的树叶', () => {
-    const { trunkTopY } = treeApi();
     for (const tree of trees()) {
       expect(world().getBlock(tree.x, trunkTopY(tree) + 1, tree.z), treeKey(tree)).toBe(woodOf(tree.species).leaves);
     }
@@ -410,13 +405,13 @@ describe.each([
     const base = flatForest(SEED, biome, { spawnColumn: FAR_SPAWN });
     const tree = treesIn(base, SCAN_RADIUS).find((t) => !crossesChunk(t));
     if (!tree) throw new Error('扫描范围内应有不跨区块的树');
-    // 台阶比基准高出树干高度减一格：顶面在树干顶之下一格，盖住树干顶之下的树冠层
+    // 台阶比基准高出树干高度减一格：顶面在树干顶之下一格，覆盖树干顶之下的树冠层
     const step = tree.trunkHeight - 1;
     const cx = chunkOf(tree.x);
     const cz = chunkOf(tree.z);
     const surfaceAt = (_x: number, z: number): number => (z > tree.z ? LEDGE_BASE_Y + step : LEDGE_BASE_Y);
     const chunk = groundOnly(cx, cz, surfaceAt);
-    treeApi().plantTrees({ ...base, surfaceHeightAt: surfaceAt }, chunk);
+    plantTrees({ ...base, surfaceHeightAt: surfaceAt }, chunk);
 
     const eaten: string[] = [];
     let planted = 0;
@@ -456,7 +451,7 @@ describe.each([
 
   /** 树冠伸出了树根所在区块、各格都落在已加载区块里的这种树。 */
   const crossing = (): Tree[] => {
-    const species = treeApi().TreeSpecies[speciesKey];
+    const species = TreeSpecies[speciesKey];
     return treesIn(terrain, SCAN_RADIUS).filter(
       (tree) => tree.species === species && crossesChunk(tree) && chunksTouchedBy(tree).every(inLoaded),
     );
@@ -513,7 +508,6 @@ describe.each([
     if (!tree) throw new Error('扫描范围内应有树冠跨过区块边界的树');
     const rootChunk = { cx: chunkOf(tree.x), cz: chunkOf(tree.z) };
     const alone = worldWith(terrain, [rootChunk]);
-    const { trunkTopY } = treeApi();
     // 树干整根都在树根那个区块里，跨出去的只有树冠
     for (let y = tree.rootY; y <= trunkTopY(tree); y++) expect(alone.getBlock(tree.x, y, tree.z)).toBe(woodOf(tree.species).log);
     const outside = [...worldCells(tree).keys()].filter((cell) => {

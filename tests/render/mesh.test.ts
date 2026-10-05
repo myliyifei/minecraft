@@ -10,7 +10,6 @@ import {
 import { createTerrain } from '../../src/core/terrain';
 import { chunkOf, chunksAround, ORIGIN_CHUNK, World } from '../../src/core/world';
 import { FLAT_GROUND_Y, flatTestTerrain } from '../helpers/flat-terrain';
-import { treeApi } from '../helpers/trees';
 import { tileUvRect, TILE } from '../../src/render/atlas';
 import {
   buildChunkMesh,
@@ -21,6 +20,7 @@ import {
   type MeshView,
 } from '../../src/render/mesh';
 import { torchHitbox } from '../../src/core/torch';
+import { TreeSpecies, treesTouching } from '../../src/core/tree';
 import { SELF_LIT_BLOCK_LIGHT } from '../../src/render/shading';
 
 /**
@@ -549,7 +549,6 @@ describe('生成地形的网格', () => {
     // 从种子生成的世界一路走到网格：树长出来了，而且带着对的贴图上了画面。
     // 单块方块的六面贴图在上一节断言过，这里补的是「生成的树真的进了网格」这一段。
     // 原点区块的第一棵树是哪一种由种子决定（#79），贴图按它的树种取。
-    const { TreeSpecies, treesTouching } = treeApi();
     const terrain = createTerrain(DEFAULT_SEED);
     const world = new World(terrain.generateChunk);
     for (const { cx, cz } of chunksAround(ORIGIN_CHUNK, 1)) world.loadChunk(cx, cz);

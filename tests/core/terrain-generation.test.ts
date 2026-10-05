@@ -5,6 +5,7 @@ import { CHUNK_SIZE, SEA_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/
 import { ORE_KINDS, oreVeinsTouching } from '../../src/core/ore';
 import { Biome, createTerrain, type ColumnCoord } from '../../src/core/terrain';
 import { chunkOf, chunksAround, localOf, type ChunkCoord } from '../../src/core/world';
+import { TreeSpecies, treesTouching } from '../../src/core/tree';
 import {
   boundariesOn,
   boundaryKind,
@@ -20,7 +21,7 @@ import {
   surveyLines,
   type BiomeBoundary,
 } from '../helpers/terrain-survey';
-import { chunksTouchedBy, crossesChunk, treeApi, treeKey, woodOf, worldCells, type Tree } from '../helpers/trees';
+import { chunksTouchedBy, crossesChunk, treeKey, woodOf, worldCells, type Tree } from '../helpers/trees';
 
 /**
  * 三维密度地形生成出的区块（#75）：按群系各找几个区块，断言方块与三个查询一致。
@@ -497,7 +498,6 @@ describe('树', () => {
   it('平原、冰雪与高山里跨区块边界的树（橡树、白桦、云杉），几个区块里的部分合起来是完整的树', () => {
     // 期望值是 `footprint`：同一棵树种在一个全空气区块里的样子。真实地形有起伏，树叶只往空气里长，
     // 所以 footprint 里的树叶格在世界里是这种树叶或被地形方块占着都算对；原木必须逐格相同。
-    const { TreeSpecies } = treeApi();
     /** 世界坐标的一格，从缓存的区块里读。 */
     const blockIn = (seed: number, x: number, y: number, z: number): BlockType =>
       chunkAt(seed, { cx: chunkOf(x), cz: chunkOf(z) }).get(localOf(x), y, localOf(z));
@@ -514,7 +514,7 @@ describe('树', () => {
         const inside = ({ cx, cz }: ChunkCoord): boolean => Math.abs(cx - center.cx) <= 1 && Math.abs(cz - center.cz) <= 1;
         const trees = new Map<string, Tree>();
         for (const { cx, cz } of around) {
-          for (const tree of treeApi().treesTouching(terrain, cx, cz)) trees.set(treeKey(tree), tree);
+          for (const tree of treesTouching(terrain, cx, cz)) trees.set(treeKey(tree), tree);
         }
         for (const tree of trees.values()) {
           // 树冠整个落在这 3×3 个区块里、又伸出了树根所在区块的树

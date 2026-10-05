@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { BlockType } from '../src/core/block';
 import { PLAYER_EYE_HEIGHT } from '../src/core/player';
+import { fogAt } from '../src/render/fog';
 import { installPixelProbe } from './canvas';
 import { enterDefaultWorld } from './world-list';
 
@@ -36,6 +37,11 @@ function colorDistance(a: Rgb, b: Rgb): number {
 /** sRGB 十六进制拆成三个 0–255 的通道。 */
 function hexRgb(hex: number): Rgb {
   return [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff];
+}
+
+/** 三个 [0, 1] 的 sRGB 分量拼成十六进制，与 three 的 `getHex` 一样逐通道四舍五入。 */
+function rgbHex([r, g, b]: Rgb): number {
+  return (Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255);
 }
 
 test('在眼睛那一格与周围放水，sky 读回报告在水下、雾开启、背景换成雾色；拆掉水后报告不在（#77）', async ({ page }) => {
@@ -82,6 +88,13 @@ test('在眼睛那一格与周围放水，sky 读回报告在水下、雾开启�
   const [r, g, b] = hexRgb(seen.wet.sky.fogColor);
   expect(b).toBeGreaterThan(r);
   expect(b).toBeGreaterThan(g);
+  // 送进着色器的就是 `fogAt` 给的 sRGB 雾色：按 sRGB 换成线性写进 uniform，读回时换回来是同一个颜色
+  expect(seen.wet.sky.fogColor).toBe(rgbHex(fogAt(true).color));
+  // 中午太阳在天上，水下不画，出水后又画
+  expect(seen.before.sunVisible).toBe(true);
+  expect(seen.wet.sky.sunVisible).toBe(false);
+  expect(seen.wet.sky.moonVisible).toBe(false);
+  expect(seen.dry.sky.sunVisible).toBe(true);
 
   expect(seen.dry.sky.underwater).toBe(false);
   expect(seen.dry.sky.fogEnabled).toBe(false);
@@ -175,5 +188,45 @@ test('像素探针：眼睛在水下时，正前方远于雾的 far 处的石墙
   const fog = hexRgb(seen.fogColor);
   expect(colorDistance(seen.wet.rgb, fog)).toBeLessThanOrEqual(FOGGED_TOLERANCE);
   expect(colorDistance(seen.dry.rgb, fog)).toBeGreaterThan(CLEAR_DIFFERENCE);
+  expect(errors).toEqual([]);
+});
+
+test('像素探针：眼睛在水下时近处看得清，正前方 1.5 格处的石墙不是雾色（#77）', async ({ page }) => {
+  // 中午、平视 −Z。眼睛那一格周围 3×3×3 放水，紧挨着水的前方（眼睛那一格往 −Z 两格）砌一面 5×5 的石墙。
+  // 眼睛到墙面约 1.5 格，雾还几乎没有混入：画面正中与雾色差得远。雾按到相机的距离算，算错成到别处的距离时这里会画成雾色。
+  const seen = await page.evaluate(
+    ({ water, stone, eyeHeight }) => {
+      const { core, renderer } = window.__VOXEL__!;
+      const pixel = window.__PIXEL_RGB__!;
+      core.setTimeOfDay(6000);
+      core.turn(-core.player.yaw, -core.player.pitch);
+      const { x, y, z } = core.player.position;
+      const eye = { x: Math.floor(x), y: Math.floor(y + eyeHeight), z: Math.floor(z) };
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dz = -1; dz <= 1; dz++) core.setBlock(eye.x + dx, eye.y + dy, eye.z + dz, water);
+        }
+      }
+      for (let dx = -2; dx <= 2; dx++) {
+        for (let dy = -2; dy <= 2; dy++) core.setBlock(eye.x + dx, eye.y + dy, eye.z - 2, stone);
+      }
+      renderer.syncChunkMeshes(Infinity);
+      renderer.render(1);
+      const sum = [0, 0, 0];
+      let n = 0;
+      for (let i = -2; i <= 2; i++) {
+        for (let j = -2; j <= 2; j++) {
+          const rgb = pixel(i * 0.01, j * 0.01);
+          for (let c = 0; c < 3; c++) sum[c]! += rgb[c]!;
+          n++;
+        }
+      }
+      return { rgb: [sum[0]! / n, sum[1]! / n, sum[2]! / n] as const, sky: renderer.sky };
+    },
+    { water: BlockType.Water, stone: BlockType.Stone, eyeHeight: PLAYER_EYE_HEIGHT },
+  );
+
+  expect(seen.sky.underwater).toBe(true);
+  expect(colorDistance(seen.rgb, hexRgb(seen.sky.fogColor))).toBeGreaterThan(CLEAR_DIFFERENCE);
   expect(errors).toEqual([]);
 });

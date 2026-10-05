@@ -164,10 +164,15 @@ function dirtDepthAt(seed: number, x: number, z: number): number {
 const CLIMATE_MARGIN = BEACH_REACH;
 const CLIMATE_WINDOW = CHUNK_SIZE + 2 * CLIMATE_MARGIN;
 
+/** 区块生成按列缓存的温度：还没求、不是寒冷处、是寒冷处。 */
+const COLD_UNKNOWN = 0;
+const COLD_NO = 1;
+const COLD_YES = 2;
+
 /**
  * 区块生成用的样本：区块连同四周一圈的地表高度来自 `fillDensity` 已求出的数，区块连同四周 CLIMATE_MARGIN 列的
- * 群系与大陆度按列算一次存下；更远的列改调地形对象的查询。每个数都与查询逐列相同，所以生成时铺地表与
- * 列顶地表方块查询得到同一个结果，只是不重复计算。
+ * 群系与大陆度、区块里各列的温度按列算一次存下；更远的列改调地形对象的查询。每个数都与查询逐列相同，所以生成时
+ * 铺地表与列顶地表方块查询得到同一个结果，只是不重复计算。
  */
 function chunkSamples(
   seed: number,
@@ -177,6 +182,7 @@ function chunkSamples(
   queries: Omit<Terrain, 'generateChunk'>,
 ): SurfaceSamples {
   const continentalness = new Float64Array(CLIMATE_WINDOW * CLIMATE_WINDOW).fill(Number.NaN);
+  const cold = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
   const biomes: Array<Biome | undefined> = new Array<Biome | undefined>(CLIMATE_WINDOW * CLIMATE_WINDOW);
   const climateIndex = (x: number, z: number): number => {
     const wx = x - originX + CLIMATE_MARGIN;
@@ -215,8 +221,19 @@ function chunkSamples(
     continentalnessAt: continentalnessOf,
     // 起伏只有大海群系里露出水面的低处列才问，每列最多一次，不缓存。
     reliefAt: (x, z) => reliefAt(seed, x, z),
-    // 只有大海群系露出水面的列才问，次数少，不缓存。
-    isColdAt: (x, z) => isColdAt(seed, x, z),
+    // 温度只问那一列自身：区块里的列每列最多求一次，生成器结冰时也读这里，与铺地表共用。
+    isColdAt: (x, z) => {
+      const lx = x - originX;
+      const lz = z - originZ;
+      if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) return isColdAt(seed, x, z);
+      const i = lz * CHUNK_SIZE + lx;
+      let known = cold[i]!;
+      if (known === COLD_UNKNOWN) {
+        known = isColdAt(seed, x, z) ? COLD_YES : COLD_NO;
+        cold[i] = known;
+      }
+      return known === COLD_YES;
+    },
   };
 }
 
@@ -249,10 +266,8 @@ function densityGenerator(queries: Omit<Terrain, 'generateChunk'>): TerrainGener
         const column = lz * CHUNK_SIZE + lx;
         const solidTop = solidTops[column]!;
         floodBelowSeaLevel(chunk, lx, lz, solidTop);
-        // 温度每列最多求一次：结冰与寒冷处大海的雪草方块共用。
-        let cold: boolean | undefined;
-        const coldHere = (): boolean => (cold ??= isColdAt(seed, x, z));
-        if (chunk.get(lx, SEA_LEVEL, lz) === BlockType.Water && coldHere()) {
+        // 温度经样本按列缓存：结冰、铺地表与寒冷处大海的雪草方块共用一次计算。
+        if (chunk.get(lx, SEA_LEVEL, lz) === BlockType.Water && samples.isColdAt(x, z)) {
           chunk.set(lx, SEA_LEVEL, lz, BlockType.Ice);
         }
         const top = highestTopBlock(samples, x, z);
@@ -264,7 +279,7 @@ function densityGenerator(queries: Omit<Terrain, 'generateChunk'>): TerrainGener
           depth: dirtDepthAt(seed, x, z),
           highest: top,
           biome,
-          coldOcean: biome === Biome.Ocean && coldHere(),
+          coldOcean: biome === Biome.Ocean && samples.isColdAt(x, z),
         });
       }
     }

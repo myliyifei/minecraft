@@ -310,8 +310,8 @@ function densityGenerator(queries: Omit<Terrain, 'generateChunk'>, ponds: PondPl
           solidTop,
           depth: dirtDepthAt(seed, x, z),
           highest: top,
-          // 雪草方块只在雪线以上的高山才会是陡坡列的列顶（其余陡坡是石头）。
-          highestBare: top === BlockType.SnowyGrass && isSteepColumn(samples, x, z),
+          // 高山的列顶是雪草方块即在雪线以上；其余群系的陡坡列顶是石头，不用再判陡坡。
+          highestBare: biome === Biome.Mountains && top === BlockType.SnowyGrass && isSteepColumn(samples, x, z),
           biome,
           coldOcean: biome === Biome.Ocean && samples.isColdAt(x, z),
         });

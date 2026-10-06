@@ -8,9 +8,8 @@ import { digPonds, isPondColumn, type PondPlacement } from './pond';
 import {
   COLD_TEMPERATURE,
   continentalnessAt,
-  densitySolidSpan,
-  densitySurfaceHeight,
-  fillDensity,
+  createDensityField,
+  type DensityField,
   HEIGHT_WINDOW,
   isColdAt,
   MOUNTAIN_RELIEF,
@@ -122,8 +121,9 @@ function searchColumn(i: number, j: number): ColumnCoord {
  * 要避开它，核心与加载画面也读它。
  */
 export function createTerrain(seed: number): Terrain {
+  const density = createDensityField(seed);
   const samples: SurfaceSamples = {
-    heightAt: (x, z) => densitySurfaceHeight(seed, x, z),
+    heightAt: (x, z) => density.surfaceHeight(x, z),
     biomeAt: (x, z) => biomeAt(seed, x, z, continentalnessAt(seed, x, z)),
     continentalnessAt: (x, z) => continentalnessAt(seed, x, z),
     reliefAt: (x, z) => reliefAt(seed, x, z),
@@ -138,7 +138,7 @@ export function createTerrain(seed: number): Terrain {
   // POND_SPAWN_CLEARANCE 格，所以出生列那一列挖不挖水塘结论都一样。
   const spawnColumn = findSpawnColumn(beforePonds);
   const isSolidSpan = (x: number, z: number, fromY: number, toY: number): boolean =>
-    densitySolidSpan(seed, x, z, fromY, toY);
+    density.solidSpan(x, z, fromY, toY);
   const ponds: PondPlacement = { seed, spawnColumn, biomeAt: samples.biomeAt, surfaceHeightAt: samples.heightAt, isSolidSpan };
   const placement: Omit<Terrain, 'generateChunk'> = {
     ...beforePonds,
@@ -147,7 +147,7 @@ export function createTerrain(seed: number): Terrain {
     isSolidSpan,
     surfaceBlockAt: (x, z) => surfaceBlockWithPonds(ponds, samples, x, z),
   };
-  return { ...placement, generateChunk: densityGenerator(placement, ponds) };
+  return { ...placement, generateChunk: densityGenerator(placement, ponds, density) };
 }
 
 /**
@@ -199,7 +199,7 @@ const COLD_NO = 1;
 const COLD_YES = 2;
 
 /**
- * 区块生成用的样本：区块连同四周一圈的地表高度来自 `fillDensity` 已求出的数，区块连同四周 CLIMATE_MARGIN 列的
+ * 区块生成用的样本：区块连同四周一圈的地表高度来自 `DensityField.fill` 已求出的数，区块连同四周 CLIMATE_MARGIN 列的
  * 群系与大陆度、区块里各列的温度按列算一次存下；更远的列改调地形对象的查询。每个数都与查询逐列相同，所以生成时
  * 铺地表与列顶地表方块查询得到同一个结果，只是不重复计算。
  */
@@ -280,12 +280,16 @@ function chunkSamples(
  * 8. 放地表植物（`plantSurfacePlants`）：在区块内逐列放，列顶是草方块或雪草方块、上面是空气时按群系与种子哈希决定，
  *    在树之后放，所以不长在原木与树叶的格里；出生列周围不长。
  */
-function densityGenerator(queries: Omit<Terrain, 'generateChunk'>, ponds: PondPlacement): TerrainGenerator {
+function densityGenerator(
+  queries: Omit<Terrain, 'generateChunk'>,
+  ponds: PondPlacement,
+  density: DensityField,
+): TerrainGenerator {
   const { seed } = queries;
   return (cx, cz) => {
     const chunk = new Chunk(cx, cz);
     chunk.fillLayer(WORLD_MIN_Y, BlockType.Bedrock);
-    const { tops, solidTops, heights } = fillDensity(seed, chunk);
+    const { tops, solidTops, heights } = density.fill(chunk);
 
     const originX = cx * CHUNK_SIZE;
     const originZ = cz * CHUNK_SIZE;

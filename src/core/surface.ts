@@ -14,15 +14,17 @@ import { MOUNTAIN_RELIEF, OCEAN_CONTINENTALNESS } from './terrain-density';
  *
  * 最高那一段（地表高度那一格）的优先次序：
  * 1. 被水覆盖（地表低于海平面）：顶面 y ≥ SHALLOW_FLOOR_MIN_Y 是沙子，更低是沙砾，不论群系。
- * 2. 陡坡：与东南西北四个相邻列的地表高度差最大的那个 ≥ STEEP_RISE，石头，不铺泥土。
- * 3. 海岸：地表不高于 BEACH_MAX_Y 的列。平原在 BEACH_REACH 格内有大海时是沙滩（沙子），高山是石头岸，
- *    冰雪不算海岸、照规则 4 铺雪草方块；
+ * 2. 雪线以上的高山（顶面 y ≥ SNOW_LINE_Y）：雪草方块，陡坡也是（#82 用户决定：从山顶到雪线一直是雪）。
+ *    陡坡列的雪草方块之下不铺泥土，侧面露出的是石头；不是陡坡的列照常铺泥土。
+ * 3. 陡坡：与东南西北四个相邻列的地表高度差最大的那个 ≥ STEEP_RISE，石头，不铺泥土。陡坡露石头因此只在雪线以下。
+ * 4. 海岸：地表不高于 BEACH_MAX_Y 的列。平原在 BEACH_REACH 格内有大海时是沙滩（沙子），高山是石头岸，
+ *    冰雪不算海岸、照规则 5 铺雪草方块；
  *    大海群系里露出水面的列按这一列自身的起伏与温度铺：起伏高于 MOUNTAIN_RELIEF 是石头，否则寒冷处是雪草方块，
  *    其余是沙子。平原临海的沙滩因此从陆地一侧约 BEACH_REACH 格一直铺到水边；冰雪临海从雪地到冰面全是雪草方块。
- * 4. 雪线以上的高山、任意高度的冰雪、寒冷处大海群系里地表高于 BEACH_MAX_Y 的列：雪草方块。
- * 5. 其余：草方块。
+ * 5. 任意高度的冰雪、寒冷处大海群系里地表高于 BEACH_MAX_Y 的列：雪草方块。
+ * 6. 其余：草方块。
  *
- * 悬垂下方的段只按 1、4、5 铺（陡坡与海岸只看最高那一段），雪线按那一段顶面的 y 判断。规则 4 里「地表高于
+ * 悬垂下方的段只按 1、2、5、6 铺（陡坡与海岸只看最高那一段），雪线按那一段顶面的 y 判断。规则 5 里「地表高于
  * BEACH_MAX_Y」只对最高那一段成立：寒冷处大海群系里悬垂下方露出的段不论高度都是雪草方块。
  */
 
@@ -108,6 +110,11 @@ function maxNeighborRise(samples: SurfaceSamples, x: number, z: number, h: numbe
   );
 }
 
+/** 这一列是不是陡坡：与相邻列的地表高度差最大的那个不小于 STEEP_RISE。 */
+export function isSteepColumn(samples: SurfaceSamples, x: number, z: number): boolean {
+  return maxNeighborRise(samples, x, z, samples.heightAt(x, z)) >= STEEP_RISE;
+}
+
 /** 这几个偏移上有没有满足条件的列。 */
 function anyNear(
   offsets: ReadonlyArray<readonly [number, number]>,
@@ -145,8 +152,9 @@ function coastTop(samples: SurfaceSamples, x: number, z: number, biome: Biome): 
 export function highestTopBlock(samples: SurfaceSamples, x: number, z: number): BlockType {
   const h = samples.heightAt(x, z);
   if (h < SEA_LEVEL) return underwaterFloorAt(h);
-  if (maxNeighborRise(samples, x, z, h) >= STEEP_RISE) return BlockType.Stone;
   const biome = samples.biomeAt(x, z);
+  if (biome === Biome.Mountains && h >= SNOW_LINE_Y) return BlockType.SnowyGrass;
+  if (isSteepColumn(samples, x, z)) return BlockType.Stone;
   if (h <= BEACH_MAX_Y) {
     const coast = coastTop(samples, x, z, biome);
     if (coast !== undefined) return coast;
@@ -178,6 +186,11 @@ export interface ColumnCover {
   readonly depth: number;
   /** 最高那一段的顶层（`highestTopBlock`）。 */
   readonly highest: BlockType;
+  /**
+   * 最高那一段的顶层之下不铺泥土：雪线以上的陡坡列（顶层是雪草方块），与陡坡露石头不铺泥土一致，
+   * 侧面露出的是石头。其下各段照常铺。
+   */
+  readonly highestBare: boolean;
   /** 这一列的群系：悬垂下方的段按它铺。 */
   readonly biome: Biome;
   /** 这一列是不是寒冷处的大海群系（`exposedTopAt` 的 cold）。 */
@@ -190,7 +203,7 @@ export interface ColumnCover {
  * 或沙砾，否则按群系与那一段顶面的 y 铺。
  */
 export function coverColumn(chunk: Chunk, lx: number, lz: number, cover: ColumnCover): void {
-  const { top, solidTop, depth, highest, biome, coldOcean: cold } = cover;
+  const { top, solidTop, depth, highest, highestBare, biome, coldOcean: cold } = cover;
   let aboveSolid = false;
   let first = true;
   let filler: BlockType | undefined;
@@ -199,8 +212,10 @@ export function coverColumn(chunk: Chunk, lx: number, lz: number, cover: ColumnC
     const solid = chunk.get(lx, y, lz) === BlockType.Stone;
     if (solid && !aboveSolid) {
       let block: BlockType;
+      let bare = false;
       if (first) {
         block = highest;
+        bare = highestBare;
         first = false;
       } else {
         const above = chunk.get(lx, y + 1, lz);
@@ -208,7 +223,7 @@ export function coverColumn(chunk: Chunk, lx: number, lz: number, cover: ColumnC
       }
       chunk.set(lx, y, lz, block);
       filler = fillerBelow(block);
-      left = filler === undefined ? 0 : depth;
+      left = filler === undefined || bare ? 0 : depth;
     } else if (solid && left > 0) {
       chunk.set(lx, y, lz, filler!);
       left--;

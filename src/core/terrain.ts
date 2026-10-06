@@ -19,7 +19,7 @@ import {
   temperatureAt,
 } from './terrain-density';
 import { Biome } from './biome';
-import { BEACH_REACH, coverColumn, highestTopBlock, type SurfaceSamples } from './surface';
+import { BEACH_REACH, coverColumn, highestTopBlock, isSteepColumn, type SurfaceSamples } from './surface';
 import { plantTrees, type SurfaceHeightAt, type TreePlacement } from './tree';
 
 import type { ColumnCoord } from './world';
@@ -310,6 +310,8 @@ function densityGenerator(queries: Omit<Terrain, 'generateChunk'>, ponds: PondPl
           solidTop,
           depth: dirtDepthAt(seed, x, z),
           highest: top,
+          // 雪草方块只在雪线以上的高山才会是陡坡列的列顶（其余陡坡是石头）。
+          highestBare: top === BlockType.SnowyGrass && isSteepColumn(samples, x, z),
           biome,
           coldOcean: biome === Biome.Ocean && samples.isColdAt(x, z),
         });

@@ -7,6 +7,7 @@ import { oreVeinsTouching } from '../../src/core/ore';
 import { isColdAt, MOUNTAIN_RELIEF, reliefAt } from '../../src/core/terrain-density';
 import type { ChunkCoord } from '../../src/core/world';
 import {
+  blockAt,
   boundariesOn,
   chunkCache,
   chunkOfColumn,
@@ -41,7 +42,9 @@ import {
  *
  * 阈值（测试设定，常量在 tests/helpers/surface-rules.ts）：
  * - 陡坡：与东南西北四个相邻列的地表高度差最大的那个 ≥ 3，顶层石头，紧挨着的下一格不是泥土。只看最高的那一段。
- * - 雪线：高山顶面 y ≥ 150 铺雪草方块，以下铺草方块；冰雪任何高度都是雪草方块。悬垂下方的段按那一段顶面的 y 判断。
+ *   高山地表 y ≥ 150 的陡坡列除外（#82 修订，用户决定）：雪草方块，紧挨着的下一格不是泥土（侧面露出石头）。
+ * - 雪线：高山顶面 y ≥ 150 铺雪草方块（最高那一段陡坡也是），以下铺草方块；冰雪任何高度都是雪草方块。
+ *   悬垂下方的段按那一段顶面的 y 判断。从山顶到雪线列顶连续是雪草方块，中间没有石头。
  * - 被水覆盖（上方是水或冰）：顶面 y ≥ 56 铺沙子，y ≤ 55 铺沙砾，不论群系。
  * - 沙滩（#76 修订）：只在平原与大海之间，从陆地一侧约 4 格一直铺到水边，地表在 y 63 到 67。陆地一侧是平原 4 格内
  *   有大海的列；大海一侧是大海群系里露出水面、地表不高于 y 67 的列，按这一列自身的起伏与温度判断：起伏高于高山阈值
@@ -50,7 +53,7 @@ import {
  *   交界从陆地一侧到水边之间没有草方块；离大海 12 格以外没有露天的沙子。高山群系的列不铺沙子，高山临海是石头岸。
  * - 冰雪临海（#76 第二次修订，用户决定）：冰雪群系的列不铺沙子，临海也按冰雪的常规铺法（雪草方块，其下 3 到 4 层
  *   泥土）；寒冷处从冰雪陆地一侧到水边都是雪草方块（陡坡与起伏高的列是石头）。
- * - 优先次序：被水覆盖 → 陡坡 → 海岸（平原一侧沙滩或高山石头岸；大海一侧起伏高于高山阈值的列是石头，否则寒冷处
+ * - 优先次序：被水覆盖 → 高山雪线以上（陡坡也是雪草方块，#82 修订）→ 陡坡 → 海岸（平原一侧沙滩或高山石头岸；大海一侧起伏高于高山阈值的列是石头，否则寒冷处
  *   雪草方块、其余沙子）→ 雪线以上与冰雪 → 草方块。
  *
  * 采样：每个种子在 ±2560 格、步长 64 的网格上找各群系内部的列（东南西北 32 格外同群系），取平原、冰雪、最深的大海
@@ -67,6 +70,12 @@ const MOUNTAIN_CHUNKS = 6;
 const HIGH_MOUNTAIN_CHUNKS = 3;
 /** 「地表很高」：比雪线高 15 格，那一块里雪线以上的列才多。 */
 const HIGH_MOUNTAIN_Y = 165;
+/**
+ * 雪线以下的陡坡区块（#82 修订）：高山内部本身是陡坡、地表低于这个高度的采样列所在的区块，取这么多个。
+ * 种子 777 的 6 个高山区块与 3 个高山临海区块里雪线以下没有陡坡列，雪线以下露石的用例要另取。
+ */
+const LOW_STEEP_MOUNTAIN_Y = 140;
+const LOW_STEEP_MOUNTAIN_CHUNKS = 3;
 
 /** 每种交界取几个区块。 */
 const COAST_CHUNKS = 2;
@@ -139,6 +148,8 @@ interface Sites {
   readonly ocean?: ChunkCoord;
   readonly mountains: ChunkCoord[];
   readonly highMountains: ChunkCoord[];
+  /** 雪线以下的陡坡所在的高山区块，只有雪线以下露石与按群系铺的高山用例查。 */
+  readonly lowSteepMountains: ChunkCoord[];
   /** 陆地群系与大海的交界，按陆地群系分。 */
   readonly coasts: ReadonlyMap<CoastKind, BiomeBoundary[]>;
   /** 每种交界取的区块。 */
@@ -240,6 +251,14 @@ function sitesOf(seed: number): Sites {
       spread(
         mountainColumns.filter(({ x, z }) => terrain.surfaceHeightAt(x, z) >= HIGH_MOUNTAIN_Y),
         HIGH_MOUNTAIN_CHUNKS,
+      ).map(chunkOfColumn),
+    ),
+    lowSteepMountains: distinct(
+      spread(
+        mountainColumns.filter(
+          ({ x, z }) => terrain.surfaceHeightAt(x, z) < LOW_STEEP_MOUNTAIN_Y && isSteep(terrain, x, z),
+        ),
+        LOW_STEEP_MOUNTAIN_CHUNKS,
       ).map(chunkOfColumn),
     ),
     coasts,
@@ -353,7 +372,12 @@ function dirtProblem(chunk: Chunk, lx: number, y: number, lz: number): string | 
   return undefined;
 }
 
-/** 远离大海、不是陡坡、露出水面时，最高那一段的顶面按群系与高度应铺的方块。 */
+/** 高山地表在雪线以上的列（#82 修订）：最高那一段不论坡度都是雪草方块。 */
+function isMountainAboveSnowLine(terrain: Terrain, x: number, z: number): boolean {
+  return terrain.biomeAt(x, z) === Biome.Mountains && terrain.surfaceHeightAt(x, z) >= SNOW_LINE_Y;
+}
+
+/** 远离大海、不是陡坡（或高山雪线以上）、露出水面时，最高那一段的顶面按群系与高度应铺的方块。 */
 function inlandTopBlock(biome: Biome, y: number): BlockType {
   if (biome === Biome.Snowy) return SNOWY_GRASS;
   if (biome === Biome.Mountains && y >= SNOW_LINE_Y) return SNOWY_GRASS;
@@ -386,26 +410,30 @@ describe('列顶地表方块查询与生成一致（#76）', () => {
     },
   );
 
-  it.each(SURVEY_SEEDS)('种子 %i：区块边缘的陡坡列，查询与生成一致（陡坡要看相邻区块的列）', (seed) => {
+  it.each(SURVEY_SEEDS)('种子 %i：区块边缘的陡坡列，查询与生成一致（陡坡要看相邻区块的列）：雪线以下石头，高山雪线以上雪草方块', (seed) => {
     expectSurfaceBlocksDefined();
     const s = expectSitesFound(seed);
     const terrain = terrainOf(seed);
     const wrong: string[] = [];
-    let steepEdge = 0;
-    for (const column of columnsOf(seed, [...s.mountains, ...s.highMountains])) {
+    const steepEdge = new Map<BlockType, number>();
+    for (const column of columnsOf(seed, distinct([...s.mountains, ...s.highMountains, ...s.lowSteepMountains]))) {
       const { chunk, lx, lz, x, z } = column;
       const onEdge = lx === 0 || lx === CHUNK_SIZE - 1 || lz === 0 || lz === CHUNK_SIZE - 1;
       // 水塘列（#81）列顶是水，不是陡坡的石头
       if (!onEdge || !isSteep(terrain, x, z) || isPondColumn(terrain, x, z)) continue;
       const surface = terrain.surfaceHeightAt(x, z);
       if (surface < SEA_LEVEL) continue;
-      steepEdge++;
+      const expected = isMountainAboveSnowLine(terrain, x, z) ? SNOWY_GRASS : BlockType.Stone;
+      steepEdge.set(expected, (steepEdge.get(expected) ?? 0) + 1);
       const generated = chunk.get(lx, surface, lz);
-      if (generated !== BlockType.Stone || terrain.surfaceBlockAt(x, z) !== BlockType.Stone) {
-        wrong.push(`(${x}, ${z})：查询 ${blockName(terrain.surfaceBlockAt(x, z))}，生成 ${blockName(generated)}`);
+      if (generated !== expected || terrain.surfaceBlockAt(x, z) !== expected) {
+        wrong.push(
+          `(${x}, ${surface}, ${z})：应为 ${blockName(expected)}，查询 ${blockName(terrain.surfaceBlockAt(x, z))}，生成 ${blockName(generated)}`,
+        );
       }
     }
-    expect(steepEdge, '区块边缘的陡坡列').toBeGreaterThan(0);
+    expect(steepEdge.get(BlockType.Stone) ?? 0, '区块边缘雪线以下的陡坡列').toBeGreaterThan(0);
+    expect(steepEdge.get(SNOWY_GRASS) ?? 0, '区块边缘高山雪线以上的陡坡列').toBeGreaterThan(0);
     expect(wrong.slice(0, 20)).toEqual([]);
   });
 });
@@ -413,6 +441,7 @@ describe('列顶地表方块查询与生成一致（#76）', () => {
 describe('露天、不是陡坡的顶面按群系铺（#76）', () => {
   /**
    * 远离大海的区块里，最高那一段露出水面、不是陡坡的列：顶层按群系与高度，其下 3 到 4 层泥土。
+   * 高山雪线以上的陡坡列也查顶层（#82 修订：一律雪草方块），泥土层数只查不是陡坡的列，陡坡列见「雪线以上的陡坡」。
    * 返回各种群系与顶层的计数，以便断言要测的情形确实出现了。
    */
   function checkInland(seed: number, coords: readonly ChunkCoord[]): { wrong: string[]; counts: Map<string, number> } {
@@ -423,7 +452,8 @@ describe('露天、不是陡坡的顶面按群系铺（#76）', () => {
     for (const column of columnsOf(seed, far)) {
       const { chunk, lx, lz, x, z } = column;
       const surface = terrain.surfaceHeightAt(x, z);
-      if (surface < SEA_LEVEL || isSteep(terrain, x, z) || isPondColumn(terrain, x, z)) continue;
+      const steep = isSteep(terrain, x, z);
+      if (surface < SEA_LEVEL || (steep && !isMountainAboveSnowLine(terrain, x, z)) || isPondColumn(terrain, x, z)) continue;
       const biome = terrain.biomeAt(x, z);
       const expected = inlandTopBlock(biome, surface);
       const actual = chunk.get(lx, surface, lz);
@@ -433,6 +463,7 @@ describe('露天、不是陡坡的顶面按群系铺（#76）', () => {
         wrong.push(`(${x}, ${surface}, ${z}) ${biome}：应为 ${blockName(expected)}，生成 ${blockName(actual)}`);
         continue;
       }
+      if (steep) continue;
       const dirt = dirtProblem(chunk, lx, surface, lz);
       if (dirt) wrong.push(`(${x}, ${surface}, ${z}) ${biome} ${blockName(actual)}：${dirt}`);
     }
@@ -455,36 +486,118 @@ describe('露天、不是陡坡的顶面按群系铺（#76）', () => {
   });
 
   it.each(SURVEY_SEEDS)(
-    `种子 %i：高山 y ${SNOW_LINE_Y} 以上的列顶是雪草方块、以下是草方块，其下都是 3 到 4 层泥土`,
+    `种子 %i：高山 y ${SNOW_LINE_Y} 以上的列顶不论坡度都是雪草方块、以下不是陡坡的是草方块，不是陡坡的列其下 3 到 4 层泥土`,
     (seed) => {
       expectSurfaceBlocksDefined();
       const s = expectSitesFound(seed);
-      const { wrong, counts } = checkInland(seed, [...s.mountains, ...s.highMountains]);
+      const { wrong, counts } = checkInland(seed, distinct([...s.mountains, ...s.highMountains, ...s.lowSteepMountains]));
       expect(counts.get(`${Biome.Mountains}:SnowyGrass`) ?? 0, '查过的雪线以上的高山列').toBeGreaterThan(0);
+      expect(counts.get(`${Biome.Mountains}:Grass`) ?? 0, '查过的雪线以下的高山列').toBeGreaterThan(0);
       expect(wrong.slice(0, 20)).toEqual([]);
     },
   );
 });
 
-describe('陡坡露石头（#76）', () => {
+describe('陡坡露石头（#76，#82 修订限定在雪线以下）', () => {
   it.each(SURVEY_SEEDS)(
-    '种子 %i：与相邻列地表高度差 ≥ 3 的列，顶层是石头，紧挨着的下一格不是泥土',
+    `种子 %i：与相邻列地表高度差 ≥ 3、不是高山 y ${SNOW_LINE_Y} 以上的列，顶层是石头，紧挨着的下一格不是泥土`,
     (seed) => {
       const s = expectSitesFound(seed);
       const terrain = terrainOf(seed);
       const wrong: string[] = [];
       let steep = 0;
-      for (const column of columnsOf(seed, [...s.mountains, ...s.highMountains])) {
+      for (const column of columnsOf(seed, distinct([...allChunks(s), ...s.lowSteepMountains]))) {
         const { chunk, lx, lz, x, z } = column;
         const surface = terrain.surfaceHeightAt(x, z);
         if (surface < SEA_LEVEL || !isSteep(terrain, x, z) || isPondColumn(terrain, x, z)) continue;
+        if (isMountainAboveSnowLine(terrain, x, z)) continue;
         steep++;
         const top = chunk.get(lx, surface, lz);
         const below = chunk.get(lx, surface - 1, lz);
         if (top !== BlockType.Stone) wrong.push(`(${x}, ${surface}, ${z}) 顶层是 ${blockName(top)}`);
         else if (below === BlockType.Dirt) wrong.push(`(${x}, ${surface}, ${z}) 石头下面是泥土`);
       }
-      expect(steep, '查过的陡坡列').toBeGreaterThan(0);
+      expect(steep, '查过的雪线以下的陡坡列').toBeGreaterThan(0);
+      expect(wrong.slice(0, 20)).toEqual([]);
+    },
+  );
+});
+
+describe('雪线以上一律铺雪（#82 修订，用户决定）', () => {
+  it.each(SURVEY_SEEDS)(
+    `种子 %i：高山 y ${SNOW_LINE_Y} 以上的陡坡列，列顶查询与生成结果都是雪草方块，紧挨着的下一格不是泥土`,
+    (seed) => {
+      expectSurfaceBlocksDefined();
+      const s = expectSitesFound(seed);
+      const terrain = terrainOf(seed);
+      const wrong: string[] = [];
+      let steep = 0;
+      for (const column of columnsOf(seed, s.highMountains)) {
+        const { chunk, lx, lz, x, z } = column;
+        if (!isMountainAboveSnowLine(terrain, x, z) || !isSteep(terrain, x, z)) continue;
+        steep++;
+        const surface = terrain.surfaceHeightAt(x, z);
+        const queried = terrain.surfaceBlockAt(x, z);
+        const top = chunk.get(lx, surface, lz);
+        const below = chunk.get(lx, surface - 1, lz);
+        if (queried !== SNOWY_GRASS || top !== SNOWY_GRASS) {
+          wrong.push(`(${x}, ${surface}, ${z})：查询 ${blockName(queried)}，生成 ${blockName(top)}`);
+        } else if (below === BlockType.Dirt) {
+          wrong.push(`(${x}, ${surface}, ${z}) 陡坡的雪草方块下面是泥土`);
+        }
+      }
+      expect(steep, '查过的雪线以上的陡坡列').toBeGreaterThan(0);
+      expect(wrong.slice(0, 20)).toEqual([]);
+    },
+  );
+
+  /** 山顶：地表 ≥ 这个高度、不低于周围 8 列的高山列。每个种子取几座。 */
+  const PEAK_MIN_Y = 170;
+  const PEAKS_PER_SEED = 3;
+  const DIRECTIONS: ReadonlyArray<readonly [number, number]> = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+
+  it.each(SURVEY_SEEDS)(
+    `种子 %i：从山顶（地表 ≥ ${PEAK_MIN_Y} 的局部最高处）沿东南西北逐列检查到地表低于 y ${SNOW_LINE_Y}，途经各列的列顶查询与生成结果都没有石头`,
+    (seed) => {
+      expectSurfaceBlocksDefined();
+      const s = expectSitesFound(seed);
+      const terrain = terrainOf(seed);
+      const peaks: ColumnCoord[] = [];
+      for (const { x, z } of columnsOf(seed, s.highMountains)) {
+        const h = terrain.surfaceHeightAt(x, z);
+        if (h < PEAK_MIN_Y || terrain.biomeAt(x, z) !== Biome.Mountains) continue;
+        let top = true;
+        for (let dx = -1; dx <= 1 && top; dx++) {
+          for (let dz = -1; dz <= 1; dz++) {
+            if (terrain.surfaceHeightAt(x + dx, z + dz) > h) top = false;
+          }
+        }
+        if (top && peaks.every((p) => Math.abs(p.x - x) + Math.abs(p.z - z) > CHUNK_SIZE)) peaks.push({ x, z });
+        if (peaks.length >= PEAKS_PER_SEED) break;
+      }
+      expect(peaks.length, `地表 ≥ ${PEAK_MIN_Y} 的山顶`).toBeGreaterThan(0);
+      const wrong: string[] = [];
+      let walked = 0;
+      for (const peak of peaks) {
+        for (const [dx, dz] of DIRECTIONS) {
+          for (let { x, z } = peak; terrain.surfaceHeightAt(x, z) >= SNOW_LINE_Y; x += dx, z += dz) {
+            if (terrain.biomeAt(x, z) !== Biome.Mountains) break;
+            walked++;
+            const surface = terrain.surfaceHeightAt(x, z);
+            const queried = terrain.surfaceBlockAt(x, z);
+            const generated = blockAt(chunkAt(seed, chunkOfColumn({ x, z })), { x, z }, surface);
+            if (queried === BlockType.Stone || generated === BlockType.Stone) {
+              wrong.push(`山顶 (${peak.x}, ${peak.z}) 往 (${dx}, ${dz})：(${x}, ${surface}, ${z}) 查询 ${blockName(queried)}，生成 ${blockName(generated)}`);
+            }
+          }
+        }
+      }
+      expect(walked, '检查过的雪线以上的列').toBeGreaterThan(0);
       expect(wrong.slice(0, 20)).toEqual([]);
     },
   );
@@ -525,7 +638,7 @@ describe('悬垂下方那段的顶层也按群系铺（#76）', () => {
 
 describe('每一段露天的顶面都铺了地表（#76）', () => {
   it.each(SURVEY_SEEDS)(
-    '种子 %i：每一段上方是空气、水或冰的顶面都是草方块、雪草方块、石头、沙子、沙砾之一；草方块与雪草方块之下 3 到 4 层泥土',
+    '种子 %i：每一段上方是空气、水或冰的顶面都是草方块、雪草方块、石头、沙子、沙砾之一；草方块与雪草方块之下 3 到 4 层泥土（高山雪线以上的陡坡列除外）',
     (seed) => {
       expectSurfaceBlocksDefined();
       const s = expectSitesFound(seed);
@@ -534,14 +647,16 @@ describe('每一段露天的顶面都铺了地表（#76）', () => {
       const seen = new Set<BlockType>();
       for (const column of columnsOf(seed, allChunks(s))) {
         const { chunk, lx, lz, x, z } = column;
-        for (const { y } of segmentTops(terrain, column)) {
+        // 高山雪线以上的陡坡列（#82 修订）最高那一段的雪草方块之下不铺泥土，见「雪线以上一律铺雪」
+        const steepSnow = isSteep(terrain, x, z) && isMountainAboveSnowLine(terrain, x, z);
+        for (const { y, highest } of segmentTops(terrain, column)) {
           const block = chunk.get(lx, y, lz);
           seen.add(block);
           if (!TERRAIN_SURFACE.has(block)) {
             wrong.push(`(${x}, ${y}, ${z}) 顶面是 ${blockName(block)}`);
             continue;
           }
-          if (block === BlockType.Grass || block === SNOWY_GRASS) {
+          if ((block === BlockType.Grass || block === SNOWY_GRASS) && !(highest && steepSnow)) {
             const dirt = dirtProblem(chunk, lx, y, lz);
             if (dirt) wrong.push(`(${x}, ${y}, ${z}) ${blockName(block)}：${dirt}`);
           }

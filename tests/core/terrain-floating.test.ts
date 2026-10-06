@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
-import type { Chunk } from '../../src/core/chunk';
+import { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, WORLD_MIN_Y } from '../../src/core/constants';
 import { Biome, createTerrain, type Terrain } from '../../src/core/terrain';
+import { createDensityField } from '../../src/core/terrain-density';
 import type { ChunkCoord } from '../../src/core/world';
 import { analyzeConnectivity, type ConnectivityReport, type FloatingBlock } from '../helpers/floating-terrain';
 import {
@@ -21,13 +22,25 @@ import {
 /**
  * 高山悬空地形块（#86）：三维连通分析下没有不与地面相连的地形块，高山里仍有悬垂，四个查询仍与生成结果一致。
  *
- * 采样（QA 定，见 .scratch/seams-86.md）：每个种子在 ±2560 格、步长 64 的网格上找高山内部的列（东南西北 32 格外
+ * 接缝：只经地形对象的公共接缝测，即 `createTerrain(seed)` 的 `generateChunk` 与四个查询（`biomeAt`、`surfaceHeightAt`、
+ * `surfaceBlockAt`、`isSolidSpan`），不碰密度场的内部函数；搜索编号重新计数的用例例外，经 `createDensityField` 注入起点。
+ * 查询用另一个没生成过区块的地形对象，查询不能依赖生成器留下的状态。只看地形方块（`isTerrainBlock`）。
+ *
+ * 采样：每个种子在 ±2560 格、步长 64 的网格上找高山内部的列（东南西北 32 格外
  * 也是高山），按地表高度从高到低取 WINDOWS_PER_SEED 个山顶，彼此相隔至少 WINDOW 个区块；以每个山顶所在区块为中心
  * 取 WINDOW×WINDOW 个区块合成一块做连通分析（`tests/helpers/floating-terrain.ts`）。悬空块多在山顶一带，所以按山顶取。
  * 碰到合并体侧面的连通块判不定、不计入；没碰到侧面的连通块在整个世界里也是孤立的，不会误报。
  * 改前三个种子 9 个合并体里有 11 块悬空块，最大 2380 格（y 179 到 194），水平外接矩形最大 26 格。
  *
- * 阈值：悬空块数量为 0（#86「去掉」的字面）。
+ * 连通分析里的地面是最底层基岩所在的连通块，6 邻接。另取种子 20261772、中心区块 (45, −8) 的合并体做回归：#82 实机验收
+ * 找到最大那块悬空块（136 格，y 183 到 186）就在这里。
+ *
+ * 阈值：
+ * - 悬空块数量为 0（#86「去掉」的字面），每个山顶合并体与回归合并体都是。
+ * - 悬垂：山顶合并体里的高山列隔一列取一列，悬垂列合计占比不低于 MIN_OVERHANG_SHARE。
+ * - 查询一致：区块边缘一圈加内部隔一列取一列，地表高度查询等于最高的地形方块（水塘列按挖之前），列顶地表方块查询等于
+ *   那一格；最高那一段是实心段，其下一格不是。回归一带另按格逐一核对单列实心段查询。
+ * - 确定性：生成过整片合并体之后的中心与四角区块，与新地形对象只生成那一个区块逐字节相同；先 A 后 B 与先 B 后 A 相同。
  * 耗时：每个合并体 100 个区块，生成加连通分析约 0.8 秒；查询一致的用例只抽查部分列。本文件在当前机器上合计约 16 秒（上限 30 秒）。
  */
 
@@ -242,6 +255,41 @@ describe('单列实心段查询逐格与生成一致（回归一带）', () => {
             }
           }
         }
+      }
+    }
+    expect(wrong.slice(0, 20)).toEqual([]);
+  });
+});
+
+/**
+ * 跨区块搜索编号的起点：下一次搜索的编号是 Uint32Array 能存的最大值，再下一次就要重新计数。下面的区块生成约有
+ * 6 次跨区块搜索，查询约有 2 次，都会越过上限。
+ */
+const NEAR_SEARCH_ID_LIMIT = 0xffff_ffff - 1;
+
+describe('跨区块搜索的编号用完后重新计数', () => {
+  it(`种子 ${REGRESSION_SEED}：搜索编号从 2^32 − 2 起算，越过上限后原悬空块一带的生成与查询结果与从 0 起算相同`, () => {
+    // 列上的访问表是 Uint32Array，编号越过 2^32 − 1 而不重新计数时，搜索认不出访问过的格，不会结束
+    const tight = createDensityField(REGRESSION_SEED, NEAR_SEARCH_ID_LIMIT);
+    const normal = createDensityField(REGRESSION_SEED);
+    const wrong: string[] = [];
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const cx = REGRESSION_CENTER.cx + dx;
+        const cz = REGRESSION_CENTER.cz + dz;
+        const a = new Chunk(cx, cz);
+        const b = new Chunk(cx, cz);
+        const ea = tight.fill(a);
+        const eb = normal.fill(b);
+        if (!sameBlocks(a, b)) wrong.push(`区块 (${cx}, ${cz}) 的方块`);
+        if (!Buffer.from(ea.heights.buffer).equals(Buffer.from(eb.heights.buffer))) wrong.push(`区块 (${cx}, ${cz}) 的地表高度窗口`);
+      }
+    }
+    const fresh = createDensityField(REGRESSION_SEED, NEAR_SEARCH_ID_LIMIT);
+    for (let x = 704; x < 736; x++) {
+      for (let z = -138; z < -106; z++) {
+        if (fresh.surfaceHeight(x, z) !== normal.surfaceHeight(x, z)) wrong.push(`(${x}, ${z}) 的地表高度`);
+        if (fresh.solidSpan(x, z, 184, 184) !== normal.solidSpan(x, z, 184, 184)) wrong.push(`(${x}, 184, ${z}) 的实心段`);
       }
     }
     expect(wrong.slice(0, 20)).toEqual([]);

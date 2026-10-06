@@ -404,17 +404,59 @@ export interface DensityField {
   fill(chunk: Chunk): DensityExtent;
 }
 
-export function createDensityField(seed: number): DensityField {
-  return new Field(seed);
+/**
+ * 跨区块搜索编号的上限。列上的访问表是 Uint32Array，编号再大就存不下：存进去的值与编号不相等，
+ * 搜索认不出这次已经访问过的格，会一直重复访问。编号到上限时清空扫过的列（连同访问表与结论）、从 1 重新计数。
+ */
+const SEARCH_ID_LIMIT = 0xffff_ffff;
+
+/**
+ * `lastSearchId` 只给测试用：从接近 SEARCH_ID_LIMIT 的编号开始，少量搜索就能走到重新计数的那条路径。
+ */
+export function createDensityField(seed: number, lastSearchId = 0): DensityField {
+  return new Field(seed, lastSearchId);
 }
 
 /**
  * 区块里悬着的格的标记：不悬着、还没标、保留（与地面相连）、悬空块。标记表的下标与区块方块数组相同
- * （`blockIndex`：`((y − WORLD_MIN_Y) << 8) | (lz << 4) | lx`）。
+ * （`blockIndex`），由 `cellIndex` 从高度与列下标算出。
  */
 const HANGING = 1;
 const KEPT = 2;
 const FLOATING = 3;
+
+/** 区块边长与一层格数以 2 为底的对数：下面几个换算函数用位运算。 */
+const SIZE_BITS = Math.log2(CHUNK_SIZE);
+const AREA_BITS = 2 * SIZE_BITS;
+
+/**
+ * 区块里一格的下标，与区块方块数组相同（`blockIndex`）。column 是列下标 `lz * CHUNK_SIZE + lx`。
+ * 下面几个函数在下标、高度、列下标、局部坐标之间换算。
+ */
+function cellIndex(y: number, column: number): number {
+  return ((y - WORLD_MIN_Y) << AREA_BITS) | column;
+}
+
+function cellY(cell: number): number {
+  return (cell >> AREA_BITS) + WORLD_MIN_Y;
+}
+
+function cellColumn(cell: number): number {
+  return cell & (CHUNK_AREA - 1);
+}
+
+function columnX(column: number): number {
+  return column & (CHUNK_SIZE - 1);
+}
+
+function columnZ(column: number): number {
+  return column >> SIZE_BITS;
+}
+
+/** 列下标在地表高度窗口 `heights` 里的下标（窗口四周多一圈）。 */
+function heightIndex(column: number): number {
+  return (columnZ(column) + 1) * HEIGHT_WINDOW + columnX(column) + 1;
+}
 
 /** 一格悬着的格搜过的结论。 */
 function verdictOf(col: ColumnSolids, y: number): number {
@@ -435,7 +477,7 @@ class Field implements DensityField {
   private readonly columns = new Map<number, ColumnSolids>();
 
   /** 搜索的编号：每次搜索加一，列上记的编号等于它就是这次搜过的格。 */
-  private searchId = 0;
+  private searchId: number;
   /** 跨区块搜索用的栈（x、y、z 依次排）与访问过的格（列、y 依次排），搜索之间复用。 */
   private readonly stack: number[] = [];
   private readonly visited: Array<ColumnSolids | number> = [];
@@ -446,9 +488,14 @@ class Field implements DensityField {
   private cellStack = new Int32Array(1024);
   private component = new Int32Array(1024);
 
-  constructor(private readonly seed: number) {}
+  constructor(
+    private readonly seed: number,
+    lastSearchId: number,
+  ) {
+    this.searchId = lastSearchId;
+  }
 
-  /** 缓存超过上限就整个清空。只在对外方法开头调，搜索中途不清。 */
+  /** 缓存超过上限就整个清空。只在对外方法开头调，搜索中途不清（搜索编号用完时另见 `isFloating`）。 */
   private trim(): void {
     if (this.grids.size > GRID_CACHE_LIMIT) this.grids.clear();
     if (this.columns.size > COLUMN_CACHE_LIMIT) this.columns.clear();
@@ -504,9 +551,16 @@ class Field implements DensityField {
    * 结论只取决于这一格所在的连通块，所以从块里哪一格搜起都一样，搜过的格都记下。
    */
   private isFloating(x: number, y: number, z: number): boolean {
-    const startColumn = this.column(x, z);
+    let startColumn = this.column(x, z);
     const known = verdictOf(startColumn, y);
     if (known !== UNKNOWN) return known === DETACHED;
+    if (this.searchId >= SEARCH_ID_LIMIT) {
+      // 编号用完：清空扫过的列（访问表与结论随列一起丢掉），从 1 重新计数。调用方手上的列对象仍然有效，
+      // 它们的实心与着地信息不变，只是之后的搜索不再往它们上面记编号与结论。
+      this.columns.clear();
+      this.searchId = 0;
+      startColumn = this.column(x, z);
+    }
     const id = ++this.searchId;
     const stack = this.stack;
     const visited = this.visited;
@@ -636,7 +690,7 @@ class Field implements DensityField {
         let lowestAir = top + 1;
         scanColumn(corners, top, solidTop + 1, (y, solid) => {
           if (solid) {
-            blocks[((y - WORLD_MIN_Y) << 8) | column] = BlockType.Stone;
+            blocks[cellIndex(y, column)] = BlockType.Stone;
             if (!found) {
               surface = y;
               found = true;
@@ -650,7 +704,7 @@ class Field implements DensityField {
         solidTops[column] = solidTop;
         groundedTops[column] = lowestAir - 1;
         if (surface > lowestAir) hanging = true;
-        heights[(lz + 1) * HEIGHT_WINDOW + (lx + 1)] = surface;
+        heights[heightIndex(column)] = surface;
       }
     }
     const marks = this.marks;
@@ -677,7 +731,7 @@ class Field implements DensityField {
           } else if (!solid) {
             return false;
           }
-          attached = y <= innerGrounded || (used !== undefined && marks[((y - WORLD_MIN_Y) << 8) | inner] === KEPT);
+          attached = y <= innerGrounded || (used !== undefined && marks[cellIndex(y, inner)] === KEPT);
           return !attached;
         });
         heights[(lz + 1) * HEIGHT_WINDOW + (lx + 1)] =
@@ -705,20 +759,20 @@ class Field implements DensityField {
     let high = WORLD_MIN_Y;
     let count = 0;
     for (let column = 0; column < CHUNK_AREA; column++) {
-      const surface = heights[((column >> 4) + 1) * HEIGHT_WINDOW + (column & (CHUNK_SIZE - 1)) + 1]!;
+      const surface = heights[heightIndex(column)]!;
       const groundedTop = groundedTops[column]!;
       if (surface <= groundedTop) continue;
       if (groundedTop + 1 < low) low = groundedTop + 1;
       if (surface > high) high = surface;
       for (let y = surface; y > groundedTop; y--) {
-        const cell = ((y - WORLD_MIN_Y) << 8) | column;
+        const cell = cellIndex(y, column);
         if (blocks[cell] !== BlockType.Stone) continue;
         cells[cell] = HANGING;
         count++;
       }
     }
-    const from = (low - WORLD_MIN_Y) << 8;
-    const to = (high - WORLD_MIN_Y + 1) << 8;
+    const from = cellIndex(low, 0);
+    const to = cellIndex(high + 1, 0);
     if (this.cellStack.length < count) {
       this.cellStack = new Int32Array(count);
       this.component = new Int32Array(count);
@@ -736,10 +790,10 @@ class Field implements DensityField {
       while (sp > 0) {
         const cell = stack[--sp]!;
         component[size++] = cell;
-        const column = cell & (CHUNK_AREA - 1);
-        const lx = column & (CHUNK_SIZE - 1);
-        const lz = column >> 4;
-        const y = (cell >> 8) + WORLD_MIN_Y;
+        const column = cellColumn(cell);
+        const lx = columnX(column);
+        const lz = columnZ(column);
+        const y = cellY(cell);
         if (lx === 0 || lz === 0 || lx === CHUNK_SIZE - 1 || lz === CHUNK_SIZE - 1) edge = true;
         // 上下两格在同一列，不会着地（悬着的格正下方是空气或另一格悬着的格）；东西南北的格可能着地。
         // 标记表在 low 之下、high 之上都是 0，不必另判边界。
@@ -766,7 +820,7 @@ class Field implements DensityField {
             if (lz === 0) continue;
             next = cell - CHUNK_SIZE;
           }
-          if (y <= groundedTops[next & (CHUNK_AREA - 1)]!) grounded = true;
+          if (y <= groundedTops[cellColumn(next)]!) grounded = true;
           else if (cells[next] === HANGING) {
             cells[next] = KEPT;
             stack[sp++] = next;
@@ -775,12 +829,13 @@ class Field implements DensityField {
       }
       if (grounded) continue;
       const first = component[0]!;
+      const firstColumn = cellColumn(first);
       const floating =
         !edge ||
         this.isFloating(
-          chunk.cx * CHUNK_SIZE + (first & (CHUNK_SIZE - 1)),
-          (first >> 8) + WORLD_MIN_Y,
-          chunk.cz * CHUNK_SIZE + ((first >> 4) & (CHUNK_SIZE - 1)),
+          chunk.cx * CHUNK_SIZE + columnX(firstColumn),
+          cellY(first),
+          chunk.cz * CHUNK_SIZE + columnZ(firstColumn),
         );
       if (!floating) continue;
       for (let c = 0; c < size; c++) {
@@ -791,10 +846,10 @@ class Field implements DensityField {
     }
     // 区块里各列的地表高度：最高的格若是悬空块，往下找第一格保留的悬着的格，都没有就是着地的最高一格。
     for (let column = 0; column < CHUNK_AREA; column++) {
-      const index = ((column >> 4) + 1) * HEIGHT_WINDOW + (column & (CHUNK_SIZE - 1)) + 1;
+      const index = heightIndex(column);
       const groundedTop = groundedTops[column]!;
       let y = heights[index]!;
-      while (y > groundedTop && cells[((y - WORLD_MIN_Y) << 8) | column] !== KEPT) y--;
+      while (y > groundedTop && cells[cellIndex(y, column)] !== KEPT) y--;
       heights[index] = y;
     }
     return { from, to };

@@ -12,13 +12,15 @@ import {
   type DensityField,
   HEIGHT_WINDOW,
   isColdAt,
+  MAX_TERRAIN_Y,
   MOUNTAIN_RELIEF,
   OCEAN_CONTINENTALNESS,
   reliefAt,
   temperatureAt,
+  temperatureDropAt,
 } from './terrain-density';
 import { Biome } from './biome';
-import { BEACH_REACH, coverColumn, highestTopBlock, isSteepColumn, type SurfaceSamples } from './surface';
+import { BEACH_REACH, coverColumn, highestTopBlock, isSteepColumn, SNOW_LINE_Y, type SurfaceSamples } from './surface';
 import { plantTrees, type SurfaceHeightAt, type TreePlacement } from './tree';
 
 import type { ColumnCoord } from './world';
@@ -122,9 +124,10 @@ function searchColumn(i: number, j: number): ColumnCoord {
  */
 export function createTerrain(seed: number): Terrain {
   const density = createDensityField(seed);
+  const heightAt: SurfaceHeightAt = (x, z) => density.surfaceHeight(x, z);
   const samples: SurfaceSamples = {
-    heightAt: (x, z) => density.surfaceHeight(x, z),
-    biomeAt: (x, z) => biomeAt(seed, x, z, continentalnessAt(seed, x, z)),
+    heightAt,
+    biomeAt: (x, z) => biomeAt(seed, x, z, continentalnessAt(seed, x, z), heightAt),
     continentalnessAt: (x, z) => continentalnessAt(seed, x, z),
     reliefAt: (x, z) => reliefAt(seed, x, z),
     isColdAt: (x, z) => isColdAt(seed, x, z),
@@ -159,16 +162,32 @@ function surfaceBlockWithPonds(ponds: PondPlacement, samples: SurfaceSamples, x:
 }
 
 /**
- * 按群系参数分群系（CONTEXT.md「群系」）：先按大陆度分海与陆，海是大海；陆地上起伏大的是高山，
- * 寒冷处是冰雪，其余是平原。寒冷处的海仍是大海，海面结冰由生成步骤按同一个温度阈值做。
- *
- * 大陆度由调用方先求好（区块生成按列缓存它，铺地表找大海也只看它），起伏与温度判到哪一层才求哪一层。
+ * 温度噪声不低于它的陆地列，地表再高也不是寒冷处：地表高度不超过 MAX_TERRAIN_Y，温度最多下降
+ * `temperatureDropAt(MAX_TERRAIN_Y)`。群系判断在这种列上不必求地表高度。
  */
-function biomeAt(seed: number, x: number, z: number, continentalness: number): Biome {
+const NEVER_COLD_TEMPERATURE = COLD_TEMPERATURE + temperatureDropAt(MAX_TERRAIN_Y);
+
+/**
+ * 按群系参数与地表高度分群系（CONTEXT.md「群系」，#87）。判断次序：
+ * 1. 大陆度低于大海阈值：大海。寒冷处的海仍是大海，海面结冰由生成步骤按海平面处的温度做（`isColdAt`，不含高度项）。
+ * 2. 陆地的温度 = 二维温度噪声 − 随地表高度下降的项（`temperatureDropAt`），低于 COLD_TEMPERATURE 是寒冷处。
+ * 3. 起伏大的陆地：寒冷处且地表在雪线以下是冰雪，其余是高山。寒冷处的高山因此只剩雪线以上的部分。
+ * 4. 起伏不大的陆地：寒冷处是冰雪，其余是平原。
+ *
+ * 大陆度由调用方先求好（区块生成按列缓存它，铺地表找大海也只看它），起伏、温度与地表高度判到哪一步才求哪一个：
+ * 高度项只会让温度更低，所以起伏不大且温度噪声已低于阈值的列直接是冰雪；温度噪声不低于 NEVER_COLD_TEMPERATURE 的列
+ * 地表再高也不冷。其余列才求地表高度，它是这里开销最大的一项。
+ */
+function biomeAt(seed: number, x: number, z: number, continentalness: number, heightAt: SurfaceHeightAt): Biome {
   if (continentalness < OCEAN_CONTINENTALNESS) return Biome.Ocean;
-  if (reliefAt(seed, x, z) > MOUNTAIN_RELIEF) return Biome.Mountains;
-  if (temperatureAt(seed, x, z) < COLD_TEMPERATURE) return Biome.Snowy;
-  return Biome.Plains;
+  const mountainous = reliefAt(seed, x, z) > MOUNTAIN_RELIEF;
+  const temperature = temperatureAt(seed, x, z);
+  if (!mountainous && temperature < COLD_TEMPERATURE) return Biome.Snowy;
+  if (temperature >= NEVER_COLD_TEMPERATURE) return mountainous ? Biome.Mountains : Biome.Plains;
+  const height = heightAt(x, z);
+  const cold = temperature - temperatureDropAt(height) < COLD_TEMPERATURE;
+  if (mountainous) return cold && height < SNOW_LINE_Y ? Biome.Snowy : Biome.Mountains;
+  return cold ? Biome.Snowy : Biome.Plains;
 }
 
 /** 草方块与雪草方块之下的泥土层数（沙子、沙砾之下同样层数）：每一列在这个闭区间里由种子确定性地取一个。 */
@@ -193,6 +212,9 @@ function dirtDepthAt(seed: number, x: number, z: number): number {
 const CLIMATE_MARGIN = BEACH_REACH;
 const CLIMATE_WINDOW = CHUNK_SIZE + 2 * CLIMATE_MARGIN;
 
+/** 区块生成按列缓存的地表高度还没求的标记：比世界最低处低。 */
+const HEIGHT_UNKNOWN = -0x8000;
+
 /** 区块生成按列缓存的温度：还没求、不是寒冷处、是寒冷处。 */
 const COLD_UNKNOWN = 0;
 const COLD_NO = 1;
@@ -200,7 +222,7 @@ const COLD_YES = 2;
 
 /**
  * 区块生成用的样本：区块连同四周一圈的地表高度来自 `DensityField.fill` 已求出的数，区块连同四周 CLIMATE_MARGIN 列的
- * 群系与大陆度、区块里各列的温度按列算一次存下；更远的列改调地形对象的查询。每个数都与查询逐列相同，所以生成时
+ * 群系、大陆度与其余地表高度、区块里各列的温度按列算一次存下；更远的列改调地形对象的查询。每个数都与查询逐列相同，所以生成时
  * 铺地表与列顶地表方块查询得到同一个结果，只是不重复计算。
  */
 function chunkSamples(
@@ -228,21 +250,33 @@ function chunkSamples(
     }
     return c;
   };
+  // 群系要读地表高度（#87），群系窗口比 fill 求出的高度窗口宽：窗口外圈的列求过一次就存下，放树、挖水塘与
+  // 列顶地表方块再问同一列时不重复求。
+  const outerHeights = new Int16Array(CLIMATE_WINDOW * CLIMATE_WINDOW).fill(HEIGHT_UNKNOWN);
+  const heightOf: SurfaceHeightAt = (x, z) => {
+    const wx = x - originX + 1;
+    const wz = z - originZ + 1;
+    const inWindow = wx >= 0 && wx < HEIGHT_WINDOW && wz >= 0 && wz < HEIGHT_WINDOW;
+    // 窗口四个角上的列没有求，与窗口外的列一样另求。
+    const corner = (wx === 0 || wx === HEIGHT_WINDOW - 1) && (wz === 0 || wz === HEIGHT_WINDOW - 1);
+    if (inWindow && !corner) return heights[wz * HEIGHT_WINDOW + wx]!;
+    const i = climateIndex(x, z);
+    if (i < 0) return queries.surfaceHeightAt(x, z);
+    let h = outerHeights[i]!;
+    if (h === HEIGHT_UNKNOWN) {
+      h = queries.surfaceHeightAt(x, z);
+      outerHeights[i] = h;
+    }
+    return h;
+  };
   return {
-    heightAt: (x, z) => {
-      const wx = x - originX + 1;
-      const wz = z - originZ + 1;
-      const inWindow = wx >= 0 && wx < HEIGHT_WINDOW && wz >= 0 && wz < HEIGHT_WINDOW;
-      // 窗口四个角上的列没有求，改调查询。
-      const corner = (wx === 0 || wx === HEIGHT_WINDOW - 1) && (wz === 0 || wz === HEIGHT_WINDOW - 1);
-      return inWindow && !corner ? heights[wz * HEIGHT_WINDOW + wx]! : queries.surfaceHeightAt(x, z);
-    },
+    heightAt: heightOf,
     biomeAt: (x, z) => {
       const i = climateIndex(x, z);
       if (i < 0) return queries.biomeAt(x, z);
       let biome = biomes[i];
       if (biome === undefined) {
-        biome = biomeAt(seed, x, z, continentalnessOf(x, z));
+        biome = biomeAt(seed, x, z, continentalnessOf(x, z), heightOf);
         biomes[i] = biome;
       }
       return biome;

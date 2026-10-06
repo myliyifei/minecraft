@@ -64,9 +64,28 @@ export function temperatureAt(seed: number, x: number, z: number): number {
   return fbm2(seed ^ TEMPERATURE_SALT, x / TEMPERATURE_SCALE, z / TEMPERATURE_SCALE, CLIMATE_OCTAVES);
 }
 
-/** 那一列是不是寒冷处。 */
+/**
+ * 那一列海平面处是不是寒冷处：只看二维温度噪声，不含随地表高度下降的那一项。
+ *
+ * 海平面那层结冰与寒冷处大海群系露出水面的雪草方块用它（#87）：结冰看的是水面，水面总在海平面，
+ * 不随岸上的地表高度变；含高度项后，内陆洼地湖岸边的山越高、湖面越容易结冰，与水面所在的高度无关。
+ */
 export function isColdAt(seed: number, x: number, z: number): boolean {
   return temperatureAt(seed, x, z) < COLD_TEMPERATURE;
+}
+
+/** 地表高于它的陆地列，温度按高出的格数下降（#87）。平原内部的普通起伏在它以下，温度不变。 */
+export const TEMPERATURE_DROP_BASE_Y = 72;
+
+/** 地表每高出 TEMPERATURE_DROP_BASE_Y 一格，温度下降这么多（#87）。 */
+export const TEMPERATURE_DROP_PER_BLOCK = 0.006;
+
+/**
+ * 地表高度为 surfaceHeight 的陆地列，温度比二维温度噪声低多少（#87，CONTEXT.md「群系」）：
+ * 基准高度以下为 0，以上每格 TEMPERATURE_DROP_PER_BLOCK。群系判断用「温度噪声 − 这一项」与 COLD_TEMPERATURE 比较。
+ */
+export function temperatureDropAt(surfaceHeight: number): number {
+  return TEMPERATURE_DROP_PER_BLOCK * Math.max(0, surfaceHeight - TEMPERATURE_DROP_BASE_Y);
 }
 
 // ---------------------------------------------------------------------------

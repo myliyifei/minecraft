@@ -17,6 +17,7 @@ import {
 } from '../helpers/terrain-survey';
 import { localOf } from '../../src/core/world';
 import { SEA_LEVEL } from '../../src/core/constants';
+import { SNOW_LINE_Y } from '../../src/core/surface';
 
 /**
  * 群系的分布与各群系的高度（#75 验收条件第二、三条）。
@@ -48,6 +49,12 @@ const MAX_SURFACE_Y = 210;
 const PEAK_AT_LEAST_Y = 170;
 const OCEAN_FLOOR_MIN_Y = 40;
 const OCEAN_FLOOR_MAX_Y = 55;
+
+/**
+ * 冰雪列里最高的地表离雪线不超过几格（#87）。寒冷处的山坡在雪线以下都是冰雪，大范围采样里最高的冰雪列应贴近雪线；
+ * 三个种子实测都是 y 149，留 10 格余量。改前冰雪只在起伏不大的陆地上，最高只到 y 77。
+ */
+const SNOWY_BELOW_SNOW_LINE = 10;
 
 /** 「高山列的平均地表比平原高出若干格」里的若干格。 */
 const MOUNTAIN_ABOVE_PLAINS = 20;
@@ -203,11 +210,20 @@ describe('各群系的高度', () => {
     expect(below.length / land.length).toBeLessThan(0.05);
   });
 
-  it.each(SURVEY_SEEDS)('种子 %i：起伏大的陆地不论冷暖都是高山，冰雪列里最高的地表比高山列里最高的低至少 50 格', (seed) => {
-    const highest = (biome: Biome): number =>
-      Math.max(...allSamples(seed).filter((sample) => sample.biome === biome).map(({ surface }) => surface));
-    expect(highest(Biome.Mountains) - highest(Biome.Snowy)).toBeGreaterThanOrEqual(50);
-  });
+  // #87 用户决定：寒冷处地表在雪线以下的高山判为冰雪，寒冷处的高山只剩雪线以上的部分。改前起伏大的陆地不论冷暖都是
+  // 高山，冰雪列的地表最高只到 y 75 到 77；改后寒冷处的山坡一直到雪线下一格都是冰雪（三个种子都到 y 149）。
+  it.each(SURVEY_SEEDS)(
+    `种子 %i：冰雪列的地表都在雪线 y ${SNOW_LINE_Y} 以下、最高到雪线下 ${SNOWY_BELOW_SNOW_LINE} 格以内，地表在雪线及以上的陆地列都是高山`,
+    (seed) => {
+      const samples = allSamples(seed);
+      const snowyTop = Math.max(...samples.filter(({ biome }) => biome === Biome.Snowy).map(({ surface }) => surface));
+      expect(snowyTop, '冰雪列里最高的地表').toBeLessThan(SNOW_LINE_Y);
+      expect(snowyTop, '冰雪列里最高的地表').toBeGreaterThanOrEqual(SNOW_LINE_Y - SNOWY_BELOW_SNOW_LINE);
+      const aboveSnowLine = samples.filter(({ surface }) => surface >= SNOW_LINE_Y);
+      expect(aboveSnowLine.length, '地表在雪线及以上的采样列数').toBeGreaterThanOrEqual(30);
+      expect(aboveSnowLine.filter(({ biome }) => biome !== Biome.Mountains)).toEqual([]);
+    },
+  );
 
   it(`大海内部的列，海底至少 95% 在 y ${OCEAN_FLOOR_MIN_Y} 到 ${OCEAN_FLOOR_MAX_Y}`, () => {
     // 靠岸的大海列海底往上抬（群系之间平滑过渡），所以只看四周 64 格外也是大海的列

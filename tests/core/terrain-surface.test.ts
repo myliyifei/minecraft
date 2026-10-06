@@ -887,6 +887,9 @@ describe('沙滩（#76）', () => {
         if (edge === undefined || edge === 0) continue;
         const column = oceanSide(boundary, edge - 1);
         if (!isColdAt(seed, column.x, column.z)) continue;
+        // 起伏高于高山阈值的水边按大海群系的规则是石头（下面「大海群系里露出水面」那条断言它）。#87 起寒冷处雪线以下的
+        // 高山归入冰雪，原先高山临海的石头岸成了冰雪临海，这些水边不再计入；改前冰雪临海的水边没有这种列。
+        if (reliefAt(seed, column.x, column.z) > MOUNTAIN_RELIEF) continue;
         cold++;
         const block = terrain.surfaceBlockAt(column.x, column.z);
         if (block !== SNOWY_GRASS) edges.push(`(${column.x}, ${column.z}) ${blockName(block)}`);

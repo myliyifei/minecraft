@@ -12,7 +12,6 @@ import {
   type DensityField,
   HEIGHT_WINDOW,
   isColdAt,
-  MAX_TERRAIN_Y,
   MOUNTAIN_RELIEF,
   OCEAN_CONTINENTALNESS,
   reliefAt,
@@ -163,12 +162,6 @@ function surfaceBlockWithPonds(ponds: PondPlacement, samples: SurfaceSamples, x:
 }
 
 /**
- * 温度噪声不低于它的陆地列，地表再高也不是寒冷处：地表高度不超过 MAX_TERRAIN_Y，温度最多下降
- * `temperatureDropAt(MAX_TERRAIN_Y)`。群系判断在这种列上不必求地表高度。
- */
-const NEVER_COLD_TEMPERATURE = COLD_TEMPERATURE + temperatureDropAt(MAX_TERRAIN_Y);
-
-/**
  * 按群系参数与地表高度分群系（CONTEXT.md「群系」，#87）。判断次序：
  * 1. 大陆度低于大海阈值：大海。寒冷处的海仍是大海，海面结冰由生成步骤按海平面处的温度做（`isColdAt`，不含高度项）。
  * 2. 陆地的温度 = 二维温度噪声 − 随地表高度下降的项（`temperatureDropAt`），低于 COLD_TEMPERATURE 是寒冷处。
@@ -176,15 +169,13 @@ const NEVER_COLD_TEMPERATURE = COLD_TEMPERATURE + temperatureDropAt(MAX_TERRAIN_
  * 4. 起伏不大的陆地：寒冷处是冰雪，其余是平原。
  *
  * 大陆度由调用方先求好（区块生成按列缓存它，铺地表找大海也只看它），起伏、温度与地表高度判到哪一步才求哪一个：
- * 高度项只会让温度更低，所以起伏不大且温度噪声已低于阈值的列直接是冰雪；温度噪声不低于 NEVER_COLD_TEMPERATURE 的列
- * 地表再高也不冷。其余列才求地表高度，它是这里开销最大的一项。
+ * 高度项只会让温度更低，所以起伏不大且温度噪声已低于阈值的列直接是冰雪，其余陆地列才求地表高度，它是这里开销最大的一项。
  */
 function biomeAt(seed: number, x: number, z: number, continentalness: number, heightAt: SurfaceHeightAt): Biome {
   if (continentalness < OCEAN_CONTINENTALNESS) return Biome.Ocean;
   const mountainous = reliefAt(seed, x, z) > MOUNTAIN_RELIEF;
   const temperature = temperatureAt(seed, x, z);
   if (!mountainous && temperature < COLD_TEMPERATURE) return Biome.Snowy;
-  if (temperature >= NEVER_COLD_TEMPERATURE) return mountainous ? Biome.Mountains : Biome.Plains;
   const height = heightAt(x, z);
   const cold = temperature - temperatureDropAt(height) < COLD_TEMPERATURE;
   if (mountainous) return cold && height < SNOW_LINE_Y ? Biome.Snowy : Biome.Mountains;

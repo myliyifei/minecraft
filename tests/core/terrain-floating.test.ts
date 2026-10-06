@@ -221,6 +221,33 @@ describe('查询与生成结果一致（山顶合并体）', () => {
   });
 });
 
+describe('单列实心段查询逐格与生成一致（回归一带）', () => {
+  it(`种子 ${REGRESSION_SEED}：原悬空块所在区块与周围 8 个区块，y 150 到 210 每一格查询是否实心等于生成后那一格是不是地形方块`, () => {
+    // 原 136 格那块悬空块在区块 (45, −8)：那些格密度为正，查询若不按去掉悬空块的判定回答，会说它们是实心
+    const terrain = createTerrain(REGRESSION_SEED);
+    const wrong: string[] = [];
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const coord: ChunkCoord = { cx: REGRESSION_CENTER.cx + dx, cz: REGRESSION_CENTER.cz + dz };
+        const chunk = chunkAt(REGRESSION_SEED, coord);
+        for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+          for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+            const { x, z } = columnIn(coord, lx, lz);
+            if (isPondColumn(terrain, x, z)) continue;
+            for (let y = 150; y <= 210; y++) {
+              const generated = isTerrainBlock(chunk.get(lx, y, lz));
+              if (terrain.isSolidSpan(x, z, y, y) !== generated) {
+                wrong.push(`(${x}, ${y}, ${z})：查询 ${!generated}，生成 ${generated}`);
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(wrong.slice(0, 20)).toEqual([]);
+  });
+});
+
 describe('确定性（山顶合并体）', () => {
   it.each(SURVEY_SEEDS)('种子 %i：合并体里生成过整片之后的区块，与新地形对象只生成那一个区块逐字节相同', (seed) => {
     for (const origin of windowsOf(seed)) {

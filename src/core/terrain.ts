@@ -204,9 +204,6 @@ function dirtDepthAt(seed: number, x: number, z: number): number {
 const CLIMATE_MARGIN = BEACH_REACH;
 const CLIMATE_WINDOW = CHUNK_SIZE + 2 * CLIMATE_MARGIN;
 
-/** 区块生成按列缓存的地表高度还没求的标记：比世界最低处低。 */
-const HEIGHT_UNKNOWN = -0x8000;
-
 /** 区块生成按列缓存的温度：还没求、不是寒冷处、是寒冷处。 */
 const COLD_UNKNOWN = 0;
 const COLD_NO = 1;
@@ -214,7 +211,7 @@ const COLD_YES = 2;
 
 /**
  * 区块生成用的样本：区块连同四周一圈的地表高度来自 `DensityField.fill` 已求出的数，区块连同四周 CLIMATE_MARGIN 列的
- * 群系、大陆度与其余地表高度、区块里各列的温度按列算一次存下；更远的列改调地形对象的查询。每个数都与查询逐列相同，所以生成时
+ * 群系与大陆度、区块里各列的温度按列算一次存下；更远的列改调地形对象的查询。每个数都与查询逐列相同，所以生成时
  * 铺地表与列顶地表方块查询得到同一个结果，只是不重复计算。
  */
 function chunkSamples(
@@ -242,24 +239,15 @@ function chunkSamples(
     }
     return c;
   };
-  // 群系要读地表高度（#87），群系窗口比 fill 求出的高度窗口宽：窗口外圈的列求过一次就存下，放树、挖水塘与
-  // 列顶地表方块再问同一列时不重复求。
-  const outerHeights = new Int16Array(CLIMATE_WINDOW * CLIMATE_WINDOW).fill(HEIGHT_UNKNOWN);
+  // 群系要读地表高度（#87）。群系窗口比这个高度窗口宽，窗口外的列调查询；密度场缓存扫过的列，同一列再问不重新扫描，
+  // 实测在这里另建一层缓存不改变每区块耗时。
   const heightOf: SurfaceHeightAt = (x, z) => {
     const wx = x - originX + 1;
     const wz = z - originZ + 1;
     const inWindow = wx >= 0 && wx < HEIGHT_WINDOW && wz >= 0 && wz < HEIGHT_WINDOW;
-    // 窗口四个角上的列没有求，与窗口外的列一样另求。
+    // 窗口四个角上的列没有求，改调查询。
     const corner = (wx === 0 || wx === HEIGHT_WINDOW - 1) && (wz === 0 || wz === HEIGHT_WINDOW - 1);
-    if (inWindow && !corner) return heights[wz * HEIGHT_WINDOW + wx]!;
-    const i = climateIndex(x, z);
-    if (i < 0) return queries.surfaceHeightAt(x, z);
-    let h = outerHeights[i]!;
-    if (h === HEIGHT_UNKNOWN) {
-      h = queries.surfaceHeightAt(x, z);
-      outerHeights[i] = h;
-    }
-    return h;
+    return inWindow && !corner ? heights[wz * HEIGHT_WINDOW + wx]! : queries.surfaceHeightAt(x, z);
   };
   return {
     heightAt: heightOf,

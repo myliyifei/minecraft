@@ -248,8 +248,7 @@ interface Site {
  *
  * 只问种子、出生列与群系，不另问地表高度：判断两棵树是否相距足够只看水平距离与树冠半径。树冠半径由群系定：
  * 平原长橡树与白桦，高山与冰雪长云杉。群系在多数陆地列上要读地表高度（#87 温度随高度下降，见 `terrain.ts` 的
- * `biomeAt`）：区块生成按列缓存区块四周几列的群系与地表高度，密度场也缓存扫过的列，邻格检查与随后求树根高度
- * 不重复扫描同一列。
+ * `biomeAt`）：区块生成按列缓存区块四周几列的群系，密度场缓存扫过的列，邻格检查与随后求树根高度不重复扫描同一列。
  */
 function siteInCell(placement: TreePlacement, cellX: number, cellZ: number): Site | undefined {
   const roll = hashCoords(placement.seed ^ TREE_SALT, cellX, cellZ);

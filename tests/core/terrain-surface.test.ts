@@ -4,7 +4,7 @@ import type { Chunk } from '../../src/core/chunk';
 import { CHUNK_SIZE, DEFAULT_SEED, SEA_LEVEL, WORLD_MAX_Y, WORLD_MIN_Y } from '../../src/core/constants';
 import { Biome, createTerrain, type ColumnCoord, type Terrain } from '../../src/core/terrain';
 import { oreVeinsTouching } from '../../src/core/ore';
-import { isColdAt, MOUNTAIN_RELIEF, reliefAt } from '../../src/core/terrain-density';
+import { isColdAtSeaLevel, MOUNTAIN_RELIEF, reliefAt } from '../../src/core/terrain-density';
 import type { ChunkCoord } from '../../src/core/world';
 import {
   blockAt,
@@ -201,7 +201,7 @@ function waterEdgeOf(terrain: Terrain, boundary: BiomeBoundary): number | undefi
  */
 function oceanShoreTop(seed: number, { x, z }: ColumnCoord): BlockType {
   if (reliefAt(seed, x, z) > MOUNTAIN_RELIEF) return BlockType.Stone;
-  return isColdAt(seed, x, z) ? SNOWY_GRASS : SAND;
+  return isColdAtSeaLevel(seed, x, z) ? SNOWY_GRASS : SAND;
 }
 
 /** 这一列是大海群系里露出水面、地表在 y 63 到 67 的列。 */
@@ -863,7 +863,7 @@ describe('沙滩（#76）', () => {
         const edge = waterEdgeOf(terrain, boundary);
         if (edge === undefined || edge === 0) continue;
         const column = oceanSide(boundary, edge - 1);
-        if (isColdAt(seed, column.x, column.z)) continue;
+        if (isColdAtSeaLevel(seed, column.x, column.z)) continue;
         warm++;
         const block = terrain.surfaceBlockAt(column.x, column.z);
         if (block !== SAND && block !== BlockType.Stone) edges.push(`(${column.x}, ${column.z}) ${blockName(block)}`);
@@ -886,7 +886,7 @@ describe('沙滩（#76）', () => {
         const edge = waterEdgeOf(terrain, boundary);
         if (edge === undefined || edge === 0) continue;
         const column = oceanSide(boundary, edge - 1);
-        if (!isColdAt(seed, column.x, column.z)) continue;
+        if (!isColdAtSeaLevel(seed, column.x, column.z)) continue;
         // 起伏高于高山阈值的水边按大海群系的规则是石头（下面「大海群系里露出水面」那条断言它）。#87 起寒冷处雪线以下的
         // 高山归入冰雪，原先高山临海的石头岸成了冰雪临海，这些水边不再计入；改前冰雪临海的水边没有这种列。
         if (reliefAt(seed, column.x, column.z) > MOUNTAIN_RELIEF) continue;
@@ -1139,7 +1139,7 @@ describe('冰雪临海不铺沙子（#76 第二次修订，用户决定）', () 
         const edge = waterEdgeOf(terrain, boundary);
         if (edge === undefined || edge === 0) continue;
         const shore = oceanSide(boundary, edge - 1);
-        if (!isColdAt(seed, shore.x, shore.z)) continue;
+        if (!isColdAtSeaLevel(seed, shore.x, shore.z)) continue;
         reached++;
         const span = [
           ...Array.from({ length: 4 }, (_, d) => landSide(boundary, d)),

@@ -63,7 +63,7 @@ export interface SurfaceSamples {
   readonly biomeAt: (x: number, z: number) => Biome;
   readonly continentalnessAt: (x: number, z: number) => number;
   readonly reliefAt: (x: number, z: number) => number;
-  readonly isColdAt: (x: number, z: number) => boolean;
+  readonly isColdAtSeaLevel: (x: number, z: number) => boolean;
 }
 
 /** 沿 x、沿 z 四个方向各 1 到 reach 格的偏移，近的在前，找到就停。 */
@@ -98,7 +98,7 @@ export function exposedTopAt(biome: Biome, y: number, cold: boolean): BlockType 
 
 /** 这一列是不是寒冷处的大海群系：只有大海群系才问温度。 */
 function isColdOcean(samples: SurfaceSamples, x: number, z: number, biome: Biome): boolean {
-  return biome === Biome.Ocean && samples.isColdAt(x, z);
+  return biome === Biome.Ocean && samples.isColdAtSeaLevel(x, z);
 }
 
 /** 与东南西北四个相邻列的地表高度差的绝对值里最大的那个。 */
@@ -137,7 +137,7 @@ function anyNear(
 function coastTop(samples: SurfaceSamples, x: number, z: number, biome: Biome): BlockType | undefined {
   if (biome === Biome.Ocean) {
     if (samples.reliefAt(x, z) > MOUNTAIN_RELIEF) return BlockType.Stone;
-    return samples.isColdAt(x, z) ? BlockType.SnowyGrass : BlockType.Sand;
+    return samples.isColdAtSeaLevel(x, z) ? BlockType.SnowyGrass : BlockType.Sand;
   }
   if (biome === Biome.Snowy) return undefined;
   const ocean = OCEAN_CONTINENTALNESS;

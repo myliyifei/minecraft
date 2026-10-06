@@ -70,7 +70,7 @@ export function temperatureAt(seed: number, x: number, z: number): number {
  * 海平面那层结冰与寒冷处大海群系露出水面的雪草方块用它（#87）：结冰看的是水面，水面总在海平面，
  * 不随岸上的地表高度变；含高度项后，内陆洼地湖岸边的山越高、湖面越容易结冰，与水面所在的高度无关。
  */
-export function isColdAt(seed: number, x: number, z: number): boolean {
+export function isColdAtSeaLevel(seed: number, x: number, z: number): boolean {
   return temperatureAt(seed, x, z) < COLD_TEMPERATURE;
 }
 

@@ -11,7 +11,7 @@ import {
   createDensityField,
   type DensityField,
   HEIGHT_WINDOW,
-  isColdAt,
+  isColdAtSeaLevel,
   MOUNTAIN_RELIEF,
   OCEAN_CONTINENTALNESS,
   reliefAt,
@@ -130,7 +130,7 @@ export function createTerrain(seed: number): Terrain {
     biomeAt: (x, z) => biomeAt(seed, x, z, continentalnessAt(seed, x, z), heightAt),
     continentalnessAt: (x, z) => continentalnessAt(seed, x, z),
     reliefAt: (x, z) => reliefAt(seed, x, z),
-    isColdAt: (x, z) => isColdAt(seed, x, z),
+    isColdAtSeaLevel: (x, z) => isColdAtSeaLevel(seed, x, z),
   };
   const beforePonds: SpawnColumnQueries = {
     biomeAt: samples.biomeAt,
@@ -163,13 +163,13 @@ function surfaceBlockWithPonds(ponds: PondPlacement, samples: SurfaceSamples, x:
 
 /**
  * 按群系参数与地表高度分群系（CONTEXT.md「群系」，#87）。判断次序：
- * 1. 大陆度低于大海阈值：大海。寒冷处的海仍是大海，海面结冰由生成步骤按海平面处的温度做（`isColdAt`，不含高度项）。
+ * 1. 大陆度低于大海阈值：大海。寒冷处的海仍是大海，海面结冰由生成步骤按海平面处的温度做（`isColdAtSeaLevel`，不含高度项）。
  * 2. 陆地的温度 = 二维温度噪声 − 随地表高度下降的项（`temperatureDropAt`），低于 COLD_TEMPERATURE 是寒冷处。
  * 3. 起伏大的陆地：寒冷处且地表在雪线以下是冰雪，其余是高山。寒冷处的高山因此只剩雪线以上的部分。
  * 4. 起伏不大的陆地：寒冷处是冰雪，其余是平原。
  *
- * 大陆度由调用方先求好（区块生成按列缓存它，铺地表找大海也只看它），起伏、温度与地表高度判到哪一步才求哪一个：
- * 高度项只会让温度更低，所以起伏不大且温度噪声已低于阈值的列直接是冰雪，其余陆地列才求地表高度，它是这里开销最大的一项。
+ * 大陆度由调用方先求好（区块生成按列缓存它，铺地表找大海也只看它）。陆地列都求起伏与温度；高度项只会让温度更低，
+ * 所以起伏不大且温度噪声已低于阈值的列直接判为冰雪，其余陆地列才求地表高度，它是这里开销最大的一项。
  */
 function biomeAt(seed: number, x: number, z: number, continentalness: number, heightAt: SurfaceHeightAt): Biome {
   if (continentalness < OCEAN_CONTINENTALNESS) return Biome.Ocean;
@@ -265,14 +265,14 @@ function chunkSamples(
     // 起伏只有大海群系里露出水面的低处列才问，每列最多一次，不缓存。
     reliefAt: (x, z) => reliefAt(seed, x, z),
     // 海平面处的温度（不含高度项）只问那一列自身：区块里的列每列最多求一次，生成器结冰时也读这里，与铺地表共用。
-    isColdAt: (x, z) => {
+    isColdAtSeaLevel: (x, z) => {
       const lx = x - originX;
       const lz = z - originZ;
-      if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) return isColdAt(seed, x, z);
+      if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) return isColdAtSeaLevel(seed, x, z);
       const i = lz * CHUNK_SIZE + lx;
       let known = cold[i]!;
       if (known === COLD_UNKNOWN) {
-        known = isColdAt(seed, x, z) ? COLD_YES : COLD_NO;
+        known = isColdAtSeaLevel(seed, x, z) ? COLD_YES : COLD_NO;
         cold[i] = known;
       }
       return known === COLD_YES;
@@ -286,7 +286,7 @@ function chunkSamples(
  * 每一步只读本区块里已写下的方块与纯函数（ADR-0021），同一个种子与区块坐标永远得到同样的区块（ADR-0003）：
  * 1. 最底层基岩；密度为正的格写石头。
  * 2. 海平面那层及以下的空气灌水（内陆洼地因此成湖）。
- * 3. 寒冷处海平面那层的水换成冰（大海与洼地湖都是）；寒冷按海平面处的温度判，不含随地表高度下降的项（`isColdAt`）。
+ * 3. 寒冷处海平面那层的水换成冰（大海与洼地湖都是）；寒冷按海平面处的温度判，不含随地表高度下降的项（`isColdAtSeaLevel`）。
  * 4. 铺地表：上方是空气或水的每一段石头按 `surface.ts` 的规则铺顶层与其下几层。
  * 5. 嵌矿脉，只替换石头；列顶是石头的那一格（陡坡、石头岸）不换，列顶地表方块才与查询一致。
  * 6. 挖水塘（`digPonds`）：从邻近的水塘格拉取，塘底铺沙子、其上灌水到水面，水塘列的顶层记成水。
@@ -317,7 +317,7 @@ function densityGenerator(
         const solidTop = solidTops[column]!;
         floodBelowSeaLevel(chunk, lx, lz, solidTop);
         // 温度经样本按列缓存：结冰、铺地表与寒冷处大海的雪草方块共用一次计算。
-        if (chunk.get(lx, SEA_LEVEL, lz) === BlockType.Water && samples.isColdAt(x, z)) {
+        if (chunk.get(lx, SEA_LEVEL, lz) === BlockType.Water && samples.isColdAtSeaLevel(x, z)) {
           chunk.set(lx, SEA_LEVEL, lz, BlockType.Ice);
         }
         const top = highestTopBlock(samples, x, z);
@@ -331,7 +331,7 @@ function densityGenerator(
           // 高山的列顶是雪草方块即在雪线以上；其余群系的陡坡列顶是石头，不用再判陡坡。
           highestBare: biome === Biome.Mountains && top === BlockType.SnowyGrass && isSteepColumn(samples, x, z),
           biome,
-          coldOcean: biome === Biome.Ocean && samples.isColdAt(x, z),
+          coldOcean: biome === Biome.Ocean && samples.isColdAtSeaLevel(x, z),
         });
       }
     }

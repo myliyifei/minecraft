@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { CHUNK_SIZE, DEFAULT_SEED, SEA_LEVEL } from '../../src/core/constants';
 import { Biome, createTerrain, type ColumnCoord, type Terrain } from '../../src/core/terrain';
-import { chunkOf } from '../../src/core/world';
+import { chunkOf, localOf } from '../../src/core/world';
+import { COLD_TEMPERATURE, MOUNTAIN_RELIEF, reliefAt, temperatureAt } from '../../src/core/terrain-density';
 import {
   expectedSnowyTop,
   plainsInteriorHillColumns,
@@ -14,8 +15,9 @@ import { isPondColumn, SURVEY_SEEDS } from '../helpers/terrain-survey';
 /**
  * 温度随高度下降（#87）：高处更冷，冰雪旁的山丘进入冰雪群系、铺雪草方块；平原内部不变；海平面那层结冰不变。
  *
- * 接缝：只经地形对象的公共接口（`createTerrain(seed)` 的 `generateChunk`、`biomeAt`、`surfaceHeightAt`、
- * `surfaceBlockAt`），不测温度函数本身。
+ * 测试边界：只经地形对象的公共接口（`createTerrain(seed)` 的 `generateChunk`、`biomeAt`、`surfaceHeightAt`、
+ * `surfaceBlockAt`）断言，不测温度函数本身。固定坐标的两条用例用 `terrain-density.ts` 的起伏与温度噪声核对前提
+ * （这一列为什么会落在那条路径上），断言仍只看地形对象。
  *
  * 采样与阈值（main 01a0996 实测，选列条件在 tests/helpers/snowy-hills.ts）：
  * - 冰雪旁的山丘：±3072 格、步长 16 的网格上，地表 y 80 到 149、不是大海、16 格处 8 个采样点里有地表不高于 y 72 的
@@ -30,7 +32,7 @@ import { isPondColumn, SURVEY_SEEDS } from '../helpers/terrain-survey';
  *
  * 与 issue 写法的偏差：issue 说冰雪旁是「平原小山」，main 上这些山丘其实是高山群系的低处（起伏刚过高山阈值），
  * 温度多已低于寒冷阈值。群系按大海、高山、冰雪的次序判，只给温度减高度项改不了它们。「群系是冰雪」的两条（多种子一条、视点一条）按
- * 「寒冷处雪线以下的高山判为冰雪」的假定写；若用户改选「群系不变、只铺雪」，删去这两条即可，列顶的断言不受影响。
+ * 用户决定（做法 A）写：寒冷处雪线以下的高山判为冰雪。
  *
  * 四种群系都出现、一片群系的宽度约 300 到 600 格由 tests/core/terrain-biomes.test.ts 照旧断言，这里不重复。
  */
@@ -40,13 +42,13 @@ const SURVEY_HALF = 3072;
 const HILL_STEP = 16;
 const PLAINS_STEP = 32;
 
-/** 每个种子至少要选出这么多冰雪旁的山丘，选列条件才不是空转（main 上 42 到 52 列）。 */
+/** 每个种子至少要选出这么多冰雪旁的山丘，选列条件才不是空集（main 上 42 到 52 列）。 */
 const MIN_HILLS = 30;
 
 /**
  * 平原内部小山里仍是平原草方块的列数下限：main 实测的九成（三个种子各 60、70、72 列）。平原小山若被高度项变冷，
  * 它四周的平原也会变成冰雪、自己就选不进来，所以按列数断言，不只看选进来的列。留一成余量：选进来的列里温度
- * 最低约 −0.08，离寒冷阈值只差 0.02，高度项在 y 70 附近哪怕很小也会翻掉几列，这几列不算「温度高于阈值较多」。
+ * 最低约 −0.08，离寒冷阈值只差 0.02，高度项在 y 70 附近哪怕很小也会使几列改为冰雪，这几列不算「温度高于阈值较多」。
  * 选列条件不看列自身与采样点是不是平原（见 `plainsInteriorHillColumns`），所以改后多选进来的列不影响这个下限。
  */
 const MAIN_PLAINS_HILLS: ReadonlyMap<number, number> = new Map([
@@ -326,5 +328,43 @@ describe('海平面结冰范围与改前相同（#87 验收第三条）', () => 
     const terrain = terrainOf(DEFAULT_SEED);
     expect(terrain.spawnColumn).toEqual({ x: 0, z: 0 });
     expect(terrain.biomeAt(0, 0)).toBe(Biome.Plains);
+  });
+});
+
+describe('高度项的固定坐标（#87 审查补充）', () => {
+  /**
+   * 种子 314159 的 (−2872, 688)：起伏不大的陆地（不是高山），地表 y 75，温度噪声 −0.096 高于寒冷阈值，减去高度项
+   * 0.018 后 −0.114，低于阈值。高度项只作用于高山时它会是平原。
+   */
+  it('起伏不大的陆地列因地表高于基准而变冷：群系是冰雪，列顶查询与生成结果都是雪草方块', () => {
+    const seed = 314_159;
+    const { x, z } = { x: -2872, z: 688 };
+    const terrain = terrainOf(seed);
+    const h = terrain.surfaceHeightAt(x, z);
+    expect(h, '地表高度').toBe(75);
+    expect(reliefAt(seed, x, z), '起伏').toBeLessThanOrEqual(MOUNTAIN_RELIEF);
+    expect(temperatureAt(seed, x, z), '温度噪声').toBeGreaterThan(COLD_TEMPERATURE);
+    expect(terrain.biomeAt(x, z)).toBe(Biome.Snowy);
+    expect(terrain.surfaceBlockAt(x, z)).toBe(BlockType.SnowyGrass);
+    const chunk = terrain.generateChunk(chunkOf(x), chunkOf(z));
+    expect(chunk.get(localOf(x), h, localOf(z))).toBe(BlockType.SnowyGrass);
+  });
+
+  /**
+   * 种子 314159 的 (−3912, −3184)：高山，地表 y 65，温度噪声 −0.113 低于寒冷阈值。地表低于基准 y 72，高度项为 0，
+   * 温度不升高，仍是寒冷处、雪线以下，所以是冰雪；若低处按负的高度项升温（+0.042），它会是高山。
+   */
+  it('地表低于基准的列温度不升高：寒冷处低处的高山列仍是冰雪、雪草方块', () => {
+    const seed = 314_159;
+    const { x, z } = { x: -3912, z: -3184 };
+    const terrain = terrainOf(seed);
+    const h = terrain.surfaceHeightAt(x, z);
+    expect(h, '地表高度').toBe(65);
+    expect(reliefAt(seed, x, z), '起伏').toBeGreaterThan(MOUNTAIN_RELIEF);
+    expect(temperatureAt(seed, x, z), '温度噪声').toBeLessThan(COLD_TEMPERATURE);
+    expect(terrain.biomeAt(x, z)).toBe(Biome.Snowy);
+    expect(terrain.surfaceBlockAt(x, z)).toBe(BlockType.SnowyGrass);
+    const chunk = terrain.generateChunk(chunkOf(x), chunkOf(z));
+    expect(chunk.get(localOf(x), h, localOf(z))).toBe(BlockType.SnowyGrass);
   });
 });

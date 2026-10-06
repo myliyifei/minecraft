@@ -253,11 +253,14 @@ describe('陡坡上的水塘列', () => {
 
 describe('悬垂地形上的水塘', () => {
   /**
-   * 种子 1 的高山里，中心列 (1927, 1514) 一带：邻列 (1927, 1511) 的地表高度是 y 136 一格悬空的石头，其下 y 126 到 135
-   * 是空气。只看地表高度时这一列算盆地边缘（地表不低于水面 126），水塘列 (1927, 1512) 在 y 126 的水侧面就挨着空气。
+   * 种子 3 的高山里，水塘格中心列 (752, 360) 一带：邻列 (752, 364) 的地表高度是 y 144 一格悬着的地形方块，其下 y 127
+   * 到 143 是空气。只看地表高度时这一列算盆地边缘（地表不低于水面 127），会生成一片 43 列的水塘，水的侧面挨着空气。
+   * 原先的样本是种子 1 的 (1927, 1514)，#87 起那一带归入冰雪、不挖水塘，换成这里。
    */
-  const SEED = 1;
-  const OVERHANG = { x: 1927, z: 1511 };
+  const SEED = 3;
+  const CENTER = { x: 752, z: 360 };
+  const OVERHANG = { x: 752, z: 364 };
+  const WATER_Y = 127;
 
   it('盆地边缘那一列在水面高度上是空气时不生成水塘：附近的区块里每一格水的四邻是水或地形方块', () => {
     const terrain = createTerrain(SEED);
@@ -271,9 +274,21 @@ describe('悬垂地形上的水塘', () => {
       }
       return chunk.get(localOf(x), y, localOf(z));
     };
-    // 前提：那一列确实是悬垂，地表高度在 y 136，y 126 是空气
-    expect(terrain.surfaceHeightAt(OVERHANG.x, OVERHANG.z)).toBe(136);
-    expect(blockAt(OVERHANG.x, 126, OVERHANG.z)).toBe(BlockType.Air);
+    // 前提：两列都是高山（会挖水塘的群系），边缘那一列确实是悬垂：地表高度在 y 144，水面那一格是空气
+    expect(terrain.biomeAt(CENTER.x, CENTER.z)).toBe(Biome.Mountains);
+    expect(terrain.biomeAt(OVERHANG.x, OVERHANG.z)).toBe(Biome.Mountains);
+    expect(terrain.surfaceHeightAt(OVERHANG.x, OVERHANG.z)).toBe(144);
+    expect(blockAt(OVERHANG.x, WATER_Y, OVERHANG.z)).toBe(BlockType.Air);
+    // 前提：只看地表高度判断盆地边缘时，这里会生成水塘，扫描范围里有水塘列
+    const heightOnly: PondPlacement = {
+      ...terrain,
+      isSolidSpan: (x, z, _fromY, toY) => toY <= terrain.surfaceHeightAt(x, z),
+    };
+    const wouldBe = pondsIn(heightOnly, [{ cx: chunkOf(CENTER.x), cz: chunkOf(CENTER.z) }]).find(
+      (p) => p.x === CENTER.x && p.z === CENTER.z,
+    );
+    expect(wouldBe?.waterY, '只看地表高度时的水塘').toBe(WATER_Y);
+    expect(wouldBe!.columns.length).toBeGreaterThan(0);
 
     const wrong: string[] = [];
     for (let x = OVERHANG.x - 24; x <= OVERHANG.x + 24; x++) {
@@ -289,6 +304,6 @@ describe('悬垂地形上的水塘', () => {
       }
     }
     expect(wrong).toEqual([]);
-    expect(terrain.surfaceBlockAt(1927, 1512)).not.toBe(BlockType.Water);
+    expect(terrain.surfaceBlockAt(CENTER.x, CENTER.z)).not.toBe(BlockType.Water);
   });
 });

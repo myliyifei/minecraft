@@ -11,7 +11,7 @@ import type { HotbarAction, KeyAction } from '../input/keybindings.ts';
  * 界面文字的唯一来源。所有玩家可见的文案都从这里取，不在别处写字面量。
  */
 export const STRINGS = {
-  gameTitle: '体素世界',
+  gameTitle: '李星瀚的世界',
   // 加载画面上那一行。新建与读档都经过它。省略号交给一明一灭的方块光标，文案本身不带标点。
   loadingWorld: '正在加载世界',
   crosshair: '十字准星',

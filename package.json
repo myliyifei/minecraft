@@ -1,7 +1,7 @@
 {
   "name": "minecraft",
   "version": "0.1.0",
-  "description": "浏览器体素生存沙盒游戏",
+  "description": "李星瀚的世界：浏览器体素生存沙盒游戏",
   "type": "module",
   "private": true,
   "scripts": {

@@ -149,7 +149,7 @@ export function sensitivityValue(percent: number): string {
   return `${percent}%`;
 }
 
-/** 难度的名字（见 CONTEXT.md「难度」）。按难度索引，加一档不补这张表就编译不过。 */
+/** 难度的名字（见 GLOSSARY.md「难度」）。按难度索引，加一档不补这张表就编译不过。 */
 export const DIFFICULTY_NAMES: Readonly<Record<Difficulty, string>> = {
   [Difficulty.Peaceful]: '和平',
   [Difficulty.Easy]: '简单',

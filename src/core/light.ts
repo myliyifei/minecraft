@@ -3,7 +3,7 @@ import { BLOCK_LIGHT_SHIFT, CHUNK_BLOCK_COUNT, SKY_LIGHT_SHIFT, type Chunk } fro
 import { CHUNK_AREA, CHUNK_SIZE, MAX_LIGHT_LEVEL, WORLD_HEIGHT, WORLD_MAX_Y, WORLD_MIN_Y } from './constants';
 
 /**
- * 天光与方块光的计算（见 CONTEXT.md 的「天光」「方块光」、ADR-0017）：区块加载时算初值，
+ * 天光与方块光的计算（见 GLOSSARY.md 的「天光」「方块光」、ADR-0017）：区块加载时算初值，
  * `setBlock` 之后增量更新，区块卸载时撤掉它传给邻居的光。
  *
  * 每一格的一种光是下面这个唯一解：这一格自己的来源与六个邻格减 1 中的最大值，不透明方块不收

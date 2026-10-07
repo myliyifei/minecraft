@@ -55,7 +55,7 @@ export type PlayerInputTarget = Pick<
  * 右键这一下是开界面还是放方块，全在 `src/core/`。未锁定时按键与鼠标按钮都不生效，
  * 因此 Esc 之后玩家不会继续走、也不会继续挖。
  *
- * 背包键是唯一在未锁定时也认的键，条件是界面正开着（界面模式，见 CONTEXT.md）：那时
+ * 背包键是唯一在未锁定时也认的键，条件是界面正开着（界面模式，见 GLOSSARY.md）：那时
  * 鼠标已经交还给页面，玩家得有办法把界面关掉。界面开着时其余按键一概不生效——「哪些
  * 输入在界面模式下作废」这条规则本身在核心里（`GameCore.step`），这里只是不再把它们
  * 递过去。
@@ -89,7 +89,7 @@ export interface PlayerControls {
    */
   resume(): void;
   /**
-   * 此刻是否处于暂停（见 CONTEXT.md「暂停」）。装上时就是暂停：加载画面结束之后玩家点「回到游戏」才进入
+   * 此刻是否处于暂停（见 GLOSSARY.md「暂停」）。装上时就是暂停：加载画面结束之后玩家点「回到游戏」才进入
    * 第一人称。锁定真正生效时解除。游戏循环按它决定推不推进 tick。
    */
   readonly paused: boolean;
@@ -113,7 +113,7 @@ export function installPlayerControls(
 ): PlayerControls {
   const pressed = new Set<MoveAction>();
   const locked = (): boolean => document.pointerLockElement === canvas;
-  // 界面模式（见 CONTEXT.md）：背包界面、工作台界面或熔炉界面开着，或者在死亡画面上。这时鼠标
+  // 界面模式（见 GLOSSARY.md）：背包界面、工作台界面或熔炉界面开着，或者在死亡画面上。这时鼠标
   // 已经交还给页面，键盘只认关掉界面那两颗键（死亡画面上连这两颗也不认）。
   const uiOpen = (): boolean => target.uiMode;
   const sendIntent = (): void => target.setMoveIntent(intentOf(pressed));

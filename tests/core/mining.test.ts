@@ -1245,7 +1245,7 @@ describe('持工具连锁挖掘一柱相连的石头（issue #23）', () => {
 
     hold(mining, 23, CHAINED);
 
-    // 耐久不够也把整组全部挖掉（见 CONTEXT.md 的「连锁挖掘」）
+    // 耐久不够也把整组全部挖掉（见 GLOSSARY.md 的「连锁挖掘」）
     expect(remaining(world, cells)).toEqual([]);
     expect(cobblestoneCells(spawned)).toEqual(cells);
     expect(hand.held).toBeUndefined();

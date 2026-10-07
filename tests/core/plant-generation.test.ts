@@ -33,7 +33,7 @@ import { LOGS } from '../helpers/trees';
  * 分布阈值是测试设定（父 spec「白桦与花的比例……留到实现时定」）：平原合格列里长植物的占 5% 到 80%，花占平原植物的 1% 到 40%，
  * 两种花都出现，花成片（花那一列周围 8 列里花的比例至少是平原合格列里花的比例的 3 倍）；高山与冰雪合格列里长蕨的占 1% 以上。
  *
- * 两个未定点按 issue 字面定（.scratch/seams-80.md）：高山雪线以上的雪草方块照常长蕨；大海群系露出水面的列不长植物。
+ * 两个未定点按 #80 的字面意思定：高山雪线以上的雪草方块照常长蕨；大海群系露出水面的列不长植物。
  */
 
 const GROUND: ReadonlySet<BlockType> = new Set([BlockType.Grass, (BlockType as Readonly<Record<string, BlockType>>)['SnowyGrass']!]);

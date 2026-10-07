@@ -3,7 +3,7 @@ import { TAU } from '../core/constants';
 import type { ItemType } from '../core/item';
 
 /**
- * 火把在画面上的两种光：手持光与闪烁（ADR-0016，见 CONTEXT.md 的「手持光」「闪烁」）。
+ * 火把在画面上的两种光：手持光与闪烁（ADR-0016，见 GLOSSARY.md 的「手持光」「闪烁」）。
  *
  * 两者都只改画面：每帧作为 uniform 送进光照材质，不写进光照数组，生成与燃烧都不看它们。闪烁量也让火把本身
  * 有明暗起伏（`selfLitBrightness`）。

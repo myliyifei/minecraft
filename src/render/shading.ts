@@ -8,7 +8,7 @@ import { MAX_LIGHT_LEVEL } from '../core/constants';
  */
 
 /**
- * 等级 0 的亮度：洞里没有火把时的样子。很暗，但墙面与路的轮廓看得出来（见 CONTEXT.md 的「亮度」）。
+ * 等级 0 的亮度：洞里没有火把时的样子。很暗，但墙面与路的轮廓看得出来（见 GLOSSARY.md 的「亮度」）。
  */
 export const BRIGHTNESS_FLOOR = 0.2;
 
@@ -77,7 +77,7 @@ export interface ShadedLevelInput {
  * 一处送进 `brightnessAt` 的等级，与着色器同一个算法：max(折算天光, 照到的光 + 闪烁)，
  * 照到的光是方块光与这一处的手持光（手持光等级减去离眼睛的距离，不低于 0）中较大的那个。
  *
- * 闪烁只加在照到的光上，天光不加（见 CONTEXT.md 的「闪烁」）。照到的光不足 1 级时闪烁按比例减小，
+ * 闪烁只加在照到的光上，天光不加（见 GLOSSARY.md 的「闪烁」）。照到的光不足 1 级时闪烁按比例减小，
  * 到 0 就不闪：洞里没被火把照到的墙不跟着火把一明一暗，光圈的边缘也不会因为加了闪烁多出一道台阶。
  */
 export function shadedLevel({ sky, block, distance, skyDarkening, flicker, heldLight }: ShadedLevelInput): number {

@@ -213,7 +213,7 @@ describe('GameCore 在 Node 中的方块查询', () => {
       const surface = surfaceAt(x, z);
       let dirt = 0;
       while (core.getBlock(x, surface - dirt - 1, z) === BlockType.Dirt) dirt++;
-      // CONTEXT.md「草方块，其下 3 到 4 层泥土」
+      // GLOSSARY.md「草方块，其下 3 到 4 层泥土」
       expect(dirt).toBeGreaterThanOrEqual(3);
       expect(dirt).toBeLessThanOrEqual(4);
       expect(core.getBlock(x, surface - dirt - 1, z)).toBe(BlockType.Stone);

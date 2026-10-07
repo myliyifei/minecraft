@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BlockType } from '../../src/core/block';
 import { selectionBounds } from '../../src/render/selection';
 
-describe('选框套住的范围（见 CONTEXT.md 的「选框」）', () => {
+describe('选框套住的范围（见 GLOSSARY.md 的「选框」）', () => {
   it('整格方块：选框就是那一格', () => {
     expect(selectionBounds(BlockType.Stone, 3, 10, -4)).toEqual({
       min: { x: 3, y: 10, z: -4 },

@@ -116,7 +116,7 @@ describe('核心的世界时刻', () => {
   });
 });
 
-describe('天光减量与折算天光（见 CONTEXT.md 的「折算天光」）', () => {
+describe('天光减量与折算天光（见 GLOSSARY.md 的「折算天光」）', () => {
   it('减量白天 0、夜晚 11，黄昏与黎明各 1000 tick 线性过渡，不取整', () => {
     expect(skyDarkeningAt(0)).toBe(0);
     expect(skyDarkeningAt(6000)).toBe(0);

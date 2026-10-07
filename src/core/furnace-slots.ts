@@ -7,7 +7,7 @@ import { isFuel, isSmeltable, SMELT_TICKS } from './smelting';
 import type { Vec3 } from './vec3';
 import type { XpOrbSink } from './xp-orb';
 
-/** 原料格（见 CONTEXT.md）在熔炉三格里的下标。 */
+/** 原料格（见 GLOSSARY.md）在熔炉三格里的下标。 */
 export const FURNACE_INPUT_SLOT = 0;
 /** 燃料格在熔炉三格里的下标。 */
 export const FURNACE_FUEL_SLOT = 1;
@@ -25,7 +25,7 @@ const SLOT_FIELDS = ['input', 'fuel', 'output'] as const satisfies ReadonlyArray
 const FURNACE_SLOT_COUNT = SLOT_FIELDS.length;
 
 /**
- * 熔炉界面（见 CONTEXT.md）附加的那个格子批：原料格、燃料格、成品格。
+ * 熔炉界面（见 GLOSSARY.md）附加的那个格子批：原料格、燃料格、成品格。
  *
  * 它不存东西：三格直接读写状态表里那条熔炉状态的 `input`、`fuel`、`output`（ADR-0011）。
  * 界面上放进原料格的粗铁因此就在熔炉里，关掉界面还在，熔炼状态机（`stepFurnace`）改的也是同一份。

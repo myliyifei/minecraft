@@ -13,6 +13,9 @@ coverage/
 .env
 .env.local
 
+# 验收截图、调试脚本与审查报告等本机临时文件
+.scratch/
+
 # Claude Code 本地个人设置（.claude/settings.json 是共享的，这个不是）
 .claude/settings.local.json
 

@@ -55,7 +55,7 @@ export const JUMP_VELOCITY = 0.42;
 export const WALK_STEP = WALK_SPEED / TICK_RATE;
 
 /*
- * 在水里（见 CONTEXT.md「流体」）的移动参数，数值取原版的观感。只有玩家用：僵尸、掉落物在水里照旧（#72 Out of Scope）。
+ * 在水里（见 GLOSSARY.md「流体」）的移动参数，数值取原版的观感。只有玩家用：僵尸、掉落物在水里照旧（#72 Out of Scope）。
  * 在水里时竖直这一步不走 `fallStep`，按下面四个数另算：每 tick 先按住跳加上浮速度、夹住下沉上限，按这个速度移动，
  * 再乘阻力、减重力。不按跳时收敛到 `WATER_MAX_SINK_SPEED` 下沉，按住跳时收敛到每 tick 上升 0.1 格。
  */
@@ -147,7 +147,7 @@ export interface PlayerView {
   readonly pitch: number;
   readonly onGround: boolean;
   /**
-   * 在水里（见 CONTEXT.md「流体」）：碰撞箱与水格重叠出体积，只贴着水格的面不算。与 `onGround` 一样随查随算。
+   * 在水里（见 GLOSSARY.md「流体」）：碰撞箱与水格重叠出体积，只贴着水格的面不算。与 `onGround` 一样随查随算。
    * 在水里时移动按水里的参数算（`WATER_WALK_FACTOR` 等）。
    */
   readonly inWater: boolean;
@@ -329,7 +329,7 @@ export class Player implements PlayerView {
    * 或者一直站在地上，返回 0。跳上台阶时落差只算高出台阶顶面的那一段。受不受伤、受几点由调用方
    * 按 `fallDamage` 算，玩家本身不持生命值。
    *
-   * autoJump 是自动跳跃（见 CONTEXT.md）是否开启，见 `stepsUp`。开关由核心持有（`GameCore.autoJump`），每 tick 传进来；
+   * autoJump 是自动跳跃（见 GLOSSARY.md）是否开启，见 `stepsUp`。开关由核心持有（`GameCore.autoJump`），每 tick 传进来；
    * 省略时关，直接构造玩家的测试因此与没有自动跳跃时相同。
    */
   step(intent: MoveIntent, autoJump = false): number {
@@ -394,7 +394,7 @@ export class Player implements PlayerView {
   }
 
   /**
-   * 自动跳跃（见 CONTEXT.md）是否起跳：水平走完之后在地面上、这一 tick 有移动输入（walk 不为零），被挡住的轴上
+   * 自动跳跃（见 GLOSSARY.md）是否起跳：水平走完之后在地面上、这一 tick 有移动输入（walk 不为零），被挡住的轴上
    * 挡住玩家的只是一格高的台阶、上方站得下碰撞箱（`clearsAfterRising` 抬高 1 格，抬高后的整个碰撞箱一并检查，
    * 台阶上方空间不够 1.8 格就不跳）。在水里不做这项判断，按爬岸规则处理，两者不叠加。
    *

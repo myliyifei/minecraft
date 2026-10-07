@@ -10,7 +10,7 @@ import { bindableCode, SENSITIVITY_RANGE, VIEW_RADIUS_RANGE, type DisplayToggle,
 import { FIXED_ACTION_NAMES, keyActionName, sensitivityValue, STRINGS, viewRadiusValue } from './strings';
 
 /**
- * 设置界面（见 CONTEXT.md「设置」、ADR-0020）：铺满画面的一层，上半是键位，下半是视距、灵敏度、三个画面开关与自动跳跃开关。
+ * 设置界面（见 GLOSSARY.md「设置」、ADR-0020）：铺满画面的一层，上半是键位，下半是视距、灵敏度、三个画面开关与自动跳跃开关。
  * 世界列表与暂停菜单打开的是同一个。它叠在打开它的那一层之上，那一层一直留着，关掉就回到那里。改动当场写进设置，
  * 设置再写 localStorage。页面打开时装一个，之后一直在。
  *

@@ -5,7 +5,7 @@ import { IDLE_INTENT, JUMP_VELOCITY, PLAYER_WIDTH, type MoveIntent } from '../..
 import { FLAT_GROUND_Y, FLAT_STAND_Y, flatTerrain } from '../helpers/flat-terrain';
 
 /*
- * 自动跳跃（#78，见 CONTEXT.md「自动跳跃」）：在地面上、有水平移动输入、水平移动被一格高的台阶挡住、台阶上方站得下
+ * 自动跳跃（#78，见 GLOSSARY.md「自动跳跃」）：在地面上、有水平移动输入、水平移动被一格高的台阶挡住、台阶上方站得下
  * 玩家碰撞箱时自动起跳，起跳速度在下一 tick 生效；在水里不触发。核心多一个运行时可改的开关：初值从构造参数
  * `autoJump` 传入（省略时开），之后由 `setAutoJump` 改，`autoJump` 读当前值，与视距（`viewRadius`、`setViewRadius`）
  * 同一种写法（ADR-0020 补记）。

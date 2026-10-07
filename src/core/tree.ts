@@ -27,15 +27,15 @@ export interface TreePlacement {
   readonly biomeAt: (x: number, z: number) => Biome;
   readonly surfaceHeightAt: SurfaceHeightAt;
   readonly surfaceBlockAt: (x: number, z: number) => BlockType;
-  /** 出生列（见 CONTEXT.md「出生点」），树根不落在它周围 `TREE_SPAWN_CLEARANCE` 格内。 */
+  /** 出生列（见 GLOSSARY.md「出生点」），树根不落在它周围 `TREE_SPAWN_CLEARANCE` 格内。 */
   readonly spawnColumn: ColumnCoord;
 }
 
-/** 树干能长在哪些列顶地表方块上（CONTEXT.md「树」）：沙滩、陡坡的石头、水底的沙子与沙砾都不长。 */
+/** 树干能长在哪些列顶地表方块上（GLOSSARY.md「树」）：沙滩、陡坡的石头、水底的沙子与沙砾都不长。 */
 const TREE_GROUND: ReadonlySet<BlockType> = new Set([BlockType.Grass, BlockType.SnowyGrass]);
 
 /**
- * 树种（CONTEXT.md「树」）。写法同 `Biome`：同名的类型是这几个值的联合。
+ * 树种（GLOSSARY.md「树」）。写法同 `Biome`：同名的类型是这几个值的联合。
  */
 export const TreeSpecies = {
   Oak: 'oak',
@@ -106,7 +106,7 @@ export const MAX_CANOPY_RADIUS = Math.max(OAK_CANOPY_RADIUS, SPRUCE_CANOPY_RADIU
  * 出生点在出生列上（`TreePlacement.spawnColumn`、`GameCore.spawnPoint`）。树叶是实心的：树冠伸到出生点，玩家
  * 一进世界碰撞箱就与树叶相交；伸到旁边几格，玩家刚迈步就停在树叶前。所以给出生点留一小片空地，按
  * 「朝任何方向走一秒，碰撞箱都不与树叶相交」定大小——一秒 4.3 格，加半个碰撞箱是 4.6 格，
- * 所以橡树冠不能进 |5| 格，树根因此不能进 |7| 格。出生列在平原（CONTEXT.md「出生点」），周围长的是橡树与白桦；
+ * 所以橡树冠不能进 |5| 格，树根因此不能进 |7| 格。出生列在平原（GLOSSARY.md「出生点」），周围长的是橡树与白桦；
  * 云杉的树冠半径大一格，出生列落在平原之外时云杉的树冠能伸到 |4| 格，这种情形少见，不另加大。
  */
 export const TREE_SPAWN_CLEARANCE = 7;
@@ -131,11 +131,11 @@ const ROLL_MASK = 0xff;
 /** 随机数小于这个数，这一格就长树。64/256 = 25%，一个区块 4 个树格，平均约一棵。 */
 const TREE_CHANCE = 64;
 
-/** 平原的树里，树种那段随机数小于这个数的是白桦：77/256 ≈ 30%（CONTEXT.md「树」约三成）。 */
+/** 平原的树里，树种那段随机数小于这个数的是白桦：77/256 ≈ 30%（GLOSSARY.md「树」约三成）。 */
 const BIRCH_CHANCE = 77;
 
 /**
- * 冰雪的落点里，树种那段随机数小于这个数的才长树：128/256 = 50%。冰雪零散长云杉（CONTEXT.md「树」）。
+ * 冰雪的落点里，树种那段随机数小于这个数的才长树：128/256 = 50%。冰雪零散长云杉（GLOSSARY.md「树」）。
  * 三个种子的大范围采样（按区块中心那一列的群系归类）：每个区块平均冰雪约 0.45 棵、平原约 0.9 棵、
  * 高山雪线以下约 0.75 棵（陡坡露石头的列不长）。
  */
@@ -197,7 +197,7 @@ const OAK_FORM: TreeForm = {
   canopy: OAK_CANOPY_LAYERS,
 };
 
-/** 白桦与橡树同形（CONTEXT.md「树」），只换原木与树叶。 */
+/** 白桦与橡树同形（GLOSSARY.md「树」），只换原木与树叶。 */
 const TREE_FORMS: Readonly<Record<TreeSpecies, TreeForm>> = {
   [TreeSpecies.Oak]: OAK_FORM,
   [TreeSpecies.Birch]: { ...OAK_FORM, log: BlockType.BirchLog, leaves: BlockType.BirchLeaves },
@@ -294,7 +294,7 @@ function treeInCell(placement: TreePlacement, cellX: number, cellZ: number): Tre
   // 地表不高于海平面的列不长：低于海平面的上面是水，正好在海平面的是水边那一圈。
   const surface = placement.surfaceHeightAt(site.x, site.z);
   if (surface <= SEA_LEVEL) return undefined;
-  // 高山雪线以上不长（CONTEXT.md「雪线」）：那里的列顶是雪草方块，只看列顶地表方块排除不了。
+  // 高山雪线以上不长（GLOSSARY.md「雪线」）：那里的列顶是雪草方块，只看列顶地表方块排除不了。
   if (site.biome === Biome.Mountains && surface >= SNOW_LINE_Y) return undefined;
   // 只长在草方块与雪草方块上（#76）：沙滩是沙子，陡坡与石头岸是石头，这些列都不长。
   if (!TREE_GROUND.has(placement.surfaceBlockAt(site.x, site.z))) return undefined;

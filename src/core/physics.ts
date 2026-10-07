@@ -217,7 +217,7 @@ export const KNOCKBACK_DECAY = 0.6;
 const KNOCKBACK_MIN_SPEED = 1e-3;
 
 /**
- * 击退（见 CONTEXT.md）：attacker 打到 target 时 target 获得的水平速度，指向「攻击者到受击者」的
+ * 击退（见 GLOSSARY.md）：attacker 打到 target 时 target 获得的水平速度，指向「攻击者到受击者」的
  * 水平方向，大小 `KNOCKBACK_SPEED`。两者水平位置重合时没有方向，不推。竖直那一下（`KNOCKBACK_LIFT`）
  * 由受击者自己写进竖直速度。
  *

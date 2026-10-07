@@ -8,7 +8,7 @@ import type { TreePlacement } from './tree';
 import type { ColumnCoord } from './world';
 
 /**
- * 水塘（CONTEXT.md「水塘」，#81）：平原与高山雪线以下地表上的小片湖泊。位置与形状只由种子、水塘格坐标与
+ * 水塘（GLOSSARY.md「水塘」，#81）：平原与高山雪线以下地表上的小片湖泊。位置与形状只由种子、水塘格坐标与
  * 群系、地表高度与单列实心段（`isSolidSpan`）三个查询决定；每个区块按 ADR-0005 从邻近的水塘格拉取会写进自己的水塘，区块外的列一律调查询。
  *
  * 一个水塘格里最多一个水塘：
@@ -22,7 +22,7 @@ import type { ColumnCoord } from './world';
  *    盆地边缘有一列在要挡水的那一段里不是实心（`rimHoldsWater`）。
  *    最深一列至少 2 格不必另判：中心列不高于水面，它的水深不小于中心深度。
  *
- * 地表高度查询不随水塘变（CONTEXT.md「地表高度」）：这里读的是挖之前的高度，挖水塘只改区块里写下的方块。
+ * 地表高度查询不随水塘变（GLOSSARY.md「地表高度」）：这里读的是挖之前的高度，挖水塘只改区块里写下的方块。
  */
 
 /**
@@ -86,7 +86,7 @@ export const POND_DIAMETER_MIN = 5;
 /** 每一列水深（水面 y − 塘底 y）的上界。 */
 export const POND_DEPTH_MAX = 4;
 
-/** 出生列周围多少格内不出现水塘列（切比雪夫距离，含边界），与树、植物相同（CONTEXT.md「出生点」）。 */
+/** 出生列周围多少格内不出现水塘列（切比雪夫距离，含边界），与树、植物相同（GLOSSARY.md「出生点」）。 */
 export const POND_SPAWN_CLEARANCE = 7;
 
 /** 水塘的种子偏移量，与树、矿脉、植物的盐错开。 */

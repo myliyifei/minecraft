@@ -253,7 +253,7 @@ export class Zombies implements ZombiesView, EntityRaycast {
    * 生成。看的是候选列，不是玩家脚下那一列：玩家头顶盖着东西不影响生成。候选列也只看列顶：白天屋顶
    * 底下折算天光是 0，但列顶是屋顶，屋顶上面那格折算天光 15，不生成。
    *
-   * 列顶是地表植物时跳过它看下面那一格（#80，CONTEXT.md「生成」）：僵尸生成在植物那一格里，长满矮草的平原照样生成。
+   * 列顶是地表植物时跳过它看下面那一格（#80，GLOSSARY.md「生成」）：僵尸生成在植物那一格里，长满矮草的平原照样生成。
    * 只跳过植物，不跳过一切不实心方块：列顶是水时照旧放弃，不会跳过水生成在水底。
    */
   spawnNaturally(tick: number, player: Vec3, skyDarkening: number): void {
@@ -345,7 +345,7 @@ export class Zombies implements ZombiesView, EntityRaycast {
     });
   }
 
-  /** position 在露天吗：它所在那一格的天光是 15（见 CONTEXT.md 的「露天」）。 */
+  /** position 在露天吗：它所在那一格的天光是 15（见 GLOSSARY.md 的「露天」）。 */
   private isOpenSky({ x, y, z }: Vec3): boolean {
     return this.blocks.skyLightAt(x, y, z) === MAX_LIGHT_LEVEL;
   }

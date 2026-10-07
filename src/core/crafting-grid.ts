@@ -3,14 +3,14 @@ import { withoutOne, type ItemStack, type ItemType } from './item';
 import { matchRecipe, type GridSize } from './recipe';
 import type { Crafting, RuledSlotBatch } from './slot-batch';
 
-/** 背包界面那块合成网格的尺寸（见 CONTEXT.md 的「合成网格」）：2x2。 */
+/** 背包界面那块合成网格的尺寸（见 GLOSSARY.md 的「合成网格」）：2x2。 */
 export const INVENTORY_CRAFTING_GRID: GridSize = Object.freeze({ width: 2, height: 2 });
 
 /** 工作台界面那块合成网格的尺寸：3x3。工具那几条配方只摆得进它。 */
 export const CRAFTING_TABLE_GRID: GridSize = Object.freeze({ width: 3, height: 3 });
 
 /**
- * 合成网格（见 CONTEXT.md）：一批按行排列的格子，加一个由内容算出来的输出格。
+ * 合成网格（见 GLOSSARY.md）：一批按行排列的格子，加一个由内容算出来的输出格。
  *
  * 它是格子批（`RuledSlotBatch`）最简单的一种实现：每格都收任何物品、没有只取格、关闭界面时
  * 里面的材料退回背包。背包界面那套拿起放下直接用在它上面，但它不按入包规则收东西——拾取
@@ -67,7 +67,7 @@ export class CraftingGrid implements RuledSlotBatch, Crafting {
   }
 
   /**
-   * 输出格（见 CONTEXT.md）：网格里摆的东西匹配到的成品与数量，不匹配任何配方时 undefined。
+   * 输出格（见 GLOSSARY.md）：网格里摆的东西匹配到的成品与数量，不匹配任何配方时 undefined。
    * 只读的预览——拿走成品是 `InventoryScreen.clickOutput` 那条独立的指令。
    */
   get output(): ItemStack | undefined {

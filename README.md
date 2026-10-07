@@ -1,6 +1,6 @@
 # 李星瀚的世界
 
-浏览器体素生存沙盒游戏。领域术语见 [`CONTEXT.md`](CONTEXT.md)，架构决策见 [`docs/adr/`](docs/adr/)。
+浏览器体素生存沙盒游戏。领域术语见 [`GLOSSARY.md`](GLOSSARY.md)，架构决策见 [`docs/adr/`](docs/adr/)。
 
 ## 快速开始
 

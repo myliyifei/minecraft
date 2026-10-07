@@ -52,7 +52,7 @@ describe('物品表里的工具', () => {
   }
 
   it('同一档的镐斧铲三件是三个类别、一个材质档', () => {
-    // 类别与材质档是两回事（见 CONTEXT.md 的「材质档」）：木镐与石镐同类不同档，
+    // 类别与材质档是两回事（见 GLOSSARY.md 的「材质档」）：木镐与石镐同类不同档，
     // 木镐与木斧同档不同类
     expect(toolOf(ItemType.WoodenPickaxe)!.toolClass).toBe(toolOf(ItemType.StonePickaxe)!.toolClass);
     expect(toolOf(ItemType.WoodenPickaxe)!.material).not.toBe(toolOf(ItemType.StonePickaxe)!.material);

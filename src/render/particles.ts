@@ -11,7 +11,7 @@ import { SELF_LIT_BLOCK_LIGHT } from './shading';
 import { TORCH_STICK_UV, torchTip } from './torch-model';
 
 /**
- * 粒子（见 CONTEXT.md 的「粒子」，#59）：只画在画面上的小片，不碰实体、不进任何规则。
+ * 粒子（见 GLOSSARY.md 的「粒子」，#59）：只画在画面上的小片，不碰实体、不进任何规则。
  *
  * 这个文件是粒子池与发射规则（火把与熔炉冒火焰光点与烟，挖掘溅碎屑），纯数学、不 import three，因此能在
  * Node 里测。池子里的几条数组按显卡实例属性的排布存（`positions`、`sizes`、`uvRects`、`lights`、`alphas`），
@@ -24,7 +24,7 @@ import { TORCH_STICK_UV, torchTip } from './torch-model';
 export const ParticleKind = {
   Flame: 'flame',
   Smoke: 'smoke',
-  /** 碎屑（见 CONTEXT.md 的「碎屑」，#60）：挖掘时从方块上溅出的小块。 */
+  /** 碎屑（见 GLOSSARY.md 的「碎屑」，#60）：挖掘时从方块上溅出的小块。 */
   Debris: 'debris',
 } as const;
 
@@ -370,7 +370,7 @@ const SMOKE: Omit<Emission, 'rate'> = {
   drift: 0.02,
 };
 
-/** 火把一直在烧，冒得勤；燃烧中的熔炉「偶尔」冒（见 CONTEXT.md 的「粒子」）。 */
+/** 火把一直在烧，冒得勤；燃烧中的熔炉「偶尔」冒（见 GLOSSARY.md 的「粒子」）。 */
 const TORCH_EMISSIONS: readonly Emission[] = [
   { ...FLAME, rate: 1.5 },
   { ...SMOKE, rate: 1.2 },

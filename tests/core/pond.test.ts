@@ -13,7 +13,7 @@ import { gridColumns, highestTerrainY, isInterior, isTerrainBlock, SURVEY_SEEDS 
 import { LEAVES, LOGS, worldCells } from '../helpers/trees';
 
 /**
- * 水塘（#81，父 spec #72「湖泊、冰面与水塘」，CONTEXT.md「水塘」）。
+ * 水塘（#81，父 spec #72「湖泊、冰面与水塘」，GLOSSARY.md「水塘」）。
  *
  * 只经测试边界：`createTerrain(seed)` 的生成器与三个查询、出生列，`treesTouching`，与新接口 `pondsTouching`
  * （经 tests/helpers/ponds.ts 取）。不测噪声与密度的内部。

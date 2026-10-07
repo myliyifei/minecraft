@@ -16,7 +16,7 @@ export interface GridSize {
 export type GridContents = ReadonlyArray<ItemType | undefined>;
 
 /**
- * 一组物品（见 CONTEXT.md 的「配方」，#85）：配方里的一格写它时，组里任意一种都匹配，同一个配方里的
+ * 一组物品（见 GLOSSARY.md 的「配方」，#85）：配方里的一格写它时，组里任意一种都匹配，同一个配方里的
  * 几格可以各放入组里不同的一种。目前只有木板组（`PLANKS`）。
  *
  * 写成带 `kind` 的对象而不是物品数组：配方格里的单个物品是编号，组是对象，两者可按类型区分，
@@ -136,7 +136,7 @@ function toolRecipes({ head, pickaxe, axe, shovel, sword }: ToolTier): Recipe[] 
 }
 
 /**
- * 配方表——纯数据（见 CONTEXT.md 的「合成」）。加配方只加一条。
+ * 配方表——纯数据（见 GLOSSARY.md 的「合成」）。加配方只加一条。
  *
  * 目前有三种原木各出自己的木板三条、木板出木棍、木板出工作台，加木、石、铁三档各四件（镐、斧、铲、剑），
  * 再加圆石出熔炉、煤炭与木炭各出火把。用到木板的配方写木板组（#85），三种木板任意混用，配方书里各只列一条。
@@ -261,7 +261,7 @@ export function matchRecipe(
 }
 
 /**
- * 配方书（见 CONTEXT.md）列出的配方：配方表里摆得进这么大网格的那些，顺序照配方表。
+ * 配方书（见 GLOSSARY.md）列出的配方：配方表里摆得进这么大网格的那些，顺序照配方表。
  *
  * 顺序稳定是有用的：配方书里第 i 条就是这个数组的第 i 项，点第 i 条递的就是 i。
  */

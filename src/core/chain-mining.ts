@@ -2,7 +2,7 @@ import { baseBlock, isBreakable, type BlockView } from './block';
 import type { Vec3 } from './vec3';
 
 /**
- * 一次连锁挖掘最多挖掉多少块，含起点那一块（见 CONTEXT.md 的「连锁挖掘」）。
+ * 一次连锁挖掘最多挖掉多少块，含起点那一块（见 GLOSSARY.md 的「连锁挖掘」）。
  *
  * 上限本身是玩法上的取舍：没有它，一片相连的石头能一下挖穿半个区块。64 与背包一格的
  * 堆叠上限同一个数，一次连锁挖出来的东西刚好并成一堆。

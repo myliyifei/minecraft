@@ -135,7 +135,7 @@ export function plainsInteriorHillColumns(terrain: Terrain, half: number, step: 
   return found;
 }
 
-/** 陡坡（CONTEXT.md「陡坡」）：与东南西北相邻列的地表高度差最大的那个不小于 STEEP_RISE。只用地表高度查询。 */
+/** 陡坡（GLOSSARY.md「陡坡」）：与东南西北相邻列的地表高度差最大的那个不小于 STEEP_RISE。只用地表高度查询。 */
 export function isSteep(terrain: Terrain, { x, z }: ColumnCoord): boolean {
   const h = terrain.surfaceHeightAt(x, z);
   return [
@@ -147,7 +147,7 @@ export function isSteep(terrain: Terrain, { x, z }: ColumnCoord): boolean {
 }
 
 /**
- * 冰雪群系雪线以下、露出水面、不是水塘的列该铺的列顶地表方块（CONTEXT.md「群系」「陡坡」）：陡坡是石头，其余是
+ * 冰雪群系雪线以下、露出水面、不是水塘的列该铺的列顶地表方块（GLOSSARY.md「群系」「陡坡」）：陡坡是石头，其余是
  * 雪草方块。冰雪不算海岸，所以不看大海。
  */
 export function expectedSnowyTop(terrain: Terrain, column: ColumnCoord): BlockType {

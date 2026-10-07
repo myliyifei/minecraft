@@ -107,7 +107,7 @@ function relaxAll(flat: Flat, level: Uint8Array, queue: Int32Array, tail: number
  *
  * 故意不复用 `src/core/light.ts` 的任何做法：把已加载区块所在的那个矩形范围铺成一张大数组，每一列从顶往下
  * 填竖直部分，然后把所有亮着的格子都当光源，按先进先出反复松弛到不再变化。每一步都对着
- * CONTEXT.md 的「天光」写，是独立的参照。
+ * GLOSSARY.md 的「天光」写，是独立的参照。
  *
  * 返回值以 `"cx,cz"` 为键，值与区块的光照数组同样排布，每格是天光等级。
  */
@@ -135,7 +135,7 @@ export function skyLightFromScratch(world: World): Map<string, Uint8Array> {
 }
 
 /**
- * 「清零后从头算」的方块光（CONTEXT.md 的「方块光」）：发光方块那一格是它的发光等级——不透明的
+ * 「清零后从头算」的方块光（GLOSSARY.md 的「方块光」）：发光方块那一格是它的发光等级——不透明的
  * 发光方块（燃烧中的熔炉）也是——再从所有发光方块出发松弛。树叶对方块光与空格一样。
  * 同样不复用核心的做法，返回值的形状同 `skyLightFromScratch`。
  */

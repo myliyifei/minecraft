@@ -61,5 +61,5 @@ export const DEFAULT_VIEW_RADIUS = 8;
  */
 export const UNLOAD_MARGIN = 1;
 
-/** 光照等级的上限（见 CONTEXT.md 的「天光」「方块光」）：两种光都是 0 到 15。露天的天光就是它。 */
+/** 光照等级的上限（见 GLOSSARY.md 的「天光」「方块光」）：两种光都是 0 到 15。露天的天光就是它。 */
 export const MAX_LIGHT_LEVEL = 15;

@@ -73,7 +73,7 @@ export type ChunkSource = (cx: number, cz: number) => Chunk | undefined;
 export class World implements BlockEdit, BlockStateView {
   private readonly chunks = new Map<number, Chunk>();
   /**
-   * 玩家改过的区块，卸载之后仍留在这里。这条规则本身见 CONTEXT.md 的「已改区块」。
+   * 玩家改过的区块，卸载之后仍留在这里。这条规则本身见 GLOSSARY.md 的「已改区块」。
    *
    * 里面的区块与 `chunks` 里的是同一个对象：`loadChunk` 把留着的那一份放回 `chunks`，
    * 因此后来的写入改的仍是这一份。
@@ -109,7 +109,7 @@ export class World implements BlockEdit, BlockStateView {
    */
   private readonly staleLight = new Map<number, ChunkCoord>();
   /**
-   * 方块状态表（见 CONTEXT.md 的「方块状态」、ADR-0011）：键是世界坐标，值是那一格方块的额外状态。
+   * 方块状态表（见 GLOSSARY.md 的「方块状态」、ADR-0011）：键是世界坐标，值是那一格方块的额外状态。
    *
    * 由 `setBlock` 维护：放下带状态的方块建一条，换成别的方块删一条，同一种状态的两个编号之间
    * 切换（熄火与燃烧中的熔炉）那条不动。区块卸载不删这里的条目——带状态的方块一定是玩家放的，
@@ -406,7 +406,7 @@ export class World implements BlockEdit, BlockStateView {
   }
 
   /**
-   * (x, y, z) 那一格的天光等级（见 CONTEXT.md 的「天光」），坐标按 floor 取整。
+   * (x, y, z) 那一格的天光等级（见 GLOSSARY.md 的「天光」），坐标按 floor 取整。
    *
    * 没加载的格子读作 0。世界最高一层之上是天空，已加载的那一列在那里读作 15。
    */
@@ -421,7 +421,7 @@ export class World implements BlockEdit, BlockStateView {
   }
 
   /**
-   * (x, y, z) 那一格的方块光等级（见 CONTEXT.md 的「方块光」），坐标按 floor 取整，没加载的格子读作 0。
+   * (x, y, z) 那一格的方块光等级（见 GLOSSARY.md 的「方块光」），坐标按 floor 取整，没加载的格子读作 0。
    *
    * 读的是光照数组的方块光那几位：发光方块那一格是它的发光等级，往外每格减 1（见 `light.ts`）。
    */

@@ -18,7 +18,7 @@ export interface SlotCell {
   readonly icon: HTMLElement;
   /** 显示数量的那个小标签。与 `ItemStack.count` 不是一回事，一个是元素一个是数字。 */
   readonly countLabel: HTMLElement;
-  /** 工具格底部那条耐久条（见 CONTEXT.md 的「耐久」）。满耐久与非工具时藏着。 */
+  /** 工具格底部那条耐久条（见 GLOSSARY.md 的「耐久」）。满耐久与非工具时藏着。 */
   readonly durability: HTMLElement;
   /** 上一次画的那一堆。与当前相同就跳过这一格。 */
   shown?: ItemStack;

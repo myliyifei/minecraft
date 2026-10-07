@@ -42,7 +42,7 @@ export function dayFactor(timeOfDay: number): number {
 export interface Daylight {
   readonly sky: Rgb;
   /**
-   * 天光减量（见 CONTEXT.md 的「折算天光」），不取整：着色器拿它折算每一处的天光，黄昏因此连续变暗。
+   * 天光减量（见 GLOSSARY.md 的「折算天光」），不取整：着色器拿它折算每一处的天光，黄昏因此连续变暗。
    * 规则用的是核心取整之后的值（`GameCore.skyDarkening`），两者只差在取整。
    */
   readonly skyDarkening: number;

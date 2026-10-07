@@ -1,7 +1,7 @@
 import { ItemType } from './item';
 
 /**
- * 燃料表（见 CONTEXT.md 的「燃料」）——纯数据：一件燃料能烧多少 tick，数值与原版一致。不在表里的
+ * 燃料表（见 GLOSSARY.md 的「燃料」）——纯数据：一件燃料能烧多少 tick，数值与原版一致。不在表里的
  * 物品不是燃料，燃料格不收（`isFuel`）。
  *
  * 工作台与木制工具不在表里：原版里它们能烧，这里不收，免得玩家误把镐放进燃料格烧掉。
@@ -41,7 +41,7 @@ export interface SmeltingRecipe {
 const CHARCOAL: SmeltingRecipe = { result: ItemType.Charcoal, experience: 2 };
 
 /**
- * 熔炼配方表（见 CONTEXT.md 的「熔炼」）——纯数据：原料 → 成品与每件经验，数值与原版一致。
+ * 熔炼配方表（见 GLOSSARY.md 的「熔炼」）——纯数据：原料 → 成品与每件经验，数值与原版一致。
  * 不在表里的物品不能熔炼，原料格不收（`isSmeltable`）。三种原木都炼出木炭、每件 2 点（#85）；木板只是燃料。
  */
 export const SMELTING_RECIPES: Readonly<Partial<Record<ItemType, SmeltingRecipe>>> = {

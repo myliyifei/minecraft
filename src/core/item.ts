@@ -1,5 +1,5 @@
 /**
- * 物品种类（见 CONTEXT.md 的「物品」）。数值会进存档，因此已发布的编号不可改动，
+ * 物品种类（见 GLOSSARY.md 的「物品」）。数值会进存档，因此已发布的编号不可改动，
  * 新物品追加即可。
  *
  * 与方块是两套编号，不是一套：工具、食物这些物品没有对应的方块，草方块这样的方块
@@ -58,7 +58,7 @@ export interface ItemStack {
   readonly item: ItemType;
   readonly count: number;
   /**
-   * 已损耗的耐久（见 CONTEXT.md 的「耐久」、ADR-0010）：只在工具上出现，材料与方块物品没有
+   * 已损耗的耐久（见 GLOSSARY.md 的「耐久」、ADR-0010）：只在工具上出现，材料与方块物品没有
    * 这个字段。没有这个字段就是满耐久，所以新造的工具与材料一样只有种类与数量。
    *
    * 耐久是这一堆的状态而不是一个独立实体：两把损耗不同的木镐是两堆各自带着 `damage` 的物品，
@@ -83,7 +83,7 @@ export function withoutOne(stack: ItemStack): ItemStack | undefined {
 }
 
 /**
- * 工具类别（见 CONTEXT.md 的「工具」）：镐、斧、铲、剑，加一个「无」。
+ * 工具类别（见 GLOSSARY.md 的「工具」）：镐、斧、铲、剑，加一个「无」。
  *
  * 两侧都用它：物品那边说某件工具属于哪一类（`ToolDef.toolClass`），方块那边说挖它的
  * 合格工具是哪一类（`BlockDef.qualifiedToolClass`）。「无」同时表示三件事——空手、手上那件东西
@@ -105,7 +105,7 @@ export const ToolClass = {
 export type ToolClass = (typeof ToolClass)[keyof typeof ToolClass];
 
 /**
- * 工具的材质档（见 CONTEXT.md 的「材质档」）：目前有木、石、铁。金、钻石在各自的切片里各加一行。
+ * 工具的材质档（见 GLOSSARY.md 的「材质档」）：目前有木、石、铁。金、钻石在各自的切片里各加一行。
  *
  * 倍率与最大耐久按材质档查（`TOOL_MATERIALS`），不按每件工具各记一份：同一档的镐斧铲剑四件数值相同，
  * 记四遍就是四处可能对不上。剑的倍率用不上：它对任何方块都不是合格工具。值是字符串，理由同
@@ -126,7 +126,7 @@ export type ToolMaterial = (typeof ToolMaterial)[keyof typeof ToolMaterial];
  * 材质档从低到高的顺序：木 < 石 < 铁。金、钻石进来时按原版的先后排进去。
  *
  * 方块表的「最低材质档」一列（`BlockDef.minimumMaterial`）按它比大小：手上工具的档在这张表上
- * 不在方块要求的那一档之前，才算合格工具（见 CONTEXT.md）。
+ * 不在方块要求的那一档之前，才算合格工具（见 GLOSSARY.md）。
  */
 export const TOOL_MATERIAL_ORDER: readonly ToolMaterial[] = Object.freeze([
   ToolMaterial.Wood,
@@ -201,7 +201,7 @@ export interface ItemDef {
   /** 这种物品是哪一件工具，不是工具的物品是 undefined。 */
   readonly tool: ToolDef | undefined;
   /**
-   * 拿着它攻击一下造成几点伤害（见 CONTEXT.md 的「攻击」「伤害」）。不是工具的物品与空手一样是
+   * 拿着它攻击一下造成几点伤害（见 GLOSSARY.md 的「攻击」「伤害」）。不是工具的物品与空手一样是
    * `BARE_HAND_DAMAGE`。同一类别的三档各不相同（石斧与铁斧都是 9），所以按物品记，不按材质档查。
    */
   readonly attackDamage: number;
@@ -378,7 +378,7 @@ export function durabilityOf(stack: ItemStack): Durability | undefined {
  * 材料没有耐久，原样返回；空手（undefined）仍是空手。
  *
  * 一次可以损耗好几点：连锁挖掘把集合里每块各自的损耗（`miningWearOf`）合成一次结算，损耗超过
- * 剩余耐久时工具同样消失（见 CONTEXT.md 的「连锁挖掘」）。
+ * 剩余耐久时工具同样消失（见 GLOSSARY.md 的「连锁挖掘」）。
  */
 export function wornTool(stack: ItemStack | undefined, points: number): ItemStack | undefined {
   if (!stack || points <= 0) return stack;

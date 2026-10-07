@@ -43,7 +43,7 @@ export const OCEAN_CONTINENTALNESS = -0.12;
 export const MOUNTAIN_RELIEF = 0.18;
 
 /**
- * 温度低于它是寒冷处：陆地上的冰雪群系与海平面那层结冰用同一个阈值（CONTEXT.md「群系」「冰面」）。
+ * 温度低于它是寒冷处：陆地上的冰雪群系与海平面那层结冰用同一个阈值（GLOSSARY.md「群系」「冰面」）。
  */
 export const COLD_TEMPERATURE = -0.1;
 
@@ -81,7 +81,7 @@ export const TEMPERATURE_DROP_BASE_Y = 72;
 export const TEMPERATURE_DROP_PER_BLOCK = 0.006;
 
 /**
- * 地表高度为 surfaceHeight 的陆地列，温度比二维温度噪声低多少（#87，CONTEXT.md「群系」）：
+ * 地表高度为 surfaceHeight 的陆地列，温度比二维温度噪声低多少（#87，GLOSSARY.md「群系」）：
  * 基准高度以下为 0，以上每格 TEMPERATURE_DROP_PER_BLOCK。群系判断用「温度噪声 − 这一项」与 COLD_TEMPERATURE 比较。
  */
 export function temperatureDropAt(surfaceHeight: number): number {
@@ -115,7 +115,7 @@ const MOUNTAIN_RISE = 0.36;
 
 /**
  * 高山最高处的基准高度比平原高几格：68 + 100 = y 168。三维噪声很少同时取到 +1，大范围采样里最高的地表
- * 约 y 183 到 192（CONTEXT.md「群系」：高山最高约到 y 200）。
+ * 约 y 183 到 192（GLOSSARY.md「群系」：高山最高约到 y 200）。
  */
 const MOUNTAIN_HEIGHT = 100;
 

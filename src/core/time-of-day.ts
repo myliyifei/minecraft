@@ -1,5 +1,5 @@
 /**
- * 世界时刻（见 CONTEXT.md）：一天分成 `DAY_LENGTH_TICKS` 个 tick，时刻是一天里的第几个。
+ * 世界时刻（见 GLOSSARY.md）：一天分成 `DAY_LENGTH_TICKS` 个 tick，时刻是一天里的第几个。
  *
  * 时刻由 tick 计数加一个偏移算出来，不单独计一个每 tick 加一的数：`setTimeOfDay` 只改偏移，
  * tick 计数不动，靠 tick 计数起算的那些东西（拾取延迟、熔炼进度、哈希）因此不受拨时刻的影响。
@@ -24,7 +24,7 @@ export const NIGHT_END = 23000;
  */
 export const TWILIGHT_TICKS = 1000;
 
-/** 夜晚的天光减量（见 CONTEXT.md 的「折算天光」）：露天格子天光 15，夜里折算天光为 4。 */
+/** 夜晚的天光减量（见 GLOSSARY.md 的「折算天光」）：露天格子天光 15，夜里折算天光为 4。 */
 export const NIGHT_SKY_DARKENING = 11;
 
 /** tick 计数与偏移对应的时刻，落在 [0, `DAY_LENGTH_TICKS`)。偏移可以是负数。 */
@@ -43,7 +43,7 @@ export function isNightAt(timeOfDay: number): boolean {
 }
 
 /**
- * 这一刻的天光减量（见 CONTEXT.md 的「折算天光」）：白天 0，夜晚 `NIGHT_SKY_DARKENING`，
+ * 这一刻的天光减量（见 GLOSSARY.md 的「折算天光」）：白天 0，夜晚 `NIGHT_SKY_DARKENING`，
  * 黄昏从 0 线性增上去，黎明线性减回 0。
  *
  * 不取整：时刻可以带小数（渲染层传插值后的时刻），着色器拿这个浮点值，画面因此是连续的。
@@ -57,7 +57,7 @@ export function skyDarkeningAt(timeOfDay: number): number {
   return Math.max(0, (NIGHT_SKY_DARKENING * (DAY_LENGTH_TICKS - timeOfDay)) / TWILIGHT_TICKS);
 }
 
-/** 天光 skyLight 按减量 darkening 折算之后的等级（见 CONTEXT.md 的「折算天光」），不低于 0。 */
+/** 天光 skyLight 按减量 darkening 折算之后的等级（见 GLOSSARY.md 的「折算天光」），不低于 0。 */
 export function effectiveSkyLight(skyLight: number, darkening: number): number {
   return Math.max(0, skyLight - darkening);
 }

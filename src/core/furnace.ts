@@ -15,7 +15,7 @@ export function isBurning(state: FurnaceState): boolean {
 }
 
 /**
- * 熔炉推进一个 tick（见 CONTEXT.md 的「熔炼」「熔炼进度」）。
+ * 熔炉推进一个 tick（见 GLOSSARY.md 的「熔炼」「熔炼进度」）。
  *
  * - 原料格里的东西能炼、成品格收得下它的成品时才算「能炼」（`recipeToSmelt`）。
  * - 没在烧而能炼、燃料格有燃料：点一件，这一 tick 就算烧了，进度 +1。

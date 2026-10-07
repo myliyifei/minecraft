@@ -5,7 +5,7 @@ import { SEA_LEVEL } from './constants';
 import { MOUNTAIN_RELIEF, OCEAN_CONTINENTALNESS } from './terrain-density';
 
 /**
- * 地表铺法（#76，CONTEXT.md「沙滩」「雪线」「群系」）：上方是空气或水的每一段地形方块，顶层按群系与坡度换成
+ * 地表铺法（#76，GLOSSARY.md「沙滩」「雪线」「群系」）：上方是空气或水的每一段地形方块，顶层按群系与坡度换成
  * 草方块、雪草方块、石头、沙子或沙砾，其下几层换成泥土或沙子。
  *
  * 规则只读「样本」：任意一列的地表高度、群系、大陆度、起伏与温度。列顶地表方块查询从地形对象的纯函数取样本，
@@ -31,7 +31,7 @@ import { MOUNTAIN_RELIEF, OCEAN_CONTINENTALNESS } from './terrain-density';
 /** 陡坡：与相邻列的地表高度差的绝对值最大的那个不小于它。四个种子的大范围采样里平原与冰雪几乎没有，高山约 13%。 */
 export const STEEP_RISE = 3;
 
-/** 雪线：高山的顶面 y 不小于它铺雪草方块（CONTEXT.md「雪线」约 y 150）。 */
+/** 雪线：高山的顶面 y 不小于它铺雪草方块（GLOSSARY.md「雪线」约 y 150）。 */
 export const SNOW_LINE_Y = 150;
 
 /** 被水覆盖的顶面 y 不小于它铺沙子（上面最多 7 格水），更低铺沙砾。 */

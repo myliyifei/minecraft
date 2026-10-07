@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-浏览器体素生存沙盒游戏。领域术语见 `CONTEXT.md`，架构决策见 `docs/adr/`。
+浏览器体素生存沙盒游戏。领域术语见 `GLOSSARY.md`，架构决策见 `docs/adr/`。
 
 ## Agent skills
 
@@ -14,4 +14,4 @@ Issue 存放在本仓库的 GitHub Issues，通过 `gh` CLI 读写。See `docs/a
 
 ### Domain docs
 
-单上下文布局：根目录 `CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md`.
+单上下文布局：根目录 `GLOSSARY.md` + `docs/adr/`。See `docs/agents/domain.md`.

@@ -3,7 +3,7 @@ import type { ItemStack, ItemType } from './item';
 import type { FurnaceStateRecord } from './snapshot';
 
 /**
- * 熔炉的方块状态（见 CONTEXT.md 的「方块状态」「熔炉」）：三个格子，加燃烧与熔炼的进度。
+ * 熔炉的方块状态（见 GLOSSARY.md 的「方块状态」「熔炉」）：三个格子，加燃烧与熔炼的进度。
  *
  * 字段可写：熔炉界面的三格格子批（`FurnaceSlots`）与熔炼状态机（`stepFurnace`）直接改它们，世界只负责
  * 这条状态什么时候建、什么时候删（ADR-0011）。

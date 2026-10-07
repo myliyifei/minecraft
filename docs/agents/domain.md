@@ -2,11 +2,11 @@
 
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
-This repo is **single-context**: one `CONTEXT.md` at the root plus `docs/adr/`.
+This repo is **single-context**: one `GLOSSARY.md` at the root plus `docs/adr/`.
 
 ## Before exploring, read these
 
-- **`CONTEXT.md`** at the repo root — the domain glossary (written in Chinese).
+- **`GLOSSARY.md`** at the repo root — the domain glossary (written in Chinese).
 - **`docs/adr/`** — read ADRs that touch the area you're about to work in.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
@@ -15,17 +15,17 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 
 ```
 /
-├── CONTEXT.md
+├── GLOSSARY.md
 ├── docs/adr/
 │   └── 0001-browser-typescript-threejs.md
 └── src/
 ```
 
-If this repo ever grows into a monorepo with several bounded contexts, switch to a root `CONTEXT-MAP.md` pointing at one `CONTEXT.md` per context, with context-scoped `src/<context>/docs/adr/` directories.
+If this repo ever grows into a monorepo with several bounded contexts, switch to a root `GLOSSARY-MAP.md` pointing at one `GLOSSARY.md` per context, with context-scoped `src/<context>/docs/adr/` directories.
 
 ## Use the glossary's vocabulary
 
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `CONTEXT.md`. Don't drift to synonyms the glossary explicitly avoids (each entry lists them under `_Avoid_`).
+When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `GLOSSARY.md`. Don't drift to synonyms the glossary explicitly avoids (each entry lists them under `_Avoid_`).
 
 `_Avoid_` entries come in two forms, explained in the glossary's own "怎么读这份术语表" section:
 
@@ -37,7 +37,7 @@ When your output names a domain concept (in an issue title, a refactor proposal,
 
 When you add or tighten an `_Avoid_` entry, check whether the word has a second legitimate meaning in this repo. If it does, write the condition in parentheses rather than banning it outright.
 
-`CONTEXT.md` defines terms in Chinese with the English name in parentheses (e.g. **区块（Chunk）**). Use the English name for code identifiers and the Chinese term in prose aimed at the user.
+`GLOSSARY.md` defines terms in Chinese with the English name in parentheses (e.g. **区块（Chunk）**). Use the English name for code identifiers and the Chinese term in prose aimed at the user.
 
 If the concept you need isn't in the glossary yet, that's a signal — either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
 

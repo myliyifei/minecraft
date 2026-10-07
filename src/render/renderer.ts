@@ -185,7 +185,7 @@ export interface SelectionView {
 }
 
 /**
- * 场景里那圈连锁预览轮廓现在是什么样（见 CONTEXT.md 的「连锁预览」）。
+ * 场景里那圈连锁预览轮廓现在是什么样（见 GLOSSARY.md 的「连锁预览」）。
  * 与 `SelectionView` 一样直接从场景对象上读，端到端测试验的是真摆进场景的东西。
  */
 export interface ChainPreviewView {
@@ -260,9 +260,9 @@ export interface SkyView {
   readonly background: number;
   /** 天光减量（浮点，见 `daylightAt`）：白天 0，夜晚 11。 */
   readonly skyDarkening: number;
-  /** 闪烁量（见 CONTEXT.md 的「闪烁」）：在 0 到 `FLICKER_AMPLITUDE` 之间，按真实时间每帧变。 */
+  /** 闪烁量（见 GLOSSARY.md 的「闪烁」）：在 0 到 `FLICKER_AMPLITUDE` 之间，按真实时间每帧变。 */
   readonly flicker: number;
-  /** 手持光等级（见 CONTEXT.md 的「手持光」）：选中格是火把时 14，否则 0。 */
+  /** 手持光等级（见 GLOSSARY.md 的「手持光」）：选中格是火把时 14，否则 0。 */
   readonly heldLight: number;
   /** 上一帧画的时候眼睛在水下（`PlayerView.eyeInWater`）。在水下时背景色是雾色，太阳与月亮不画。 */
   readonly underwater: boolean;
@@ -279,7 +279,7 @@ export interface SkyView {
 }
 
 /**
- * 场景里的粒子现在有多少（见 CONTEXT.md 的「粒子」）：按种类的数量与总数，加上总数的上限。
+ * 场景里的粒子现在有多少（见 GLOSSARY.md 的「粒子」）：按种类的数量与总数，加上总数的上限。
  * 总数读的是实例化几何体这一帧画了几个实例；按种类的数量读粒子池，池子里的数组就是那几个实例属性。
  */
 export interface ParticleView extends ParticleCounts {
@@ -832,7 +832,7 @@ export class WorldRenderer {
    * 方块物品画立方体，木棍与工具画一张竖着的平面图标（`heldItemShape`）：同一个 `Mesh`，
    * 换的是几何体、材质与大小，姿态两种共用——图标也斜着拿，与方块一样从右下伸进画面。
    *
-   * 明暗按玩家眼睛那一格的光照（见 CONTEXT.md 的「亮度」），每帧都写：洞里手上的镐也是暗的。
+   * 明暗按玩家眼睛那一格的光照（见 GLOSSARY.md 的「亮度」），每帧都写：洞里手上的镐也是暗的。
    */
   private updateHeldItem(): void {
     for (const material of [this.heldBlockMaterial, this.heldIconMaterial]) {
@@ -905,7 +905,7 @@ export class WorldRenderer {
    * 漂浮与旋转纯粹是表现，核心里没有这两个量——它只报位置与存活 tick 数，相位由
    * `age + alpha` 算，因此在两次 tick 之间也是连续的，不会以 20Hz 一跳一跳地转。
    *
-   * 每个小方块一份自己的光照材质，按碰撞箱中心那一格的光照画（见 CONTEXT.md 的「亮度」）。
+   * 每个小方块一份自己的光照材质，按碰撞箱中心那一格的光照画（见 GLOSSARY.md 的「亮度」）。
    */
   private updateDrops(alpha: number): void {
     this.syncEntityObjects(
@@ -1071,7 +1071,7 @@ export class WorldRenderer {
   }
 
   /**
-   * 把连锁预览的轮廓摆到那些会一起碎掉的方块上（见 CONTEXT.md 的「连锁预览」）。
+   * 把连锁预览的轮廓摆到那些会一起碎掉的方块上（见 GLOSSARY.md 的「连锁预览」）。
    *
    * 哪些方块由核心每 tick 给出（`MiningView.chainPreview`），渲染层不自己走一遍连通
    * 搜索——与选框同一条理由（ADR-0006）：预览与真碎掉的那批必须是同一个答案。

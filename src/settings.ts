@@ -7,7 +7,7 @@ import {
   type KeyBindingsView,
 } from './input/keybindings';
 
-/** 视距滑条的范围（区块数，见 CONTEXT.md「视距」）。 */
+/** 视距滑条的范围（区块数，见 GLOSSARY.md「视距」）。 */
 export const VIEW_RADIUS_RANGE = { min: 4, max: 16 } as const;
 
 /**
@@ -19,7 +19,7 @@ export const SENSITIVITY_RANGE = { min: 10, max: 300, step: 5 } as const;
 /** 三个画面开关在设置里的名字。渲染层读它们，设置界面为每个放一个复选框。 */
 export type DisplayToggle = 'smoothLighting' | 'flicker' | 'particles';
 
-/** 设置里除键位之外的几项（见 CONTEXT.md「设置」）。 */
+/** 设置里除键位之外的几项（见 GLOSSARY.md「设置」）。 */
 export interface SettingValues extends Readonly<Record<DisplayToggle, boolean>> {
   /** 视距（区块数），`VIEW_RADIUS_RANGE` 之内。 */
   readonly viewRadius: number;
@@ -32,7 +32,7 @@ export interface SettingValues extends Readonly<Record<DisplayToggle, boolean>> 
   /** 粒子：关掉时不再生成新粒子，已有的照常消失。 */
   readonly particles: boolean;
   /**
-   * 自动跳跃（见 CONTEXT.md）。不是画面开关（不在 `DisplayToggle` 里）：它是核心的属性，接线层构造核心时传入、
+   * 自动跳跃（见 GLOSSARY.md）。不是画面开关（不在 `DisplayToggle` 里）：它是核心的属性，接线层构造核心时传入、
    * 改动时经订阅调 `GameCore.setAutoJump`（ADR-0020）。设置界面上与三个画面开关并列。
    */
   readonly autoJump: boolean;

@@ -26,7 +26,7 @@ export type TargetView = Pick<MiningView, 'target'>;
 export type BodyView = Pick<PlayerView, 'hitbox'>;
 
 /**
- * 放置（见 CONTEXT.md）：把手上那一堆方块物品的一个放到落点上，返回放下了没有。
+ * 放置（见 GLOSSARY.md）：把手上那一堆方块物品的一个放到落点上，返回放下了没有。
  *
  * 落点：目标方块是矮草或蕨（`canPlaceInto` 认得的、视线选得中的方块）时就是它那一格，放下的方块替换它（#80）；
  * 否则是命中面外侧那一格（`blockOutsideFace`），也就是玩家看着的那一面外侧——视线从植物的命中盒旁边穿过、打在

@@ -32,7 +32,7 @@ const ALL_STORES = [WORLDS, STATES, BLOCK_STATES, CHUNKS];
  */
 export const CHUNK_PUT_BATCH = 100;
 
-/** 世界名称最多几个字符（见 CONTEXT.md「世界列表」）。按 UTF-16 码元数，与输入框的 `maxLength` 同一种数法。 */
+/** 世界名称最多几个字符（见 GLOSSARY.md「世界列表」）。按 UTF-16 码元数，与输入框的 `maxLength` 同一种数法。 */
 export const WORLD_NAME_MAX_LENGTH = 32;
 
 /** 世界的名称能不能用：去掉首尾空白之后 1 到 32 个字符。新建表单与导入的文件都按它查。 */

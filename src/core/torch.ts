@@ -3,7 +3,7 @@ import type { Hitbox } from './physics';
 import type { Vec3 } from './vec3';
 
 /**
- * 火把（见 CONTEXT.md 的「火把」，#56）的几条几何规则：贴着哪一格、命中面选哪个编号、视线碰得到的那根细杆。
+ * 火把（见 GLOSSARY.md 的「火把」，#56）的几条几何规则：贴着哪一格、命中面选哪个编号、视线碰得到的那根细杆。
  *
  * 方块表里那一行（不实心、发光 14、硬度 0……）与贴着哪一格（支撑表 `supportCell`，ADR-0012 补记）在 `block.ts`；
  * 这里只放由朝向决定的几何：命中面选哪个编号、细杆与命中盒。朝向都从支撑表的偏移推出，不另记一份。
@@ -30,7 +30,7 @@ export function isTorch(block: BlockType): boolean {
 
 /**
  * (x, y, z) 那一格的火把贴着哪一格，不是火把时 undefined（植物也贴着下面那一格，但不是火把，这里不认）。
- * 贴着的那一格不再是不透明方块时，火把在原位变成掉落物（见 CONTEXT.md 的「火把」）。
+ * 贴着的那一格不再是不透明方块时，火把在原位变成掉落物（见 GLOSSARY.md 的「火把」）。
  */
 export function torchSupportCell(block: BlockType, x: number, y: number, z: number): Vec3 | undefined {
   return isTorch(block) ? supportCell(block, x, y, z) : undefined;

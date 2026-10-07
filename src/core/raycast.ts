@@ -32,7 +32,7 @@ export function partialHitbox(block: BlockType, x: number, y: number, z: number)
 /**
  * 命中面外侧那一格的方块坐标：射线在撞上目标之前正好经过的那一格。
  *
- * 放置就放在这里（见 CONTEXT.md 的「放置」）。走法只有这一处，射线报出命中面的地方与
+ * 放置就放在这里（见 GLOSSARY.md 的「放置」）。走法只有这一处，射线报出命中面的地方与
  * 用它的地方因此不会各算一遍。
  */
 export function blockOutsideFace(hit: BlockHit): Vec3 {

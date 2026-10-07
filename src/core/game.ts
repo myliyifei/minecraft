@@ -49,14 +49,14 @@ const OUTPUT_CLICK: ScreenClick = Object.freeze({ kind: 'output' });
 export interface GameCoreOptions {
   /** 世界种子。同一种子每次进入得到同样的地形。 */
   readonly seed?: number;
-  /** 视距（区块数）：这个半径内的区块保持加载，见 CONTEXT.md 的「视距」。之后可以改，见 `setViewRadius`。 */
+  /** 视距（区块数）：这个半径内的区块保持加载，见 GLOSSARY.md 的「视距」。之后可以改，见 `setViewRadius`。 */
   readonly viewRadius?: number;
   /**
-   * 自动跳跃（见 CONTEXT.md）是否开启，省略时开（与设置的默认值一致）。之后可以改，见 `setAutoJump`。它是设置里的
+   * 自动跳跃（见 GLOSSARY.md）是否开启，省略时开（与设置的默认值一致）。之后可以改，见 `setAutoJump`。它是设置里的
    * 一项，不进快照：从快照构造时同样按这里给的值（ADR-0020）。
    */
   readonly autoJump?: boolean;
-  /** 难度（见 CONTEXT.md），默认普通。只在新建世界时给；读档时以快照里的为准。 */
+  /** 难度（见 GLOSSARY.md），默认普通。只在新建世界时给；读档时以快照里的为准。 */
   readonly difficulty?: Difficulty;
   /**
    * 从快照构造（ADR-0018）：种子、难度与世界的持续状态都取快照里的，`seed` 与 `difficulty` 不看。快照里的
@@ -103,20 +103,20 @@ export class GameCore implements BlockEdit, BlockStateView {
   private readonly inventoryCraftingGrid: CraftingGrid;
   private readonly inventoryScreenState: InventoryScreen;
   /**
-   * 工作台界面（见 CONTEXT.md）：与背包界面同一套实现，只是合成网格是 3x3。
+   * 工作台界面（见 GLOSSARY.md）：与背包界面同一套实现，只是合成网格是 3x3。
    * 两个界面各持自己的网格，同一时刻最多开一个（`activeScreen`）。
    */
   private readonly craftingTableGrid: CraftingGrid;
   private readonly craftingTableState: InventoryScreen;
   /**
-   * 熔炉界面（见 CONTEXT.md）：同一个界面类，附加的是熔炉三格。世界里有几个熔炉都只有这一个界面，
+   * 熔炉界面（见 GLOSSARY.md）：同一个界面类，附加的是熔炉三格。世界里有几个熔炉都只有这一个界面，
    * 使用键对着哪个熔炉，三格就重绑到哪一条状态（`FurnaceSlots.bind`）。
    */
   private readonly furnaceSlots: FurnaceSlots;
   private readonly furnaceScreenState: InventoryScreen;
   private readonly miningState: Mining;
   private readonly attackState: Attack;
-  /** 出生列（见 CONTEXT.md「出生点」），取自地形对象。出生点总在这一列上。 */
+  /** 出生列（见 GLOSSARY.md「出生点」），取自地形对象。出生点总在这一列上。 */
   private readonly spawnColumn: ColumnCoord;
   /** 出生列所在的区块。构造时以它为中心先加载，重生时先把它放回世界。 */
   private readonly spawnChunk: ChunkCoord;
@@ -303,7 +303,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
-   * 极限难度下玩家死过没有（见 CONTEXT.md「死亡画面」）。死亡那一 tick 由假变真，之后不再变回去，快照的
+   * 极限难度下玩家死过没有（见 GLOSSARY.md「死亡画面」）。死亡那一 tick 由假变真，之后不再变回去，快照的
    * `hardcoreDead` 就是它。核心只给出标记：外层在每个 tick 之后读它，由假变真时写一次盘，世界列表据此
    * 只给这个世界留删除。非极限的世界一直是假。
    */
@@ -391,7 +391,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
-   * 这一刻是界面模式吗（见 CONTEXT.md）——有界面开着、或者在死亡画面上就是。
+   * 这一刻是界面模式吗（见 GLOSSARY.md）——有界面开着、或者在死亡画面上就是。
    *
    * 问的是「有没有界面开着」而不是「背包界面开着没有」：移动、视角、挖掘、使用那几处
    * 判定只看这一个答案，再加一种界面也不必改它们。界面层与输入层也读它：准星藏不藏、
@@ -470,7 +470,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
-   * 使用（见 CONTEXT.md、ADR-0009）：目标方块是可使用方块（工作台、熔炉）就打开它的界面，
+   * 使用（见 GLOSSARY.md、ADR-0009）：目标方块是可使用方块（工作台、熔炉）就打开它的界面，
    * 不看手上拿的是什么；否则把手上那一堆的一个放到目标方块的相邻面上。按一次使用键调一次。
    *
    * 与 `setMining` 同一条路，下一个 tick 生效（ADR-0004）。同一个 tick 里按两次也只算
@@ -608,7 +608,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
-   * 世界时刻（见 CONTEXT.md）：一天里的第几个 tick，落在 [0, 24000)。进入世界时是 0（早晨），
+   * 世界时刻（见 GLOSSARY.md）：一天里的第几个 tick，落在 [0, 24000)。进入世界时是 0（早晨），
    * 每 tick 加 1，满一天折回 0。渲染层按它调亮度、天空色与太阳月亮的位置。
    */
   get timeOfDay(): number {
@@ -646,7 +646,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
-   * (x, y, z) 那一格的方块状态（见 CONTEXT.md 的「方块状态」），没有的返回 undefined。
+   * (x, y, z) 那一格的方块状态（见 GLOSSARY.md 的「方块状态」），没有的返回 undefined。
    *
    * 给出的是状态表里那一条本身，不是副本：调试句柄与测试往熔炉里放东西走的就是这条路；
    * 游戏里改它的是熔炉界面与熔炼状态机（`stepFurnaces`）。
@@ -673,18 +673,18 @@ export class GameCore implements BlockEdit, BlockStateView {
     return this.world.takeStaleChunks();
   }
 
-  /** (x, y, z) 那一格的天光等级（见 CONTEXT.md 的「天光」），没加载的格子读作 0。见 `World.skyLightAt`。 */
+  /** (x, y, z) 那一格的天光等级（见 GLOSSARY.md 的「天光」），没加载的格子读作 0。见 `World.skyLightAt`。 */
   skyLightAt(x: number, y: number, z: number): number {
     return this.world.skyLightAt(x, y, z);
   }
 
-  /** (x, y, z) 那一格的方块光等级（见 CONTEXT.md 的「方块光」），没加载的格子读作 0。见 `World.blockLightAt`。 */
+  /** (x, y, z) 那一格的方块光等级（见 GLOSSARY.md 的「方块光」），没加载的格子读作 0。见 `World.blockLightAt`。 */
   blockLightAt(x: number, y: number, z: number): number {
     return this.world.blockLightAt(x, y, z);
   }
 
   /**
-   * 此刻的天光减量（见 CONTEXT.md 的「折算天光」），取整到最近的整数：规则按等级判断，
+   * 此刻的天光减量（见 GLOSSARY.md 的「折算天光」），取整到最近的整数：规则按等级判断，
    * 所以是逐级的。渲染层要连续的画面，自己按插值后的时刻算浮点值（`skyDarkeningAt`）。
    */
   get skyDarkening(): number {
@@ -731,7 +731,7 @@ export class GameCore implements BlockEdit, BlockStateView {
   }
 
   /**
-   * 改视距（见 CONTEXT.md 的「视距」、ADR-0020）：改小时超出范围的区块当场卸载，卸载线照旧比视距多留
+   * 改视距（见 GLOSSARY.md 的「视距」、ADR-0020）：改小时超出范围的区块当场卸载，卸载线照旧比视距多留
    * `UNLOAD_MARGIN` 环；改大时缺的区块从下一个 tick 起按平时的节奏加载。设置界面开在暂停菜单上，那时不推进
    * tick，所以卸载不等 tick。不是非负整数时抛错：视距的取值范围是设置界面的事，这里只拒绝写错的调用。
    */
@@ -741,7 +741,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     this.world.unloadOutside(this.playerChunk, radius + UNLOAD_MARGIN);
   }
 
-  /** 自动跳跃（见 CONTEXT.md）是否开启。 */
+  /** 自动跳跃（见 GLOSSARY.md）是否开启。 */
   get autoJump(): boolean {
     return this.autoJumpEnabled;
   }
@@ -794,7 +794,7 @@ export class GameCore implements BlockEdit, BlockStateView {
     const wasDead = this.healthState.dead;
     // 界面的输入排在最前：这一 tick 是不是界面模式，下面几步都要看它。
     this.stepScreens(wasDead);
-    // 界面模式下移动、挖掘、使用一律不算数（见 CONTEXT.md 的「界面模式」）：玩家在
+    // 界面模式下移动、挖掘、使用一律不算数（见 GLOSSARY.md 的「界面模式」）：玩家在
     // 摆物品，不是在操作世界。挡的是输入而不是世界——重力、掉落物、经验球照旧。
     if (wasDead) {
       this.playerState.hold();

@@ -38,7 +38,7 @@ import { BIRCH, OAK, SPRUCE } from '../helpers/wood-species';
  * 均匀挑若干个生成。
  */
 
-/** 树根能落在哪些列顶地表方块上（CONTEXT.md「树」）。 */
+/** 树根能落在哪些列顶地表方块上（GLOSSARY.md「树」）。 */
 const TREE_GROUND: ReadonlySet<BlockType> = new Set([BlockType.Grass, BlockType.SnowyGrass]);
 
 /** 平原里白桦占橡树与白桦合计的比例，验收条件给的范围。 */

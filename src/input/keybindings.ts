@@ -53,9 +53,9 @@ export const DEFAULT_KEY_BINDINGS: Readonly<Record<KeyAction, string>> = {
   left: 'KeyA',
   right: 'KeyD',
   jump: 'Space',
-  // 连锁挖掘（见 CONTEXT.md 的「连锁键」）：按住它再开始挖掘才连锁。
+  // 连锁挖掘（见 GLOSSARY.md 的「连锁键」）：按住它再开始挖掘才连锁。
   chainMining: 'AltLeft',
-  // 背包界面（见 CONTEXT.md）：按一下开，再按一下关。
+  // 背包界面（见 GLOSSARY.md）：按一下开，再按一下关。
   inventory: 'KeyE',
   ...Object.fromEntries(HOTBAR_ACTIONS.map((action, slot) => [action, `Digit${slot + 1}`])),
 };

@@ -22,7 +22,7 @@ export function heartStates(points: number): HeartState[] {
 }
 
 /**
- * 生命值 HUD（见 CONTEXT.md 的「生命值」）：等级条上方左侧那一排心。
+ * 生命值 HUD（见 GLOSSARY.md 的「生命值」）：等级条上方左侧那一排心。
  *
  * 只读核心的 `HealthView`：扣多少、什么时候回都在 `src/core/health.ts` 里，这里只把点数
  * 换成一排心。一颗心长什么样在 `style.css` 里。

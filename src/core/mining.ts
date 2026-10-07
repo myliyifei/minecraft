@@ -33,13 +33,13 @@ export type AimView = Pick<PlayerView, 'eyePosition' | 'lookDirection'>;
 export interface MiningInput {
   /** 挖掘键按着没有。 */
   readonly held: boolean;
-  /** 连锁键（见 CONTEXT.md 的「连锁键」）按着没有。 */
+  /** 连锁键（见 GLOSSARY.md 的「连锁键」）按着没有。 */
   readonly chain: boolean;
 }
 
 /**
  * 挖掘键与连锁键都没按。
- * 界面模式（见 CONTEXT.md）下核心拿它替掉真实的按键状态，进度因此归零。这一次按住分给了攻击时
+ * 界面模式（见 GLOSSARY.md）下核心拿它替掉真实的按键状态，进度因此归零。这一次按住分给了攻击时
  * （`Attack.step`）挖掘收到的也是它。
  */
 export const IDLE_MINING: MiningInput = Object.freeze({ held: false, chain: false });
@@ -47,7 +47,7 @@ export const IDLE_MINING: MiningInput = Object.freeze({ held: false, chain: fals
 /** 挖掘状态的只读视图。渲染层读它画选框、裂纹与连锁预览。 */
 export interface MiningView {
   /**
-   * 目标方块（见 CONTEXT.md），触及距离内没有方块、或者视线在碰到方块之前先碰到了僵尸时 undefined。
+   * 目标方块（见 GLOSSARY.md），触及距离内没有方块、或者视线在碰到方块之前先碰到了僵尸时 undefined。
    */
   readonly target: BlockHit | undefined;
   /**
@@ -63,14 +63,14 @@ export interface MiningView {
    */
   readonly progress: number;
   /**
-   * 连锁预览（见 CONTEXT.md）：这一下挖穿时会一起碎掉的那些方块，含目标本身。
+   * 连锁预览（见 GLOSSARY.md）：这一下挖穿时会一起碎掉的那些方块，含目标本身。
    * 不在连锁挖掘中时是空数组。渲染层读它画那圈高亮轮廓。
    */
   readonly chainPreview: readonly Vec3[];
   /**
    * 上一 tick 碎掉的目标方块：坐标与种类，那一 tick 没挖穿时 undefined。下一 tick 一开始就清空。
    *
-   * 只报目标方块：连锁挖掘里一起碎掉的其余方块不报（见 CONTEXT.md 的「碎屑」）。渲染层每推进一个 tick
+   * 只报目标方块：连锁挖掘里一起碎掉的其余方块不报（见 GLOSSARY.md 的「碎屑」）。渲染层每推进一个 tick
    * 读一次，据此在那一格爆一团碎屑。
    */
   readonly broken: BrokenBlock | undefined;
@@ -96,7 +96,7 @@ const NO_CHAIN: readonly Vec3[] = Object.freeze([]);
  * `Drops` 与 `XpOrbs` 的事。掉落与经验各算各的：空手挖石头什么都不掉，经验照给。
  *
  * 按住连锁键开始挖，碎的就不止一块：与目标同种、26 向连通的那一片一起碎，每块各掉一份、
- * 各给一份经验（见 CONTEXT.md 的「连锁挖掘」）。耗时仍按目标那一块算，所以一根树干与
+ * 各给一份经验（见 GLOSSARY.md 的「连锁挖掘」）。耗时仍按目标那一块算，所以一根树干与
  * 一块原木一样快。
  *
  * 时间只由 `step()` 的调用次数表达（ADR-0002），耗时表在 `miningTicks`。
@@ -218,7 +218,7 @@ export class Mining implements MiningView {
       if (brokenBlock !== undefined && wearsToolWhenMined(brokenBlock)) worn++;
     }
     // 每挖穿一块按类别损耗（镐斧铲 1、剑 2），整批一次结算：损耗超过剩余耐久时那些方块照样全碎，
-    // 工具随后消失（见 CONTEXT.md 的「连锁挖掘」）。空手与拿着材料时损耗是 0；硬度 0 的方块（火把）
+    // 工具随后消失（见 GLOSSARY.md 的「连锁挖掘」）。空手与拿着材料时损耗是 0；硬度 0 的方块（火把）
     // 不计入块数，连锁挖掉一排火把耐久不变。
     this.hand.wearHeld(worn * miningWearOf(this.hand.held));
     this.restart();

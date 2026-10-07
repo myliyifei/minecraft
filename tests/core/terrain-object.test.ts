@@ -17,7 +17,7 @@ import { LOGS } from '../helpers/trees';
 // 与 DEFAULT_SEED 无关的几个种子：地形对象的性质不该只在默认种子下成立。
 const SEEDS = [314_159, 777, -42];
 
-/** 出生列周围不长树的半径（切比雪夫距离，CONTEXT.md「出生点」、父 spec #72）。 */
+/** 出生列周围不长树的半径（切比雪夫距离，GLOSSARY.md「出生点」、父 spec #72）。 */
 const SPAWN_CLEARANCE = 7;
 
 /**

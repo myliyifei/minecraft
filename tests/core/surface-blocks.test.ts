@@ -196,7 +196,7 @@ describe('核心：挖雪草方块（#76）', () => {
   });
 });
 
-describe('核心：沙子与沙砾这一切片不下落（CONTEXT.md「重力方块」）', () => {
+describe('核心：沙子与沙砾这一切片不下落（GLOSSARY.md「重力方块」）', () => {
   const G = FLAT_GROUND_Y;
   /** 玩家东边两格的那一列：下面一格泥土，上面一格沙子或沙砾，悬在平地上方。 */
   const COLUMN = { x: 2, z: 0 } as const;

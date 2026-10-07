@@ -8,7 +8,7 @@ export type DeathScreenSource = Pick<GameCore, 'health' | 'difficulty' | 'respaw
 /** 死亡画面上那颗按钮做什么：重生，或删除世界。 */
 export type DeathScreenAction = 'respawn' | 'deleteWorld';
 
-/** 这一档难度下死亡画面给哪颗按钮：极限只有删除世界，其余四档是重生（见 CONTEXT.md「死亡画面」）。 */
+/** 这一档难度下死亡画面给哪颗按钮：极限只有删除世界，其余四档是重生（见 GLOSSARY.md「死亡画面」）。 */
 export function deathScreenAction(difficulty: Difficulty): DeathScreenAction {
   return deletesWorldOnDeath(difficulty) ? 'deleteWorld' : 'respawn';
 }

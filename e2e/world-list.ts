@@ -11,7 +11,7 @@ import { STRINGS } from '../src/ui/strings';
 export const NON_SOLID_BLOCKS: readonly number[] = Object.values(BlockType).filter((block) => !isSolid(block));
 
 /**
- * 地表植物（#80）的四个编号。生成僵尸判断列顶时只跳过它们（CONTEXT.md「生成」），不跳过水与火把。
+ * 地表植物（#80）的四个编号。生成僵尸判断列顶时只跳过它们（GLOSSARY.md「生成」），不跳过水与火把。
  */
 export const PLANT_BLOCKS: readonly number[] = [BlockType.ShortGrass, BlockType.Fern, BlockType.Dandelion, BlockType.Poppy];
 

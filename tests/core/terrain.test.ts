@@ -14,7 +14,7 @@ const OTHER_SEED = 777;
 const terrain = createTerrain(SEED);
 const surfaceAt = terrain.surfaceHeightAt;
 
-/** 草方块之下的泥土层数（CONTEXT.md「草方块，其下 3 到 4 层泥土」）。 */
+/** 草方块之下的泥土层数（GLOSSARY.md「草方块，其下 3 到 4 层泥土」）。 */
 const DIRT_LAYERS_MIN = 3;
 const DIRT_LAYERS_MAX = 4;
 
@@ -185,7 +185,7 @@ describe('地形对象生成的区块', () => {
   });
 
   it('地表以上只有空气、水、冰与树', () => {
-    // 树是长在地表之上的，土石不是——「地表高度」说的是地面，见 CONTEXT.md。
+    // 树是长在地表之上的，土石不是——「地表高度」说的是地面，见 GLOSSARY.md。
     const chunk = generate(-1, -1);
     const strays: string[] = [];
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {

@@ -10,7 +10,7 @@ import {
   type ToolHand,
 } from './item';
 
-/** 快捷栏（见 CONTEXT.md）的格数。 */
+/** 快捷栏（见 GLOSSARY.md）的格数。 */
 export const HOTBAR_SIZE = 9;
 
 /** 背包总格数，含快捷栏。与原版一致。 */
@@ -44,7 +44,7 @@ export interface InventoryView {
   hotbar(): ReadonlyArray<ItemStack | undefined>;
   /** 选中的是快捷栏的第几格。HUD 据此高亮那一格。 */
   readonly selectedSlot: number;
-  /** 手持的那一堆（见 CONTEXT.md 的「手持物品」），选中格是空的时候 undefined。 */
+  /** 手持的那一堆（见 GLOSSARY.md 的「手持物品」），选中格是空的时候 undefined。 */
   readonly held: ItemStack | undefined;
 }
 
@@ -54,7 +54,7 @@ export interface InventoryView {
  * 快捷栏排在前面不只是编号方便——入包时「快捷栏优先」因此就是「下标小的优先」，
  * 两轮扫描都按下标升序走，不需要再写一遍优先级。
  *
- * 选中格也放在这里：快捷栏是背包的一排（见 CONTEXT.md），「手上拿着什么」就是
+ * 选中格也放在这里：快捷栏是背包的一排（见 GLOSSARY.md），「手上拿着什么」就是
  * 「选中格里是什么」，两者分到两个模块里只会让它们不一致。
  */
 export class Inventory implements InventoryView, ItemSink, Hand, ToolHand, SlotStore {

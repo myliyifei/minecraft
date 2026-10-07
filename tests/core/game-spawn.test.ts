@@ -10,7 +10,7 @@ import { FLAT_STAND_Y } from '../helpers/flat-terrain';
 import { OCEAN_ORIGIN_SPAWN, oceanOriginChunk, oceanOriginTerrain } from '../helpers/ocean-origin-terrain';
 
 /**
- * 核心的出生点跟着地形对象的出生列走（#84，CONTEXT.md「出生点」、ADR-0018）：构造时先加载出生列所在区块周围，
+ * 核心的出生点跟着地形对象的出生列走（#84，GLOSSARY.md「出生点」、ADR-0018）：构造时先加载出生列所在区块周围，
  * 首次出生点按那一列「最高的实心方块之上」站上去；重生回到同一点，出生列所在区块卸载之后也一样。
  *
  * 真实地形的原点总是平原，出生列几乎总是原点，所以「出生列不在原点」用原点是大海的假地形测

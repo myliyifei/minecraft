@@ -6,7 +6,7 @@ import type { UvRect } from './atlas';
 import { CUBE_FACES, type FaceSpec, type Point3, type Uv } from './cube-faces';
 
 /**
- * 火把的样子（见 CONTEXT.md 的「火把」，#57）：一根细杆，四个侧面加顶面，没有底面。
+ * 火把的样子（见 GLOSSARY.md 的「火把」，#57）：一根细杆，四个侧面加顶面，没有底面。
  *
  * 细杆的尺寸与倾斜角都不另记一份，取核心的 `torchStickBox` 与 `WALL_TORCH_TILT`：地面火把就是那个盒子；
  * 墙上火把从那个盒子出发，绕底面中心往离开墙的方向斜过这个角度，底部仍靠墙。视线与选框用的

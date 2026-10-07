@@ -1,5 +1,5 @@
 /**
- * 手持物品的挥动（见 CONTEXT.md 的「挥动」）：左键按下时右下角那件东西挥一下，按住挖掘时一直挥。
+ * 手持物品的挥动（见 GLOSSARY.md 的「挥动」）：左键按下时右下角那件东西挥一下，按住挖掘时一直挥。
  *
  * 纯表现：核心只记上次按下左键的 tick（`GameCore.lastSwingTick`）与挖掘中没有（`MiningView.digging`），
  * 挥到哪一步由这里按 tick 差加 `alpha` 算，两 tick 之间连续。不碰 Three.js 与 DOM，能在 Node 里断言。

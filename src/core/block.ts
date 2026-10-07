@@ -24,17 +24,17 @@ export const BlockType = {
   Cobblestone: 9,
   Furnace: 10,
   /**
-   * 燃烧中的熔炉（见 CONTEXT.md 的「熔炉」）：与 `Furnace` 是同一种方块的两个编号，只有正面贴图
+   * 燃烧中的熔炉（见 GLOSSARY.md 的「熔炉」）：与 `Furnace` 是同一种方块的两个编号，只有正面贴图
    * 不同。放置永远放熄火那个编号；点火与熄火在两个编号之间切换（`stepFurnaces`、ADR-0012），
    * 两者挖掉都掉熔炉物品，共用同一条方块状态。
    */
   LitFurnace: 11,
-  /** 煤矿石（见 CONTEXT.md 的「矿石」，issue #31）：嵌在石层里，持任何镐挖掉后掉煤炭。 */
+  /** 煤矿石（见 GLOSSARY.md 的「矿石」，issue #31）：嵌在石层里，持任何镐挖掉后掉煤炭。 */
   CoalOre: 12,
   /** 铁矿石（issue #31）：最低材质档石，持木镐挖得动但什么都不掉。 */
   IronOre: 13,
   /**
-   * 火把（见 CONTEXT.md 的「火把」，#56）：每个朝向一个编号（ADR-0012 补记），五个是同一种方块，
+   * 火把（见 GLOSSARY.md 的「火把」，#56）：每个朝向一个编号（ADR-0012 补记），五个是同一种方块，
    * `baseBlock` 都归到 `Torch`。`Torch` 立在下面那块的顶面上；`WallTorchNegX` 贴在它 −X 那一侧的
    * 墙上（墙在 x − 1），其余三个同理。贴着哪一格见支撑表 `supportCell`。
    */
@@ -54,23 +54,23 @@ export const BlockType = {
   SpruceLeaves: 23,
   SprucePlanks: 24,
   /**
-   * 水（见 CONTEXT.md 的「流体」，#74）：不实心、不是不透明，视线穿过它，挖不到，没有物品。目前不流动。
+   * 水（见 GLOSSARY.md 的「流体」，#74）：不实心、不是不透明，视线穿过它，挖不到，没有物品。目前不流动。
    */
   Water: 25,
   /**
-   * 冰（见 CONTEXT.md 的「冰面」，#74）：实心、不是不透明，挖掉什么都不掉，原处变成一格水（`blockAfterMining`）。
+   * 冰（见 GLOSSARY.md 的「冰面」，#74）：实心、不是不透明，挖掉什么都不掉，原处变成一格水（`blockAfterMining`）。
    */
   Ice: 26,
   /**
-   * 沙子、沙砾、雪草方块（#76）：地表铺法用的三种方块（见 CONTEXT.md「沙滩」「雪线」）。沙子与沙砾在原版是重力方块，
-   * 这一切片不下落，悬空时停在原处（CONTEXT.md「重力方块」）。雪草方块与草方块一样没有物品，挖掉掉泥土；
+   * 沙子、沙砾、雪草方块（#76）：地表铺法用的三种方块（见 GLOSSARY.md「沙滩」「雪线」）。沙子与沙砾在原版是重力方块，
+   * 这一切片不下落，悬空时停在原处（GLOSSARY.md「重力方块」）。雪草方块与草方块一样没有物品，挖掉掉泥土；
    * 两者是不同的方块，连锁挖掘里互不算同一类型。
    */
   Sand: 27,
   Gravel: 28,
   SnowyGrass: 29,
   /**
-   * 地表植物（见 CONTEXT.md「地表植物」，#80）：矮草、蕨、蒲公英、虞美人。不实心、不挡光、按下即碎、给 5 点经验，
+   * 地表植物（见 GLOSSARY.md「地表植物」，#80）：矮草、蕨、蒲公英、虞美人。不实心、不挡光、按下即碎、给 5 点经验，
    * 下面那一格没了随之碎掉（`supportCell`）。矮草与蕨什么都不掉、没有物品，放方块时可以直接替换它们（`canPlaceInto`）；
    * 两种花掉它自己，可以种回草方块、雪草方块与泥土上。四种是不同的方块，连锁挖掘里互不算同一类型。
    */
@@ -83,7 +83,7 @@ export const BlockType = {
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
 
 /**
- * 使用键对着这种方块（见 CONTEXT.md 的「使用」、ADR-0009）打开哪种界面；`None` 是不可使用，
+ * 使用键对着这种方块（见 GLOSSARY.md 的「使用」、ADR-0009）打开哪种界面；`None` 是不可使用，
  * 那一下走放置。
  *
  * 值是字符串而不是编号：它不进存档（由方块种类查出来），与 `ToolClass` 同一个理由。
@@ -99,7 +99,7 @@ export const BlockUse = {
 export type BlockUse = (typeof BlockUse)[keyof typeof BlockUse];
 
 /**
- * 这种方块带哪一种方块状态（见 CONTEXT.md 的「方块状态」、ADR-0011）；`None` 是没有额外状态，
+ * 这种方块带哪一种方块状态（见 GLOSSARY.md 的「方块状态」、ADR-0011）；`None` 是没有额外状态，
  * 绝大多数方块都是。
  *
  * 状态的形状在 `block-state.ts` 里，这里只记种类：方块表说「熔炉带熔炉状态」，世界据此在
@@ -114,7 +114,7 @@ export const BlockStateKind = {
 export type BlockStateKind = (typeof BlockStateKind)[keyof typeof BlockStateKind];
 
 /**
- * 天光与方块光经过这种方块时怎么走（见 CONTEXT.md 的「天光」「方块光」「不透明」、ADR-0017）。
+ * 天光与方块光经过这种方块时怎么走（见 GLOSSARY.md 的「天光」「方块光」「不透明」、ADR-0017）。
  *
  * - `Opaque`：不透明，两种光都完全挡住。与 `BlockDef.opaque` 为 true 的方块是同一批。
  * - `Leaves`：树叶式，天光竖直穿过每格减 1；横向传播与方块光按空格算。
@@ -141,10 +141,10 @@ export interface BlockDef {
    * 与 `opaque` 是两件事：树叶不遮挡视线，但站在树冠里会被它挡住。
    */
   readonly solid: boolean;
-  /** 硬度（见 CONTEXT.md），挖掘耗时按它算。`UNBREAKABLE` 表示怎么挖都挖不掉。 */
+  /** 硬度（见 GLOSSARY.md），挖掘耗时按它算。`UNBREAKABLE` 表示怎么挖都挖不掉。 */
   readonly hardness: number;
   /**
-   * 合格工具（见 CONTEXT.md）的两个条件之一：类别。挖它更快的那一类工具，石头是镐，原木是斧，
+   * 合格工具（见 GLOSSARY.md）的两个条件之一：类别。挖它更快的那一类工具，石头是镐，原木是斧，
    * 草与泥土是铲。`None` 是「没有哪种工具挖它更快」，树叶就是这一档。
    *
    * 与 `requiresTool` 是两件事：这一列说「哪一类工具算合格」，那一列说「手上没有合格工具时还能不能
@@ -166,14 +166,14 @@ export interface BlockDef {
    */
   readonly requiresTool: boolean;
   /**
-   * 挖掉它掉出什么（见 CONTEXT.md 的「掉落表」），`null` 表示什么都不掉。
+   * 挖掉它掉出什么（见 GLOSSARY.md 的「掉落表」），`null` 表示什么都不掉。
    *
    * 这一列是「拿着合格工具时掉什么」。需要工具的方块在没有合格工具时一律什么都不掉，
    * 那条规则在 `dropFor` 里，不在数据里：石头这一行记的是圆石，空手挖石头仍然什么都拿不到。
    */
   readonly drop: ItemStack | null;
   /**
-   * 挖掉它生成的经验球给几点经验值（见 CONTEXT.md 的「经验球」），0 表示不生成经验球。
+   * 挖掉它生成的经验球给几点经验值（见 GLOSSARY.md 的「经验球」），0 表示不生成经验球。
    *
    * 与 `drop` 是两列，不是一列：任何挖得动的方块都给经验，掉落却可能是空的——空手挖
    * 石头什么都拿不到，经验照给 30 点。矿石各有自己的档（煤 90、铁 120，整张表见
@@ -191,7 +191,7 @@ export interface BlockDef {
    */
   readonly state: BlockStateKind;
   /**
-   * 发光等级：这种方块发出多强的方块光（0 到 15，见 CONTEXT.md 的「方块光」），0 是不发光。
+   * 发光等级：这种方块发出多强的方块光（0 到 15，见 GLOSSARY.md 的「方块光」），0 是不发光。
    *
    * 火把是 14，燃烧中的熔炉是 13，其余方块为 0。
    */
@@ -214,7 +214,7 @@ function one(item: ItemType): ItemStack {
 const COMMON_EXPERIENCE = 30;
 
 /**
- * 熔炉（见 CONTEXT.md，issue #30）：石制，比圆石硬得多；要镐，持镐挖掉掉回熔炉本身。
+ * 熔炉（见 GLOSSARY.md，issue #30）：石制，比圆石硬得多；要镐，持镐挖掉掉回熔炉本身。
  * 两个编号（熄火与燃烧中）共用这一份：除正面贴图与发光等级外它们没有任何区别，写两遍就是两处可能
  * 对不上。带熔炉状态——原料、燃料、成品三格与燃烧、熔炼的进度存在世界的方块状态表里。
  * 可使用：使用键对着它打开熔炉界面（#33），不看手上拿的是什么。
@@ -235,7 +235,7 @@ const FURNACE: BlockDef = {
 };
 
 /**
- * 一种矿石（见 CONTEXT.md 的「矿石」，issue #31）那一行：石制、硬度 3、要镐、需要工具。
+ * 一种矿石（见 GLOSSARY.md 的「矿石」，issue #31）那一行：石制、硬度 3、要镐、需要工具。
  * 两种矿石只差最低材质档、掉什么、给几点经验，其余写两遍就是两处可能对不上。
  *
  * 硬度 3 是石头的两倍：持木镐 45 tick、石镐 23 tick，比挖石头慢但仍在一两秒内。
@@ -310,7 +310,7 @@ const LEAVES: BlockDef = {
   minimumMaterial: ToolMaterial.Wood,
   requiresTool: false,
   drop: null,
-  // 树叶什么都不掉，但「任何方块都给经验」（见 CONTEXT.md 的「经验球」），
+  // 树叶什么都不掉，但「任何方块都给经验」（见 GLOSSARY.md 的「经验球」），
   // 所以它照普通方块给 30 点。原版的树叶不给经验，这一条是本项目自己定的。
   experience: COMMON_EXPERIENCE,
   use: BlockUse.None,
@@ -482,7 +482,7 @@ export const BLOCKS: Readonly<Record<BlockType, BlockDef>> = {
   [BlockType.OakLog]: log(ItemType.OakLog),
   [BlockType.OakLeaves]: LEAVES,
   [BlockType.OakPlanks]: planks(ItemType.OakPlanks),
-  // 工作台（见 CONTEXT.md）：木制，比木板硬半点；挖掉掉回工作台本身，搬得走。
+  // 工作台（见 GLOSSARY.md）：木制，比木板硬半点；挖掉掉回工作台本身，搬得走。
   // 它是本切片唯一的可使用方块：使用键对着它打开工作台界面，而不是往它上面放方块。
   [BlockType.CraftingTable]: {
     opaque: true,
@@ -581,7 +581,7 @@ export function isFlower(block: BlockType): boolean {
 }
 
 /**
- * 花种得上去的方块（见 CONTEXT.md「放置」）：花的落点下面那一格必须是其中之一。生成只在草方块与雪草方块上放植物，
+ * 花种得上去的方块（见 GLOSSARY.md「放置」）：花的落点下面那一格必须是其中之一。生成只在草方块与雪草方块上放植物，
  * 是这一集合的子集。
  */
 const PLANT_SOIL: ReadonlySet<BlockType> = new Set([BlockType.Grass, BlockType.SnowyGrass, BlockType.Dirt]);
@@ -592,7 +592,7 @@ export function isPlantSoil(block: BlockType): boolean {
 }
 
 /**
- * 支撑表（见 CONTEXT.md「火把」「地表植物」、ADR-0012 补记）：贴着别的方块才立得住的方块，它贴着的那一格相对它的偏移，
+ * 支撑表（见 GLOSSARY.md「火把」「地表植物」、ADR-0012 补记）：贴着别的方块才立得住的方块，它贴着的那一格相对它的偏移，
  * 以及那一格要是什么它才仍有支撑（支撑条件）。与几何无关：火把的朝向、细杆与命中盒在 `torch.ts`，植物的命中盒在
  * `plant.ts`，这里只回答「贴着哪一格、那一格换成什么之后不再满足支撑条件」。
  *
@@ -657,7 +657,7 @@ export function mayDetachNeighbors(previous: BlockType, block: BlockType): boole
 }
 
 /**
- * 选目标方块的视线穿不穿过这种方块（见 CONTEXT.md 的「目标方块」）：空气与水穿过，其余方块都能成为目标，
+ * 选目标方块的视线穿不穿过这种方块（见 GLOSSARY.md 的「目标方块」）：空气与水穿过，其余方块都能成为目标，
  * 树叶与冰也算。火把那一格另按细杆的盒子求交（`raycastBlocks`），不走这一条。
  */
 export function sightPassesThrough(block: BlockType): boolean {
@@ -665,7 +665,7 @@ export function sightPassesThrough(block: BlockType): boolean {
 }
 
 /**
- * 放置的落点能不能是这一格（见 CONTEXT.md 的「放置」）：空气、水、矮草与蕨可以，放下的方块替换原来那一格。
+ * 放置的落点能不能是这一格（见 GLOSSARY.md 的「放置」）：空气、水、矮草与蕨可以，放下的方块替换原来那一格。
  * 两种花不行：花有物品，放方块时不替换它。火把与花不能放进水里，那一条在 `placeBlock`。
  */
 export function canPlaceInto(block: BlockType): boolean {
@@ -673,7 +673,7 @@ export function canPlaceInto(block: BlockType): boolean {
 }
 
 /**
- * 挖掉这种方块之后原处是什么：冰变成一格水（见 CONTEXT.md 的「冰面」），其余方块变成空气。
+ * 挖掉这种方块之后原处是什么：冰变成一格水（见 GLOSSARY.md 的「冰面」），其余方块变成空气。
  * 单块挖掘与连锁挖掘都按它写，连锁挖掉一片冰每一格都变成水。
  */
 export function blockAfterMining(block: BlockType): BlockType {
@@ -710,7 +710,7 @@ const TICKS_PER_HARDNESS_WITHOUT_TOOL = 100;
 const TICK_EPSILON = 1e-9;
 
 /**
- * 手上那件工具对这种方块算不算合格工具（见 CONTEXT.md）：类别正确，且材质档不低于方块要求的
+ * 手上那件工具对这种方块算不算合格工具（见 GLOSSARY.md）：类别正确，且材质档不低于方块要求的
  * 最低档。方块没有合格工具（树叶）时任何工具都不合格；空手没有材质档，也不合格。
  */
 function isQualifiedTool(def: BlockDef, tool: MiningTool): boolean {

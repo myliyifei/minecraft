@@ -5194,7 +5194,7 @@ test('火把全流程：挖原木与煤，2x2 做火把，挖下行矿道在墙�
         }
       }
       const lit = ring.filter(({ x, z }) => !inDarkSector(x + 0.5, z + 0.5));
-      /** 列顶：最高的非空气方块，是地表植物时看它下面那一格（CONTEXT.md「生成」，#80）。 */
+      /** 列顶：最高的非空气方块，是地表植物时看它下面那一格（GLOSSARY.md「生成」，#80）。 */
       const columnTop = (x: number, z: number) => {
         const top = core.highestBlockY(x, z);
         return plants.includes(core.getBlock(x, top, z)) ? top - 1 : top;

@@ -47,11 +47,11 @@ export interface Terrain {
   readonly generateChunk: TerrainGenerator;
   /** 那一列的群系。 */
   readonly biomeAt: (x: number, z: number) => Biome;
-  /** 那一列的地表高度（见 CONTEXT.md「地表高度」）。 */
+  /** 那一列的地表高度（见 GLOSSARY.md「地表高度」）。 */
   readonly surfaceHeightAt: SurfaceHeightAt;
   /** 那一列地表高度那一格的方块（列顶地表方块）：水塘列是水（`pond.ts`），其余按铺地表的规则（`surface.ts`）给出。 */
   readonly surfaceBlockAt: (x: number, z: number) => BlockType;
-  /** 出生列（见 CONTEXT.md「出生点」）。 */
+  /** 出生列（见 GLOSSARY.md「出生点」）。 */
   readonly spawnColumn: ColumnCoord;
   /**
    * 那一列 fromY 到 toY（含两端）是不是全是地形方块（挖水塘之前）。水塘判断盆地边缘是否封闭要用（`pond.ts`）；
@@ -70,7 +70,7 @@ const SPAWN_SEARCH_RADIUS = 1024;
 export type SpawnColumnQueries = Pick<Terrain, 'biomeAt' | 'surfaceHeightAt' | 'surfaceBlockAt'>;
 
 /**
- * 出生列（CONTEXT.md「出生点」）：从原点那一列起，以 16 格为步长按螺旋顺序查，取第一列群系是平原、列顶地表方块是
+ * 出生列（GLOSSARY.md「出生点」）：从原点那一列起，以 16 格为步长按螺旋顺序查，取第一列群系是平原、列顶地表方块是
  * 草方块的；1024 格以内找不到就取第一列列顶不是水、地表高于海平面的陆地，再找不到就是原点。
  *
  * 只调三个查询，不生成区块：生成器放树要避开出生列，得先有出生列才造得出生成器。陆地同时在同一遍里记下第一列，
@@ -162,7 +162,7 @@ function surfaceBlockWithPonds(ponds: PondPlacement, samples: SurfaceSamples, x:
 }
 
 /**
- * 按群系参数与地表高度分群系（CONTEXT.md「群系」，#87）。判断次序：
+ * 按群系参数与地表高度分群系（GLOSSARY.md「群系」，#87）。判断次序：
  * 1. 大陆度低于大海阈值：大海。寒冷处的海仍是大海，海面结冰由生成步骤按海平面处的温度做（`isColdAtSeaLevel`，不含高度项）。
  * 2. 陆地的温度 = 二维温度噪声 − 随地表高度下降的项（`temperatureDropAt`），低于 COLD_TEMPERATURE 是寒冷处。
  * 3. 起伏大的陆地：寒冷处且地表在雪线以下是冰雪，其余是高山。寒冷处的高山因此只剩雪线以上的部分。

@@ -12,7 +12,7 @@ export interface EntryButtons {
 }
 
 /**
- * 一条世界的按钮：极限已死亡的只剩删除（见 CONTEXT.md「死亡画面」）；版本不兼容的不能进入，仍能导出与删除
+ * 一条世界的按钮：极限已死亡的只剩删除（见 GLOSSARY.md「死亡画面」）；版本不兼容的不能进入，仍能导出与删除
  * （ADR-0018）；其余三颗都有。
  */
 export function entryButtons({ meta, compatible }: WorldEntry): EntryButtons {
@@ -42,7 +42,7 @@ export interface WorldListActions {
 }
 
 /**
- * 世界列表（见 CONTEXT.md）：铺满屏幕，上方是新建世界、导入、设置三颗按钮，下面每个世界一条。
+ * 世界列表（见 GLOSSARY.md）：铺满屏幕，上方是新建世界、导入、设置三颗按钮，下面每个世界一条。
  *
  * 纯表现：列表的内容由接线层从存储读出来交给 `show`，点击原样交回接线层。
  */

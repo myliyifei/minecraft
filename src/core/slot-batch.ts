@@ -2,7 +2,7 @@ import type { ItemStack, ItemType, SlotBatch } from './item';
 import type { GridSize } from './recipe';
 
 /**
- * 一批格子里每一格的规则：收不收某种物品，是不是只取格（见 CONTEXT.md）。
+ * 一批格子里每一格的规则：收不收某种物品，是不是只取格（见 GLOSSARY.md）。
  *
  * 与 `RuledSlotBatch` 分开是因为背包那 36 格也按这两条规则处理（每格都收、都不是只取），
  * 但背包不是附加的格子批，「关闭界面时退不退回背包」对它没有意义。
@@ -30,7 +30,7 @@ export interface SlotRules {
  * 配方书填入材料时按图案下标直接写格子，不再逐格判定规则。
  */
 export interface Crafting extends GridSize {
-  /** 输出格（见 CONTEXT.md）里显示的成品，不匹配任何配方时 undefined。 */
+  /** 输出格（见 GLOSSARY.md）里显示的成品，不匹配任何配方时 undefined。 */
   readonly output: ItemStack | undefined;
   /** 合成一份：每个非空格各消耗 1 个。调用方先看 `output` 确认匹配到了配方再来消耗。 */
   consumeOne(): void;
@@ -50,7 +50,7 @@ export interface SmeltingProgress {
 }
 
 /**
- * 格子批（见 CONTEXT.md）：界面里接在背包 36 格之后的那一批附加格子，带着自己的规则。
+ * 格子批（见 GLOSSARY.md）：界面里接在背包 36 格之后的那一批附加格子，带着自己的规则。
  * 每格两条——收不收某种物品、是不是只取格；整批一条——关闭界面时里面的东西退不退回背包。
  * 合成网格是它的一个实现：每格都收、都不是只取、关闭时退回。熔炉的三格是另一个（`FurnaceSlots`）：
  * 原料格与燃料格各只收特定物品、成品格只取、关闭时留在熔炉里。

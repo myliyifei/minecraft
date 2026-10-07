@@ -31,7 +31,7 @@ import { chunksTouchedBy, crossesChunk, treeKey, woodOf, worldCells, type Tree }
  * （东南西北 32 格外也是同一群系），沿采样线找冰雪与大海、平原与大海的交界，再在陆地一侧找低于海平面的列。
  * 每个种子约生成 30 个区块，按 (种子, cx, cz) 缓存，只有确定性那几条另建地形对象重算。
  *
- * 判定方式（QA 定，见 .scratch/seams-75.md）：海平面那一层是 y = SEA_LEVEL（63），y ≤ 63 的空气灌水，
+ * 判定方式（#75 的 QA 定）：海平面那一层是 y = SEA_LEVEL（63），y ≤ 63 的空气灌水，
  * 冰在 y = 63；冰雪群系的列寒冷，平原的列不寒冷。
  */
 

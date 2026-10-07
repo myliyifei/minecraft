@@ -5,7 +5,7 @@ import { STRINGS } from './strings';
 export type UiModeView = Pick<GameCore, 'uiMode'>;
 
 /**
- * 十字准星 HUD（见 CONTEXT.md）：屏幕正中那个十字，标出视线落在哪一点。
+ * 十字准星 HUD（见 GLOSSARY.md）：屏幕正中那个十字，标出视线落在哪一点。
  *
  * 纯表现，一个数都不读核心的世界状态——视线撞上哪一块是目标方块的事（`src/core/
  * raycast.ts`），准星只是把「那条视线从屏幕的哪一点射出去」画出来。它唯一要跟着变的

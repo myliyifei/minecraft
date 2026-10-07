@@ -2,7 +2,7 @@ import type { ExperienceView } from '../core/experience';
 import { STRINGS } from './strings';
 
 /**
- * 等级条 HUD（见 CONTEXT.md）：快捷栏上方那一条，等级数字在上、到下一级的进度在下。
+ * 等级条 HUD（见 GLOSSARY.md）：快捷栏上方那一条，等级数字在上、到下一级的进度在下。
  *
  * 只读核心的 `ExperienceView`：等级怎么算、每级要多少都在 `src/core/experience.ts` 里，
  * 这里只把三个数摆成像素。进度条有多宽不写在这个文件里——它撑满 `#hud` 那一栏，宽度

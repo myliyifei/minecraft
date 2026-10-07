@@ -23,13 +23,13 @@ import { SNOW_LINE_Y } from '../../src/core/surface';
  * 群系的分布与各群系的高度（#75 验收条件第二、三条）。
  *
  * 只调地形对象的 `biomeAt` 与 `surfaceHeightAt`，只有判「悬垂除外」时才生成区块。数值断言都是统计或范围，
- * 期望值来自 issue 与 CONTEXT.md「群系」：一片 300 到 600 格宽、高山最高约 y 200、海底 y 40 到 55。
+ * 期望值来自 issue 与 GLOSSARY.md「群系」：一片 300 到 600 格宽、高山最高约 y 200、海底 y 40 到 55。
  *
  * 采样：群系沿每个种子 8 条跨 ±8192 格的采样线、步长 8；高度在 ±4096 格、步长 128 的网格上，另在最高的
  * 10 个高山采样点周围各取 9×9、步长 8 的小网格找山顶。
  */
 
-/** 四种群系（CONTEXT.md「群系」）。 */
+/** 四种群系（GLOSSARY.md「群系」）。 */
 const ALL_BIOMES = [Biome.Plains, Biome.Mountains, Biome.Snowy, Biome.Ocean];
 
 /** 采样线的步长（格）。 */

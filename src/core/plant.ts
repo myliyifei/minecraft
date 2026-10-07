@@ -7,7 +7,7 @@ import type { Hitbox } from './physics';
 import { TREE_SPAWN_CLEARANCE, type TreePlacement } from './tree';
 
 /**
- * 地表植物（见 CONTEXT.md「地表植物」，#80）的几何与生成：视线碰的命中盒、区块生成的最后一步按群系放植物。
+ * 地表植物（见 GLOSSARY.md「地表植物」，#80）的几何与生成：视线碰的命中盒、区块生成的最后一步按群系放植物。
  * 方块表那一行与支撑表在 `block.ts`。
  */
 
@@ -34,7 +34,7 @@ export function plantHitbox(block: BlockType, x: number, y: number, z: number): 
   return { min: { x: x + lo, y, z: z + lo }, max: { x: x + hi, y: y + height, z: z + hi } };
 }
 
-/** 出生列周围多少格内不长植物（切比雪夫距离，含边界）：与树取同一个距离（CONTEXT.md「出生点」），出生时脚边没有植物。 */
+/** 出生列周围多少格内不长植物（切比雪夫距离，含边界）：与树取同一个距离（GLOSSARY.md「出生点」），出生时脚边没有植物。 */
 export const PLANT_SPAWN_CLEARANCE = TREE_SPAWN_CLEARANCE;
 
 /** 植物长得上去的列顶地表方块：草方块与雪草方块（沙子、沙砾、石头列顶不长）。 */

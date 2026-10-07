@@ -15,7 +15,7 @@ import type { Vec3 } from './vec3';
 export type OreCellSize = 4 | 8;
 
 /**
- * 一种矿石的矿脉参数（见 CONTEXT.md 的「矿脉」，issue #31、#47）。
+ * 一种矿石的矿脉参数（见 GLOSSARY.md 的「矿脉」，issue #31、#47）。
  *
  * 高度区间说的是矿石方块，不是矿脉中心：中心再往上下各伸 `ORE_VEIN_RISE` 格，所以中心只在
  * 区间内缩一格的范围里取。

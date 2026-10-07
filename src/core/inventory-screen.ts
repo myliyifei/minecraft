@@ -40,7 +40,7 @@ interface CursorHold {
 }
 
 /**
- * 配方书（见 CONTEXT.md）里的一条：哪条配方，此刻材料够不够。
+ * 配方书（见 GLOSSARY.md）里的一条：哪条配方，此刻材料够不够。
  *
  * 「够不够」把背包 36 格与网格里的材料合计，光标物品不计入——光标上那一堆是玩家正拿着
  * 要放到别处的，配方书不应把它当作材料用掉。一组物品按组里每一种的合计判断（`hasIngredients`）：
@@ -82,7 +82,7 @@ export interface CraftingView {
   readonly firstSlot: number;
   /** 网格第 local 格里的那一堆，空格是 undefined。 */
   slot(local: number): ItemStack | undefined;
-  /** 输出格（见 CONTEXT.md）里显示的成品，不匹配任何配方时 undefined。 */
+  /** 输出格（见 GLOSSARY.md）里显示的成品，不匹配任何配方时 undefined。 */
   readonly output: ItemStack | undefined;
   /**
    * 配方书：这块网格能做的全部配方，顺序固定，每条带着此刻材料够不够。点第 i 条递的是
@@ -106,9 +106,9 @@ export interface SmeltingView extends SmeltingProgress {
 
 /** 背包界面的只读视图。界面层读它画覆盖层。 */
 export interface InventoryScreenView {
-  /** 界面开着没有。开着时核心处于界面模式（见 CONTEXT.md）。 */
+  /** 界面开着没有。开着时核心处于界面模式（见 GLOSSARY.md）。 */
   readonly open: boolean;
-  /** 光标物品（见 CONTEXT.md）：拿在鼠标上的那一堆，没拿着东西时 undefined。 */
+  /** 光标物品（见 GLOSSARY.md）：拿在鼠标上的那一堆，没拿着东西时 undefined。 */
   readonly cursor: ItemStack | undefined;
   /** 合成网格与输出格，附加的格子批没有合成能力（或没有附加格子批）时 undefined。 */
   readonly crafting: CraftingView | undefined;
@@ -117,7 +117,7 @@ export interface InventoryScreenView {
 }
 
 /**
- * 背包界面（见 CONTEXT.md）：开合，以及光标物品这套拿起放下的操作。
+ * 背包界面（见 GLOSSARY.md）：开合，以及光标物品这套拿起放下的操作。
  *
  * 工作台界面也是这个类的一个实例：它同样摆出全部 36 个背包格子，只是附加的合成网格是
  * 3x3 而不是 2x2。熔炉界面是第三个：附加的是熔炉三格（`FurnaceSlots`），没有合成网格。三者的
@@ -284,7 +284,7 @@ export class InventoryScreen implements InventoryScreenView {
   }
 
   /**
-   * 点只取格（见 CONTEXT.md），点击与拆堆同一条规则：
+   * 点只取格（见 GLOSSARY.md），点击与拆堆同一条规则：
    *
    * - 光标空着：整堆到光标上，那一格空了。
    * - 光标上是同一类型：并到堆叠上限，并不完的留在格里。工具的堆叠上限是 1，一个都并不进去。

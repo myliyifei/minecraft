@@ -5,7 +5,7 @@ import { Biome, findSpawnColumn, type ColumnCoord, type Terrain } from '../../sr
 import { OCEAN_HALF_WIDTH, OCEAN_ORIGIN_SPAWN, oceanOriginQueries } from '../helpers/ocean-origin-terrain';
 
 /**
- * 出生列的搜索规则（#84，CONTEXT.md「出生点」）：从原点那一列起，以 16 格为步长按确定的螺旋顺序查，取第一列群系是平原、
+ * 出生列的搜索规则（#84，GLOSSARY.md「出生点」）：从原点那一列起，以 16 格为步长按确定的螺旋顺序查，取第一列群系是平原、
  * 列顶地表方块是草方块的；1024 格以内找不到就取第一列列顶不是水、地表高于海平面的陆地，再找不到就是原点。只调查询。
  *
  * 真实地形的原点总是平原（Perlin 噪声在整数格点为 0），螺旋搜索在真实地形上几乎总是停在原点，所以这里的查询都是假的：
